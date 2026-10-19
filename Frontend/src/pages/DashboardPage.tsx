@@ -100,7 +100,7 @@ export const DashboardPage: React.FC = () => {
             <div className="user-avatar" aria-hidden="true">
               {user.name.charAt(0).toUpperCase()}
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <div className="user-badge-text" style={{ display: 'flex', flexDirection: 'column' }}>
               <span style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>
                 {user.name}
               </span>
@@ -115,13 +115,13 @@ export const DashboardPage: React.FC = () => {
             </span>
           </div>
 
-          <Link to="/change-password">
+          <Link to="/change-password" aria-label="Security">
             <Button
               variant="outline"
               leftIcon={<KeyRound size={14} />}
               style={{ height: '36px', fontSize: '13px', padding: '0 12px' }}
             >
-              Security
+              <span className="nav-btn-label">Security</span>
             </Button>
           </Link>
 
@@ -130,8 +130,9 @@ export const DashboardPage: React.FC = () => {
             onClick={handleLogout}
             leftIcon={<LogOut size={14} />}
             style={{ height: '36px', fontSize: '13px', padding: '0 12px' }}
+            aria-label="Log out"
           >
-            Log out
+            <span className="nav-btn-label">Log out</span>
           </Button>
         </div>
       </header>
@@ -143,7 +144,7 @@ export const DashboardPage: React.FC = () => {
           style={{
             background: 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%)',
             borderRadius: '20px',
-            padding: '32px',
+            padding: 'clamp(20px, 4vw, 32px)',
             color: '#ffffff',
             boxShadow: '0 10px 25px -5px rgba(37, 99, 235, 0.25)',
             display: 'flex',
@@ -154,7 +155,7 @@ export const DashboardPage: React.FC = () => {
           }}
         >
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
               <span style={{ background: 'rgba(255,255,255,0.2)', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 700, letterSpacing: '0.5px' }}>
                 WORKSPACE ACTIVE
               </span>
@@ -162,7 +163,7 @@ export const DashboardPage: React.FC = () => {
                 Finovo OMS / WMS Cloud
               </span>
             </div>
-            <h1 style={{ fontSize: '28px', fontWeight: 800, margin: '4px 0' }}>
+            <h1 style={{ fontSize: 'clamp(22px, 5vw, 28px)', fontWeight: 800, margin: '4px 0' }}>
               Welcome back, {user.name}!
             </h1>
             <p style={{ opacity: 0.9, fontSize: '14px', maxWidth: '600px' }}>
