@@ -29,7 +29,7 @@ export class ApiError extends Error {
 
 const BASE_URL = '/api/v1';
 
-export const request = async <T>(
+export const request = async <T = any>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> => {
@@ -53,7 +53,7 @@ export const request = async <T>(
       credentials: 'include',
     });
 
-    let payload: ApiResponse<T>;
+    let payload: any;
     try {
       payload = await response.json();
     } catch {
@@ -63,7 +63,7 @@ export const request = async <T>(
       );
     }
 
-    if (!response.ok || !payload.success) {
+    if (!response.ok) {
       const message = payload.message || 'An unexpected error occurred.';
       throw new ApiError(message, response.status, payload.errors);
     }
@@ -79,3 +79,42 @@ export const request = async <T>(
     );
   }
 };
+
+export const apiClient = {
+  request,
+  async get<T = any>(endpoint: string, config?: { params?: Record<string, any> }) {
+    let url = endpoint;
+    if (config?.params) {
+      const sp = new URLSearchParams();
+      Object.entries(config.params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') {
+          sp.append(k, String(v));
+        }
+      });
+      const qs = sp.toString();
+      if (qs) url += (url.includes('?') ? '&' : '?') + qs;
+    }
+    const res = await request<T>(url, { method: 'GET' });
+    return { data: res.data || res };
+  },
+  async post<T = any>(endpoint: string, body?: any) {
+    const res = await request<T>(endpoint, {
+      method: 'POST',
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { data: res.data || res };
+  },
+  async put<T = any>(endpoint: string, body?: any) {
+    const res = await request<T>(endpoint, {
+      method: 'PUT',
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { data: res.data || res };
+  },
+  async delete<T = any>(endpoint: string) {
+    const res = await request<T>(endpoint, { method: 'DELETE' });
+    return { data: res.data || res };
+  },
+};
+
+export default apiClient;

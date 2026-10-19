@@ -5,9 +5,11 @@ namespace App\Models;
 use App\Enums\UserRole;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
@@ -26,6 +28,7 @@ class User extends Authenticatable
         'password',
         'role',
         'status',
+        'current_organization_id',
         'otp_enabled',
         'last_login_at',
         'last_login_ip',
@@ -80,5 +83,50 @@ class User extends Authenticatable
     public function securityEvents(): HasMany
     {
         return $this->hasMany(SecurityEvent::class);
+    }
+
+    public function memberships(): HasMany
+    {
+        return $this->hasMany(OrganizationMembership::class);
+    }
+
+    public function organizations(): BelongsToMany
+    {
+        return $this->belongsToMany(Organization::class, 'organization_memberships')
+            ->withPivot('role')
+            ->withTimestamps();
+    }
+
+    public function currentOrganization(): Organization
+    {
+        if ($this->current_organization_id) {
+            $org = Organization::find($this->current_organization_id);
+            if ($org) {
+                return $org;
+            }
+        }
+
+        $membership = $this->memberships()->with('organization')->first();
+        if ($membership && $membership->organization) {
+            $this->update(['current_organization_id' => $membership->organization_id]);
+
+            return $membership->organization;
+        }
+
+        // Auto-provision initial organization for the user
+        $slug = Str::slug($this->name ?: 'My Organization').'-'.substr(md5($this->id.microtime()), 0, 6);
+        $org = Organization::create([
+            'name' => ($this->name ?: 'My')."'s Organization",
+            'slug' => $slug,
+        ]);
+
+        $this->memberships()->create([
+            'organization_id' => $org->id,
+            'role' => $this->isAdmin() ? 'admin' : 'operator',
+        ]);
+
+        $this->update(['current_organization_id' => $org->id]);
+
+        return $org;
     }
 }

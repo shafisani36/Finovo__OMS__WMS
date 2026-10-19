@@ -8,6 +8,17 @@ import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
+import { StoresPage } from './pages/StoresPage';
+import { PickingPage } from './pages/PickingPage';
+import { StockMovementsPage } from './pages/StockMovementsPage';
+import { WarehousesPage } from './pages/WarehousesPage';
+import { OrdersPage } from './pages/OrdersPage';
+import { ProductsPage } from './pages/ProductsPage';
+import { ShipmentsPage } from './pages/ShipmentsPage';
+import { ReturnsPage } from './pages/ReturnsPage';
+import { CustomersPage } from './pages/CustomersPage';
+import { PurchaseOrdersPage } from './pages/PurchaseOrdersPage';
+import { AppLayout } from './components/layout/AppLayout';
 import { Loader2 } from 'lucide-react';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -23,7 +34,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
           alignItems: 'center',
           justifyContent: 'center',
           minHeight: '100vh',
-          color: '#2563eb',
+          color: '#1e56ff',
           gap: '12px',
         }}
       >
@@ -88,23 +99,27 @@ export const App: React.FC = () => {
             }
           />
 
-          {/* Protected Routes */}
+          {/* Protected Enterprise OMS / WMS Application Shell */}
           <Route
-            path="/dashboard"
             element={
               <ProtectedRoute>
-                <DashboardPage />
+                <AppLayout />
               </ProtectedRoute>
             }
-          />
-          <Route
-            path="/change-password"
-            element={
-              <ProtectedRoute>
-                <ChangePasswordPage />
-              </ProtectedRoute>
-            }
-          />
+          >
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/stores" element={<StoresPage />} />
+            <Route path="/warehouses" element={<WarehousesPage />} />
+            <Route path="/orders" element={<OrdersPage />} />
+            <Route path="/products" element={<ProductsPage />} />
+            <Route path="/shipments" element={<ShipmentsPage />} />
+            <Route path="/picking" element={<PickingPage />} />
+            <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
+            <Route path="/stock-movements" element={<StockMovementsPage />} />
+            <Route path="/returns" element={<ReturnsPage />} />
+            <Route path="/customers" element={<CustomersPage />} />
+            <Route path="/change-password" element={<ChangePasswordPage />} />
+          </Route>
 
           {/* Default Navigation Fallbacks */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />

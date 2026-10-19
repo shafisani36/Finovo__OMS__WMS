@@ -7,6 +7,7 @@ export interface User {
   role: UserRole;
   role_label: string;
   status: 'active' | 'suspended';
+  current_organization_id?: number | null;
   permissions: string[];
   last_login_at: string | null;
 }
