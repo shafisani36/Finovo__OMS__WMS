@@ -16,6 +16,7 @@ import { WarehouseCreatePage } from './pages/WarehouseCreatePage';
 import { WarehouseDetailPage } from './pages/WarehouseDetailPage';
 import { OrdersPage } from './pages/OrdersPage';
 import { ProductsPage } from './pages/ProductsPage';
+import { InventoryPage } from './pages/InventoryPage';
 import { ShipmentsPage } from './pages/ShipmentsPage';
 import { ReturnsPage } from './pages/ReturnsPage';
 import { CustomersPage } from './pages/CustomersPage';
@@ -116,6 +117,7 @@ export const App: React.FC = () => {
             <Route path="/warehouses/:id" element={<WarehouseDetailPage />} />
             <Route path="/orders" element={<OrdersPage />} />
             <Route path="/products" element={<ProductsPage />} />
+            <Route path="/inventory" element={<InventoryPage />} />
             <Route path="/shipments" element={<ShipmentsPage />} />
             <Route path="/picking" element={<PickingPage />} />
             <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />

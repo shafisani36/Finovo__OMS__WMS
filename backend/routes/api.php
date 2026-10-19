@@ -2,12 +2,18 @@
 
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CustomBridgeWebhookController;
+use App\Http\Controllers\Api\V1\CycleCountController;
+use App\Http\Controllers\Api\V1\InventoryController;
+use App\Http\Controllers\Api\V1\InventoryReceiptController;
+use App\Http\Controllers\Api\V1\InventoryTransferController;
 use App\Http\Controllers\Api\V1\OperationsController;
 use App\Http\Controllers\Api\V1\OrderController;
 use App\Http\Controllers\Api\V1\PasswordChangeController;
 use App\Http\Controllers\Api\V1\PasswordRecoveryController;
 use App\Http\Controllers\Api\V1\PickingController;
 use App\Http\Controllers\Api\V1\ProductController;
+use App\Http\Controllers\Api\V1\ReplenishmentController;
+use App\Http\Controllers\Api\V1\StockAdjustmentController;
 use App\Http\Controllers\Api\V1\StockMovementController;
 use App\Http\Controllers\Api\V1\StoreController;
 use App\Http\Controllers\Api\V1\WarehouseController;
@@ -78,11 +84,47 @@ Route::prefix('v1')->group(function () {
         Route::get('products', [ProductController::class, 'index']);
         Route::post('products', [ProductController::class, 'store']);
 
-        // Inventory & Stock Movements
-        Route::get('inventory/movements', [StockMovementController::class, 'index']);
-        Route::post('inventory/transfers', [StockMovementController::class, 'transfer']);
-        Route::post('inventory/adjustments', [StockMovementController::class, 'adjust']);
-        Route::get('inventory/availability', [StockMovementController::class, 'availability']);
+        // Enterprise Inventory Engine Endpoints
+        Route::prefix('inventory')->group(function () {
+            Route::get('/', [InventoryController::class, 'index']);
+            Route::get('kpis', [InventoryController::class, 'kpis']);
+            Route::get('sku/{variantId}', [InventoryController::class, 'skuDetail']);
+            Route::post('reconcile', [InventoryController::class, 'reconcile']);
+
+            // Receipts & Putaway
+            Route::get('receipts', [InventoryReceiptController::class, 'index']);
+            Route::post('receipts', [InventoryReceiptController::class, 'store']);
+            Route::post('receipts/{receiptId}/confirm', [InventoryReceiptController::class, 'confirm']);
+            Route::post('receipts/{receiptId}/putaway', [InventoryReceiptController::class, 'putaway']);
+
+            // Multi-Stage Transfers
+            Route::get('transfers', [InventoryTransferController::class, 'index']);
+            Route::post('transfers', [InventoryTransferController::class, 'store']);
+            Route::post('transfers/{transferId}/receive', [InventoryTransferController::class, 'receive']);
+
+            // Adjustments & Approvals
+            Route::get('adjustments', [StockAdjustmentController::class, 'index']);
+            Route::post('adjustments', [StockAdjustmentController::class, 'store']);
+            Route::post('adjustments/{adjustmentId}/approve', [StockAdjustmentController::class, 'approve']);
+            Route::post('adjustments/{adjustmentId}/reject', [StockAdjustmentController::class, 'reject']);
+
+            // Cycle Counts & Reconciliation
+            Route::get('cycle-counts', [CycleCountController::class, 'index']);
+            Route::post('cycle-counts', [CycleCountController::class, 'store']);
+            Route::put('cycle-counts/{countId}/record-counts', [CycleCountController::class, 'recordCounts']);
+            Route::post('cycle-counts/{countId}/approve-and-post', [CycleCountController::class, 'approveAndPost']);
+
+            // Replenishment & Reorder Rules
+            Route::get('replenishment/rules', [ReplenishmentController::class, 'rules']);
+            Route::post('replenishment/rules', [ReplenishmentController::class, 'saveRule']);
+            Route::get('replenishment/recommendations', [ReplenishmentController::class, 'recommendations']);
+
+            // Backward Compatibility
+            Route::get('movements', [StockMovementController::class, 'index']);
+            Route::post('legacy-transfers', [StockMovementController::class, 'transfer']);
+            Route::post('legacy-adjustments', [StockMovementController::class, 'adjust']);
+            Route::get('availability', [StockMovementController::class, 'availability']);
+        });
 
         // Orders & Lifecycle
         Route::get('orders', [OrderController::class, 'index']);

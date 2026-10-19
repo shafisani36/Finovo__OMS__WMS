@@ -12,6 +12,8 @@ class InventoryLedgerEntry extends Model
     protected $fillable = [
         'organization_id',
         'warehouse_id',
+        'warehouse_location_id',
+        'destination_location_id',
         'product_variant_id',
         'movement_type',
         'quantity',
@@ -20,6 +22,11 @@ class InventoryLedgerEntry extends Model
         'reference_type',
         'reference_id',
         'reference_number',
+        'lot_number',
+        'serial_number',
+        'expiry_date',
+        'inventory_status',
+        'unit_of_measure',
         'reason',
         'user_id',
         'idempotency_key',
@@ -32,6 +39,7 @@ class InventoryLedgerEntry extends Model
             'quantity' => 'integer',
             'balance_before' => 'integer',
             'balance_after' => 'integer',
+            'expiry_date' => 'date',
             'created_at' => 'datetime',
         ];
     }
@@ -44,6 +52,16 @@ class InventoryLedgerEntry extends Model
     public function warehouse(): BelongsTo
     {
         return $this->belongsTo(Warehouse::class);
+    }
+
+    public function location(): BelongsTo
+    {
+        return $this->belongsTo(WarehouseLocation::class, 'warehouse_location_id');
+    }
+
+    public function destinationLocation(): BelongsTo
+    {
+        return $this->belongsTo(WarehouseLocation::class, 'destination_location_id');
     }
 
     public function variant(): BelongsTo

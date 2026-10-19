@@ -18,6 +18,9 @@ class InventoryBalance extends Model
         'reserved',
         'available',
         'damaged',
+        'in_transit',
+        'quarantined',
+        'picked',
     ];
 
     protected function casts(): array
@@ -27,6 +30,9 @@ class InventoryBalance extends Model
             'reserved' => 'integer',
             'available' => 'integer',
             'damaged' => 'integer',
+            'in_transit' => 'integer',
+            'quarantined' => 'integer',
+            'picked' => 'integer',
         ];
     }
 

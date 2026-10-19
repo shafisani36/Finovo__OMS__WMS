@@ -18,6 +18,8 @@ class Product extends Model
         'barcode',
         'description',
         'category',
+        'base_uom',
+        'tracking_type',
         'image_url',
         'is_active',
     ];

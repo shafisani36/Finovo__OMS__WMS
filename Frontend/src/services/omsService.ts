@@ -153,11 +153,260 @@ export interface ProductModel {
   barcode?: string;
   category?: string;
   is_active: boolean;
+  default_variant_id?: number;
+  variants?: Array<{
+    id: number;
+    sku: string;
+    name?: string;
+    price: number;
+  }>;
   stock: {
     on_hand: number;
     reserved: number;
     available: number;
   };
+}
+
+export interface InventoryLocationItemModel {
+  location_id: number;
+  location_code: string;
+  location_type: string;
+  lot_number?: string | null;
+  expiry_date?: string | null;
+  condition: string;
+  quantity: number;
+  reserved: number;
+  available: number;
+}
+
+export interface InventoryItemModel {
+  id: number;
+  warehouse_id: number;
+  warehouse_name: string;
+  warehouse_code: string;
+  product_id: number;
+  product_variant_id?: number;
+  product_name: string;
+  sku: string;
+  barcode?: string | null;
+  category: string;
+  base_uom: string;
+  tracking_type: string;
+  price: number;
+  cost_price: number;
+  on_hand: number;
+  reserved: number;
+  available: number;
+  damaged: number;
+  quarantined: number;
+  in_transit: number;
+  picked: number;
+  locations?: InventoryLocationItemModel[];
+}
+
+export interface InventoryKpiModel {
+  total_skus: number;
+  total_on_hand: number;
+  total_reserved: number;
+  total_available: number;
+  total_quarantined: number;
+  total_damaged: number;
+  total_in_transit: number;
+  low_stock_count: number;
+  out_of_stock_count: number;
+  total_valuation: number;
+}
+
+export interface InventorySkuDetailModel {
+  variant_id: number;
+  product_id: number;
+  product_name: string;
+  sku: string;
+  barcode?: string;
+  category: string;
+  base_uom: string;
+  tracking_type: string;
+  price: number;
+  cost_price: number;
+  total_on_hand: number;
+  total_reserved: number;
+  total_available: number;
+  warehouse_balances: Array<{
+    warehouse_id: number;
+    warehouse_name: string;
+    warehouse_code: string;
+    on_hand: number;
+    reserved: number;
+    available: number;
+    damaged: number;
+    quarantined: number;
+    in_transit: number;
+  }>;
+  location_balances: InventoryLocationItemModel[];
+  recent_movements: Array<{
+    id: number;
+    reference: string;
+    type: string;
+    warehouse: string;
+    location: string;
+    quantity: number;
+    before: number;
+    after: number;
+    reason: string;
+    user: string;
+    date: string;
+  }>;
+  active_reservations: Array<{
+    id: number;
+    order_id: number;
+    warehouse_name: string;
+    quantity: number;
+    status: string;
+    created_at: string;
+  }>;
+}
+
+export interface InventoryReceiptModel {
+  id: number;
+  receipt_number: string;
+  warehouse_id: number;
+  warehouse_name: string;
+  receiving_location: string;
+  supplier_name?: string;
+  purchase_order_number?: string;
+  status: 'draft' | 'received' | 'putaway_in_progress' | 'completed' | 'cancelled';
+  total_expected: number;
+  total_received: number;
+  items_count: number;
+  received_by?: string | null;
+  received_at?: string | null;
+  created_at: string;
+  items?: Array<{
+    id: number;
+    product_variant_id: number;
+    product_name: string;
+    sku: string;
+    expected_quantity: number;
+    received_quantity: number;
+    lot_number?: string | null;
+    expiry_date?: string | null;
+    condition: string;
+    status: string;
+  }>;
+}
+
+export interface InventoryTransferModel {
+  id: number;
+  transfer_number: string;
+  product_name: string;
+  sku: string;
+  from_warehouse_id: number;
+  from_warehouse: string;
+  from_location: string;
+  to_warehouse_id: number;
+  to_warehouse: string;
+  to_location: string;
+  quantity: number;
+  received_quantity?: number | null;
+  discrepancy_quantity: number;
+  discrepancy_reason?: string | null;
+  lot_number?: string | null;
+  status: 'pending' | 'in_transit' | 'completed' | 'cancelled';
+  notes?: string | null;
+  dispatched_at?: string | null;
+  received_at?: string | null;
+  created_by: string;
+  received_by?: string | null;
+  created_at: string;
+}
+
+export interface StockAdjustmentModel {
+  id: number;
+  adjustment_number: string;
+  warehouse_id: number;
+  warehouse_name: string;
+  location: string;
+  product_name: string;
+  sku: string;
+  adjustment_type: 'add' | 'subtract' | 'recount';
+  quantity: number;
+  current_quantity: number;
+  new_quantity: number;
+  status: 'pending_approval' | 'approved' | 'rejected' | 'posted';
+  reason: string;
+  notes?: string | null;
+  lot_number?: string | null;
+  requested_by: string;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  created_at: string;
+}
+
+export interface CycleCountModel {
+  id: number;
+  count_number: string;
+  title: string;
+  warehouse_id: number;
+  warehouse_name: string;
+  status: 'draft' | 'in_progress' | 'review' | 'posted' | 'cancelled';
+  scope_type: 'full' | 'zone' | 'location';
+  scope_value?: string | null;
+  total_items: number;
+  counted_items: number;
+  variance_count: number;
+  notes?: string | null;
+  created_by: string;
+  approved_by?: string | null;
+  posted_at?: string | null;
+  created_at: string;
+  items?: Array<{
+    id: number;
+    product_variant_id: number;
+    product_name: string;
+    sku: string;
+    location_code: string;
+    lot_number?: string | null;
+    snapshot_quantity: number;
+    counted_quantity: number | null;
+    variance_quantity: number;
+    status: string;
+    notes?: string | null;
+  }>;
+}
+
+export interface ReorderRuleModel {
+  id: number;
+  warehouse_id: number;
+  warehouse_name: string;
+  product_variant_id: number;
+  product_name: string;
+  sku: string;
+  min_quantity: number;
+  reorder_point: number;
+  reorder_quantity: number;
+  safety_stock: number;
+  lead_time_days: number;
+  preferred_supplier?: string | null;
+  is_active: boolean;
+}
+
+export interface ReplenishmentRecommendationModel {
+  rule_id: number;
+  warehouse_id: number;
+  warehouse_name: string;
+  product_variant_id: number;
+  product_name: string;
+  sku: string;
+  on_hand: number;
+  reserved: number;
+  in_transit: number;
+  effective_position: number;
+  reorder_point: number;
+  safety_stock: number;
+  suggested_quantity: number;
+  lead_time_days: number;
+  preferred_supplier: string;
+  urgency: 'critical' | 'high' | 'medium';
 }
 
 export interface OrderModel {
@@ -344,6 +593,188 @@ export const omsService = {
 
   async getAvailability(productId?: number, warehouseId?: number) {
     const { data } = await apiClient.get('/inventory/availability', { params: { product_id: productId, warehouse_id: warehouseId } });
+    return data;
+  },
+
+  // Enterprise Inventory Engine
+  async getInventory(params?: { search?: string; warehouse_id?: number; status?: string; page?: number; per_page?: number }) {
+    const { data } = await apiClient.get('/inventory', { params });
+    return data;
+  },
+
+  async getInventoryKpis(warehouseId?: number) {
+    const { data } = await apiClient.get('/inventory/kpis', { params: { warehouse_id: warehouseId } });
+    return data;
+  },
+
+  async getInventorySkuDetail(variantId: number) {
+    const { data } = await apiClient.get(`/inventory/sku/${variantId}`);
+    return data;
+  },
+
+  async reconcileInventory(warehouseId?: number) {
+    const { data } = await apiClient.post('/inventory/reconcile', { warehouse_id: warehouseId });
+    return data;
+  },
+
+  // Inbound Receipts & Putaway
+  async getInventoryReceipts(params?: { search?: string; warehouse_id?: number; status?: string; page?: number; per_page?: number }) {
+    const { data } = await apiClient.get('/inventory/receipts', { params });
+    return data;
+  },
+
+  async createInventoryReceipt(payload: {
+    warehouse_id: number;
+    supplier_name?: string;
+    purchase_order_number?: string;
+    receiving_location_id?: number;
+    notes?: string;
+    items: Array<{
+      product_variant_id: number;
+      expected_quantity: number;
+      lot_number?: string;
+      expiry_date?: string;
+      unit_cost?: number;
+    }>;
+  }) {
+    const { data } = await apiClient.post('/inventory/receipts', payload);
+    return data;
+  },
+
+  async confirmInventoryReceipt(receiptId: number, payload: {
+    items: Array<{
+      item_id: number;
+      received_quantity: number;
+      location_id?: number;
+      lot_number?: string;
+      expiry_date?: string;
+      condition?: string;
+    }>;
+  }) {
+    const { data } = await apiClient.post(`/inventory/receipts/${receiptId}/confirm`, payload);
+    return data;
+  },
+
+  async putawayReceiptItem(receiptId: number, payload: {
+    item_id: number;
+    destination_location_id?: number;
+    destination_location_code?: string;
+    quantity: number;
+  }) {
+    const { data } = await apiClient.post(`/inventory/receipts/${receiptId}/putaway`, payload);
+    return data;
+  },
+
+  // Multi-Stage Transfers
+  async getInventoryTransfers(params?: { search?: string; status?: string; page?: number; per_page?: number }) {
+    const { data } = await apiClient.get('/inventory/transfers', { params });
+    return data;
+  },
+
+  async createInventoryTransfer(payload: {
+    from_warehouse_id: number;
+    to_warehouse_id: number;
+    product_variant_id: number;
+    quantity: number;
+    from_location_id?: number;
+    to_location_id?: number;
+    lot_number?: string;
+    notes?: string;
+    in_transit_only?: boolean;
+  }) {
+    const { data } = await apiClient.post('/inventory/transfers', payload);
+    return data;
+  },
+
+  async receiveInventoryTransfer(transferId: number, payload: {
+    received_quantity: number;
+    destination_location_id?: number;
+    discrepancy_reason?: string;
+  }) {
+    const { data } = await apiClient.post(`/inventory/transfers/${transferId}/receive`, payload);
+    return data;
+  },
+
+  // Adjustments & Approvals
+  async getInventoryAdjustments(params?: { search?: string; warehouse_id?: number; status?: string; page?: number; per_page?: number }) {
+    const { data } = await apiClient.get('/inventory/adjustments', { params });
+    return data;
+  },
+
+  async createInventoryAdjustment(payload: {
+    warehouse_id: number;
+    product_variant_id: number;
+    adjustment_type: 'add' | 'subtract' | 'recount';
+    quantity: number;
+    reason: string;
+    notes?: string;
+    warehouse_location_id?: number;
+    lot_number?: string;
+    require_approval?: boolean;
+  }) {
+    const { data } = await apiClient.post('/inventory/adjustments', payload);
+    return data;
+  },
+
+  async approveInventoryAdjustment(adjustmentId: number) {
+    const { data } = await apiClient.post(`/inventory/adjustments/${adjustmentId}/approve`);
+    return data;
+  },
+
+  async rejectInventoryAdjustment(adjustmentId: number) {
+    const { data } = await apiClient.post(`/inventory/adjustments/${adjustmentId}/reject`);
+    return data;
+  },
+
+  // Cycle Counts
+  async getCycleCounts(params?: { warehouse_id?: number; status?: string; page?: number; per_page?: number }) {
+    const { data } = await apiClient.get('/inventory/cycle-counts', { params });
+    return data;
+  },
+
+  async createCycleCount(payload: {
+    warehouse_id: number;
+    title: string;
+    scope_type: 'full' | 'zone' | 'location';
+    scope_value?: string;
+    notes?: string;
+  }) {
+    const { data } = await apiClient.post('/inventory/cycle-counts', payload);
+    return data;
+  },
+
+  async recordCycleCounts(countId: number, counts: Array<{ item_id: number; counted_quantity: number; notes?: string }>) {
+    const { data } = await apiClient.put(`/inventory/cycle-counts/${countId}/record-counts`, { counts });
+    return data;
+  },
+
+  async approveAndPostCycleCount(countId: number) {
+    const { data } = await apiClient.post(`/inventory/cycle-counts/${countId}/approve-and-post`);
+    return data;
+  },
+
+  // Replenishment & Reorder
+  async getReplenishmentRules() {
+    const { data } = await apiClient.get('/inventory/replenishment/rules');
+    return data;
+  },
+
+  async saveReplenishmentRule(payload: {
+    warehouse_id: number;
+    product_variant_id: number;
+    min_quantity: number;
+    reorder_point: number;
+    reorder_quantity: number;
+    safety_stock?: number;
+    lead_time_days?: number;
+    preferred_supplier?: string;
+  }) {
+    const { data } = await apiClient.post('/inventory/replenishment/rules', payload);
+    return data;
+  },
+
+  async getReplenishmentRecommendations(warehouseId?: number) {
+    const { data } = await apiClient.get('/inventory/replenishment/recommendations', { params: { warehouse_id: warehouseId } });
     return data;
   },
 

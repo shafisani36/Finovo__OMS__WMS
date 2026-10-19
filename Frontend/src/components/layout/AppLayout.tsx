@@ -6,6 +6,7 @@ import {
   Store as StoreIcon,
   FileText,
   Package,
+  Boxes,
   Truck,
   CheckSquare,
   FileSpreadsheet,
@@ -155,6 +156,14 @@ export const AppLayout: React.FC = () => {
           >
             <Package size={18} />
             <span>Products</span>
+          </NavLink>
+          <NavLink
+            to="/inventory"
+            className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
+            onClick={() => setMobileMenuOpen(false)}
+          >
+            <Boxes size={18} />
+            <span>Inventory Engine</span>
           </NavLink>
           <NavLink
             to="/shipments"

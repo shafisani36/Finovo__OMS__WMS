@@ -14,10 +14,19 @@ class InventoryTransfer extends Model
         'organization_id',
         'transfer_number',
         'from_warehouse_id',
+        'from_location_id',
         'to_warehouse_id',
+        'to_location_id',
         'product_variant_id',
         'quantity',
+        'received_quantity',
+        'lot_number',
+        'discrepancy_quantity',
+        'discrepancy_reason',
         'status',
+        'dispatched_at',
+        'received_at',
+        'received_by_user_id',
         'notes',
         'user_id',
     ];
@@ -26,6 +35,10 @@ class InventoryTransfer extends Model
     {
         return [
             'quantity' => 'integer',
+            'received_quantity' => 'integer',
+            'discrepancy_quantity' => 'integer',
+            'dispatched_at' => 'datetime',
+            'received_at' => 'datetime',
         ];
     }
 
@@ -39,9 +52,19 @@ class InventoryTransfer extends Model
         return $this->belongsTo(Warehouse::class, 'from_warehouse_id');
     }
 
+    public function fromLocation(): BelongsTo
+    {
+        return $this->belongsTo(WarehouseLocation::class, 'from_location_id');
+    }
+
     public function toWarehouse(): BelongsTo
     {
         return $this->belongsTo(Warehouse::class, 'to_warehouse_id');
+    }
+
+    public function toLocation(): BelongsTo
+    {
+        return $this->belongsTo(WarehouseLocation::class, 'to_location_id');
     }
 
     public function variant(): BelongsTo
@@ -52,5 +75,10 @@ class InventoryTransfer extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function receivedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'received_by_user_id');
     }
 }

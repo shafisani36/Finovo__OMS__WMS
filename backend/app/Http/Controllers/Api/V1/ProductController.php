@@ -57,6 +57,15 @@ class ProductController extends Controller
                 'barcode' => $p->barcode,
                 'category' => $p->category,
                 'is_active' => $p->is_active,
+                'default_variant_id' => $p->variants->first()?->id,
+                'variants' => $p->variants->map(function ($v) {
+                    return [
+                        'id' => $v->id,
+                        'sku' => $v->sku,
+                        'name' => $v->name,
+                        'price' => (float) $v->price,
+                    ];
+                }),
                 'variants_count' => $p->variants->count(),
                 'stock' => [
                     'on_hand' => $totalOnHand,
