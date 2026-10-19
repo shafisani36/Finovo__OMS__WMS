@@ -8,13 +8,15 @@ import { Button } from '../components/common/Button';
 import { Alert } from '../components/common/Alert';
 import { authService } from '../services/authService';
 import { ApiError } from '../services/apiClient';
+import { useAuth } from '../hooks/useAuth';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
+  const { setAuthSession } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [remember, setRemember] = useState(false);
+  const [remember, setRemember] = useState(true);
 
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -57,6 +59,9 @@ export const LoginPage: React.FC = () => {
             resend_cooldown_seconds: response.data.resend_cooldown_seconds,
           },
         });
+      } else if (response.data.user && response.data.token) {
+        setAuthSession(response.data.user, response.data.token, remember);
+        navigate('/dashboard', { replace: true });
       }
     } catch (err) {
       if (err instanceof ApiError) {

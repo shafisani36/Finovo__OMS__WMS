@@ -1,18 +1,49 @@
 import type { ApiResponse } from '../types/auth';
 
+export const TOKEN_STORAGE_KEY = 'finovo_auth_token';
+
 let inMemoryToken: string | null = null;
 
-export const setAuthToken = (token: string | null): void => {
+// Immediately restore token from persistent storage if present
+try {
+  inMemoryToken = localStorage.getItem(TOKEN_STORAGE_KEY) || sessionStorage.getItem(TOKEN_STORAGE_KEY);
+} catch {
+  // Graceful fallback
+}
+
+export const setAuthToken = (token: string | null, remember = true): void => {
   inMemoryToken = token;
-  if (token) {
-    sessionStorage.setItem('finovo_auth_active', '1');
-  } else {
-    sessionStorage.removeItem('finovo_auth_active');
+  try {
+    if (token) {
+      if (remember) {
+        localStorage.setItem(TOKEN_STORAGE_KEY, token);
+      }
+      sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+      sessionStorage.setItem('finovo_auth_active', '1');
+    } else {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+      sessionStorage.removeItem('finovo_auth_active');
+    }
+  } catch {
+    // Ignore storage quota or access errors
   }
 };
 
 export const getAuthToken = (): string | null => {
-  return inMemoryToken;
+  if (inMemoryToken) {
+    return inMemoryToken;
+  }
+  try {
+    const stored = localStorage.getItem(TOKEN_STORAGE_KEY) || sessionStorage.getItem(TOKEN_STORAGE_KEY);
+    if (stored) {
+      inMemoryToken = stored;
+      return stored;
+    }
+  } catch {
+    // Ignore
+  }
+  return null;
 };
 
 export class ApiError extends Error {

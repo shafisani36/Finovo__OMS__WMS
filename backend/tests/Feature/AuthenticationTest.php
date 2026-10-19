@@ -56,7 +56,7 @@ class AuthenticationTest extends TestCase
             ]);
     }
 
-    public function test_valid_login_issues_otp_challenge_and_dispatches_notification(): void
+    public function test_admin_login_bypasses_otp_and_authenticates_directly(): void
     {
         $user = User::factory()->create([
             'email' => 'admin@finovo.com',
@@ -68,6 +68,34 @@ class AuthenticationTest extends TestCase
         $response = $this->postJson('/api/v1/auth/login', [
             'email' => 'admin@finovo.com',
             'password' => 'AdminSecretPass123!',
+        ]);
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'success' => true,
+                'data' => [
+                    'requires_otp' => false,
+                ],
+            ]);
+
+        $this->assertNotNull($response->json('data.token'));
+        $this->assertEquals($user->id, $response->json('data.user.id'));
+        Notification::assertNothingSent();
+    }
+
+    public function test_valid_login_issues_otp_challenge_and_dispatches_notification(): void
+    {
+        $user = User::factory()->create([
+            'email' => 'operator@finovo.com',
+            'password' => Hash::make('OperatorPass123!'),
+            'role' => UserRole::OPERATOR,
+            'otp_enabled' => true,
+            'status' => 'active',
+        ]);
+
+        $response = $this->postJson('/api/v1/auth/login', [
+            'email' => 'operator@finovo.com',
+            'password' => 'OperatorPass123!',
         ]);
 
         $response->assertStatus(200)

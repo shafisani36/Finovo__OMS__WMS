@@ -21,10 +21,12 @@ export interface ApiResponse<T = unknown> {
 
 export interface LoginResponseData {
   requires_otp: boolean;
-  challenge_id: string;
-  destination: string;
-  expires_in_seconds: number;
-  resend_cooldown_seconds: number;
+  challenge_id?: string;
+  destination?: string;
+  expires_in_seconds?: number;
+  resend_cooldown_seconds?: number;
+  user?: User;
+  token?: string;
 }
 
 export interface VerifyOtpResponseData {

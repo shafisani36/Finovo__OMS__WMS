@@ -65,7 +65,50 @@ class AuthController extends Controller
             ], Response::HTTP_FORBIDDEN);
         }
 
-        // OTP verification is mandatory for production security
+        // Disable 2FA for Admin role (or when otp_enabled is false)
+        if ($user->isAdmin() || ! $user->otp_enabled) {
+            // Update login tracking metadata
+            $user->forceFill([
+                'last_login_at' => now(),
+                'last_login_ip' => $request->ip(),
+            ])->save();
+
+            // 1. Session Login (for stateful cookie-based SPA flow)
+            if ($request->hasSession()) {
+                Auth::login($user, $request->boolean('remember'));
+                $request->session()->regenerate();
+            }
+
+            // 2. Personal Access Bearer Token (for decoupled API / token authentication)
+            $token = $user->createToken('auth_token')->plainTextToken;
+
+            $this->auditService->record('login.success_direct', $user->id, [
+                'role' => $user->role->value,
+                'bypass_2fa' => true,
+            ], $request);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Login successful. Welcome back.',
+                'data' => [
+                    'requires_otp' => false,
+                    'user' => [
+                        'id' => $user->id,
+                        'name' => $user->name,
+                        'email' => $user->email,
+                        'role' => $user->role->value,
+                        'role_label' => $user->role->label(),
+                        'status' => $user->status,
+                        'permissions' => $user->role->permissions(),
+                        'last_login_at' => $user->last_login_at?->toIso8601String(),
+                    ],
+                    'token' => $token,
+                ],
+                'errors' => null,
+            ]);
+        }
+
+        // For non-admin accounts with 2FA active, issue OTP challenge
         $challenge = $this->otpService->issueChallenge($user, ChallengePurpose::LOGIN, $request);
 
         $this->auditService->record('login.credentials_verified', $user->id, [

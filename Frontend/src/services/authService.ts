@@ -13,10 +13,16 @@ import type {
 
 export const authService = {
   login: async (email: string, password: string, remember = false): Promise<ApiResponse<LoginResponseData>> => {
-    return request<LoginResponseData>('/auth/login', {
+    const response = await request<LoginResponseData>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password, remember }),
     });
+
+    if (!response.data?.requires_otp && response.data?.token) {
+      setAuthToken(response.data.token, remember);
+    }
+
+    return response;
   },
 
   verifyOtp: async (challenge_id: string, code: string): Promise<ApiResponse<VerifyOtpResponseData>> => {
@@ -26,7 +32,7 @@ export const authService = {
     });
 
     if (response.data?.token) {
-      setAuthToken(response.data.token);
+      setAuthToken(response.data.token, true);
     }
 
     return response;
