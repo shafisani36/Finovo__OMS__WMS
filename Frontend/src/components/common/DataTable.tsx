@@ -1,5 +1,6 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight, Loader2, Inbox } from 'lucide-react';
+import CustomDropdown from './CustomDropdown';
 
 export interface Column<T> {
   key: string;
@@ -143,23 +144,20 @@ export function DataTable<T extends Record<string, any>>({
             {pagination.onPerPageChange && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 13, color: '#64748b' }}>Per page:</span>
-                <select
-                  value={pagination.perPage}
-                  onChange={(e) => pagination.onPerPageChange!(Number(e.target.value))}
-                  style={{
-                    padding: '4px 8px',
-                    borderRadius: 8,
-                    border: '1px solid #cbd5e1',
-                    fontSize: 12,
-                    outline: 'none',
-                    backgroundColor: '#ffffff',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <option value={10}>10</option>
-                  <option value={25}>25</option>
-                  <option value={50}>50</option>
-                </select>
+                <div style={{ width: 75 }}>
+                  <CustomDropdown
+                    value={pagination.perPage}
+                    onChange={(val) => pagination.onPerPageChange!(Number(val))}
+                    options={[
+                      { value: 10, label: '10' },
+                      { value: 25, label: '25' },
+                      { value: 50, label: '50' },
+                    ]}
+                    size="sm"
+                    searchable={false}
+                    placement="top"
+                  />
+                </div>
               </div>
             )}
 

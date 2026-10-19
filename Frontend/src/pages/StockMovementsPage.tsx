@@ -16,6 +16,7 @@ import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import DataTable from '../components/common/DataTable';
 import type { Column } from '../components/common/DataTable';
+import CustomDropdown from '../components/common/CustomDropdown';
 import omsService from '../services/omsService';
 import type {
   StockMovementItem,
@@ -462,28 +463,16 @@ export const StockMovementsPage: React.FC = () => {
           <form onSubmit={handleTransferSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
             {/* Product Select */}
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
-                Product
-              </label>
-              <select
+              <CustomDropdown
+                label="Product"
+                placeholder="Select product..."
                 value={selectedProductId}
-                onChange={(e) => setSelectedProductId(Number(e.target.value))}
-                style={{
-                  width: '100%',
-                  padding: '10px 14px',
-                  borderRadius: 10,
-                  border: '1px solid #cbd5e1',
-                  fontSize: 14,
-                  backgroundColor: '#ffffff',
-                }}
-              >
-                <option value="">Select product...</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.sku})
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setSelectedProductId(Number(val))}
+                options={products.map((p) => ({
+                  value: p.id,
+                  label: `${p.name} (${p.sku})`,
+                }))}
+              />
             </div>
 
             {/* Available Stock Info Bar matching Screenshot 4 */}
@@ -516,55 +505,31 @@ export const StockMovementsPage: React.FC = () => {
             {/* From & To Warehouses Row */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
-                  From Warehouse
-                </label>
-                <select
+                <CustomDropdown
+                  label="From Warehouse"
+                  placeholder="Select warehouse..."
                   value={fromWarehouseId}
-                  onChange={(e) => setFromWarehouseId(Number(e.target.value))}
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    borderRadius: 10,
-                    border: '1px solid #cbd5e1',
-                    fontSize: 14,
-                    backgroundColor: '#ffffff',
-                  }}
-                >
-                  <option value="">Select warehouse...</option>
-                  {warehouses.map((w) => (
-                    <option key={w.id} value={w.id}>
-                      {w.name} ({w.code})
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setFromWarehouseId(Number(val))}
+                  options={warehouses.map((w) => ({
+                    value: w.id,
+                    label: `${w.name} (${w.code})`,
+                  }))}
+                />
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
-                  To Warehouse
-                </label>
-                <select
+                <CustomDropdown
+                  label="To Warehouse"
+                  placeholder="Select warehouse..."
                   value={toWarehouseId}
-                  onChange={(e) => setToWarehouseId(Number(e.target.value))}
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    borderRadius: 10,
-                    border: '1px solid #cbd5e1',
-                    fontSize: 14,
-                    backgroundColor: '#ffffff',
-                  }}
-                >
-                  <option value="">Select warehouse...</option>
-                  {warehouses
+                  onChange={(val) => setToWarehouseId(Number(val))}
+                  options={warehouses
                     .filter((w) => w.id !== Number(fromWarehouseId))
-                    .map((w) => (
-                      <option key={w.id} value={w.id}>
-                        {w.name} ({w.code})
-                      </option>
-                    ))}
-                </select>
+                    .map((w) => ({
+                      value: w.id,
+                      label: `${w.name} (${w.code})`,
+                    }))}
+                />
               </div>
             </div>
 
@@ -643,58 +608,47 @@ export const StockMovementsPage: React.FC = () => {
           <form onSubmit={handleAdjustmentSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
-                  Product
-                </label>
-                <select
-                  value={selectedProductId}
-                  onChange={(e) => setSelectedProductId(Number(e.target.value))}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', fontSize: 14 }}
+                <CustomDropdown
+                  label="Product"
                   required
-                >
-                  <option value="">Select product...</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.sku})
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Select product..."
+                  value={selectedProductId}
+                  onChange={(val) => setSelectedProductId(Number(val))}
+                  options={products.map((p) => ({
+                    value: p.id,
+                    label: `${p.name} (${p.sku})`,
+                  }))}
+                />
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
-                  Warehouse
-                </label>
-                <select
-                  value={adjWarehouseId}
-                  onChange={(e) => setAdjWarehouseId(Number(e.target.value))}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', fontSize: 14 }}
+                <CustomDropdown
+                  label="Warehouse"
                   required
-                >
-                  <option value="">Select warehouse...</option>
-                  {warehouses.map((w) => (
-                    <option key={w.id} value={w.id}>
-                      {w.name} ({w.code})
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Select warehouse..."
+                  value={adjWarehouseId}
+                  onChange={(val) => setAdjWarehouseId(Number(val))}
+                  options={warehouses.map((w) => ({
+                    value: w.id,
+                    label: `${w.name} (${w.code})`,
+                  }))}
+                />
               </div>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
-                  Adjustment Type
-                </label>
-                <select
+                <CustomDropdown
+                  label="Adjustment Type"
                   value={adjType}
-                  onChange={(e) => setAdjType(e.target.value as any)}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', fontSize: 14 }}
-                >
-                  <option value="add">Add (Inbound Receipt)</option>
-                  <option value="subtract">Subtract (Damage / Loss)</option>
-                  <option value="recount">Recount (Physical Cycle Count)</option>
-                </select>
+                  onChange={(val) => setAdjType(val as any)}
+                  options={[
+                    { value: 'add', label: 'Add (Inbound Receipt)' },
+                    { value: 'subtract', label: 'Subtract (Damage / Loss)' },
+                    { value: 'recount', label: 'Recount (Physical Cycle Count)' },
+                  ]}
+                  searchable={false}
+                />
               </div>
 
               <div>
@@ -713,20 +667,19 @@ export const StockMovementsPage: React.FC = () => {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
-                  Reason
-                </label>
-                <select
+                <CustomDropdown
+                  label="Reason"
                   value={adjReason}
-                  onChange={(e) => setAdjReason(e.target.value)}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', fontSize: 14 }}
-                >
-                  <option value="Stock Receipt">Stock Receipt</option>
-                  <option value="Damaged Goods">Damaged Goods</option>
-                  <option value="Loss / Theft">Loss / Theft</option>
-                  <option value="Audit Correction">Audit Correction</option>
-                  <option value="Return Restock">Return Restock</option>
-                </select>
+                  onChange={(val) => setAdjReason(val)}
+                  options={[
+                    { value: 'Stock Receipt', label: 'Stock Receipt' },
+                    { value: 'Damaged Goods', label: 'Damaged Goods' },
+                    { value: 'Loss / Theft', label: 'Loss / Theft' },
+                    { value: 'Audit Correction', label: 'Audit Correction' },
+                    { value: 'Return Restock', label: 'Return Restock' },
+                  ]}
+                  searchable={false}
+                />
               </div>
             </div>
 

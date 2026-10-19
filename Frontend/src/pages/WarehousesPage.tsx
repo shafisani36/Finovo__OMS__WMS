@@ -22,6 +22,7 @@ import type { WarehouseModel } from '../services/omsService';
 import WarehouseStatusBadge from '../components/warehouse/WarehouseStatusBadge';
 import WarehouseWizardModal from '../components/warehouse/WarehouseWizardModal';
 import WarehouseDetailModal from '../components/warehouse/WarehouseDetailModal';
+import CustomDropdown from '../components/common/CustomDropdown';
 
 export const WarehousesPage: React.FC = () => {
   const [warehouses, setWarehouses] = useState<WarehouseModel[]>([]);
@@ -396,26 +397,22 @@ export const WarehousesPage: React.FC = () => {
 
           {/* Search, Type Filter & Refresh */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <select
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-              style={{
-                padding: '6px 10px',
-                borderRadius: 8,
-                border: '1px solid #cbd5e1',
-                fontSize: 12,
-                backgroundColor: '#ffffff',
-                color: '#334155',
-              }}
-            >
-              <option value="all">All Facility Types</option>
-              <option value="distribution_center">Distribution Center</option>
-              <option value="fulfillment_hub">Fulfillment Hub</option>
-              <option value="retail_backroom">Retail Backroom</option>
-              <option value="cross_dock">Cross-Dock</option>
-              <option value="quarantine_zone">Quarantine Zone</option>
-              <option value="third_party_3pl">3PL Partner</option>
-            </select>
+            <div style={{ width: 170 }}>
+              <CustomDropdown
+                value={typeFilter}
+                onChange={(val) => setTypeFilter(val)}
+                options={[
+                  { value: 'all', label: 'All Facility Types' },
+                  { value: 'distribution_center', label: 'Distribution Center' },
+                  { value: 'fulfillment_hub', label: 'Fulfillment Hub' },
+                  { value: 'retail_backroom', label: 'Retail Backroom' },
+                  { value: 'cross_dock', label: 'Cross-Dock' },
+                  { value: 'quarantine_zone', label: 'Quarantine Zone' },
+                  { value: 'third_party_3pl', label: '3PL Partner' },
+                ]}
+                size="sm"
+              />
+            </div>
 
             <div style={{ position: 'relative', width: 220 }}>
               <Search

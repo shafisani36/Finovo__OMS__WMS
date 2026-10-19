@@ -14,6 +14,7 @@ import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import DataTable from '../components/common/DataTable';
 import type { Column } from '../components/common/DataTable';
+import CustomDropdown from '../components/common/CustomDropdown';
 import omsService from '../services/omsService';
 import type { PickingItem } from '../services/omsService';
 
@@ -167,26 +168,20 @@ export const PickingPage: React.FC = () => {
       header: 'STATUS',
       width: '18%',
       render: (row) => (
-        <select
-          value={row.status}
-          onChange={(e) => handleStatusChange(row.id, e.target.value)}
-          style={{
-            padding: '6px 12px',
-            borderRadius: 8,
-            border: '1px solid #cbd5e1',
-            fontSize: 12,
-            fontWeight: 500,
-            backgroundColor: '#ffffff',
-            color: '#334155',
-            cursor: 'pointer',
-            outline: 'none',
-          }}
-        >
-          <option value="not_started">Not Started</option>
-          <option value="in_progress">In Progress</option>
-          <option value="picked">Picked</option>
-          <option value="packed">Packed</option>
-        </select>
+        <div style={{ width: 140 }}>
+          <CustomDropdown
+            value={row.status}
+            onChange={(val) => handleStatusChange(row.id, val)}
+            options={[
+              { value: 'not_started', label: 'Not Started' },
+              { value: 'in_progress', label: 'In Progress' },
+              { value: 'picked', label: 'Picked' },
+              { value: 'packed', label: 'Packed' },
+            ]}
+            size="sm"
+            searchable={false}
+          />
+        </div>
       ),
     },
     {
@@ -370,19 +365,18 @@ export const PickingPage: React.FC = () => {
             </div>
             <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
-                  Set Status to:
-                </label>
-                <select
+                <CustomDropdown
+                  label="Set Status to"
                   value={bulkStatus}
-                  onChange={(e) => setBulkStatus(e.target.value)}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', fontSize: 14 }}
-                >
-                  <option value="not_started">Not Started</option>
-                  <option value="in_progress">In Progress</option>
-                  <option value="picked">Picked</option>
-                  <option value="packed">Packed</option>
-                </select>
+                  onChange={(val) => setBulkStatus(val)}
+                  options={[
+                    { value: 'not_started', label: 'Not Started' },
+                    { value: 'in_progress', label: 'In Progress' },
+                    { value: 'picked', label: 'Picked' },
+                    { value: 'packed', label: 'Packed' },
+                  ]}
+                  searchable={false}
+                />
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 12 }}>

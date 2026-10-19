@@ -4,6 +4,7 @@ import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import DataTable from '../components/common/DataTable';
 import type { Column } from '../components/common/DataTable';
+import CustomDropdown from '../components/common/CustomDropdown';
 import omsService from '../services/omsService';
 import type { OrderModel, ProductModel, StoreModel } from '../services/omsService';
 
@@ -289,18 +290,17 @@ export const OrdersPage: React.FC = () => {
 
             <form onSubmit={handleCreateOrder} style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Store *</label>
-                <select
-                  value={selectedStoreId}
-                  onChange={(e) => setSelectedStoreId(Number(e.target.value))}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1' }}
+                <CustomDropdown
+                  label="Store"
                   required
-                >
-                  <option value="">Select store...</option>
-                  {stores.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name} ({s.platform})</option>
-                  ))}
-                </select>
+                  placeholder="Select store..."
+                  value={selectedStoreId}
+                  onChange={(val) => setSelectedStoreId(Number(val))}
+                  options={stores.map((s) => ({
+                    value: s.id,
+                    label: `${s.name} (${s.platform})`,
+                  }))}
+                />
               </div>
 
               <div>
@@ -327,18 +327,17 @@ export const OrdersPage: React.FC = () => {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Select Product *</label>
-                <select
-                  value={selectedProductId}
-                  onChange={(e) => setSelectedProductId(Number(e.target.value))}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1' }}
+                <CustomDropdown
+                  label="Select Product"
                   required
-                >
-                  <option value="">Select product...</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>
-                  ))}
-                </select>
+                  placeholder="Select product..."
+                  value={selectedProductId}
+                  onChange={(val) => setSelectedProductId(Number(val))}
+                  options={products.map((p) => ({
+                    value: p.id,
+                    label: `${p.name} (${p.sku})`,
+                  }))}
+                />
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>

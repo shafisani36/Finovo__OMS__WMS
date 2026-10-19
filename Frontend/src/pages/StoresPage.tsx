@@ -18,6 +18,7 @@ import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import AlertBanner from '../components/common/AlertBanner';
 import DataTable from '../components/common/DataTable';
 import type { Column } from '../components/common/DataTable';
+import CustomDropdown from '../components/common/CustomDropdown';
 import omsService from '../services/omsService';
 import type { StoreModel, WarehouseModel } from '../services/omsService';
 
@@ -436,24 +437,23 @@ export const StoresPage: React.FC = () => {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
-                  Commerce Platform *
-                </label>
-                <select
+                <CustomDropdown
+                  label="Commerce Platform"
+                  required
                   value={formData.platform}
-                  onChange={(e) => setFormData({ ...formData, platform: e.target.value })}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', fontSize: 14, backgroundColor: '#ffffff', boxSizing: 'border-box' }}
-                >
-                  <option value="shopify">Shopify</option>
-                  <option value="woocommerce">WooCommerce</option>
-                  <option value="custom_bridge">Finovo Custom Bridge (PHP / Custom)</option>
-                  <option value="bigcommerce">BigCommerce</option>
-                  <option value="magento">Magento 2 / Adobe Commerce</option>
-                  <option value="prestashop">PrestaShop</option>
-                  <option value="wix">Wix</option>
-                  <option value="ebay">eBay</option>
-                  <option value="manual">Manual Store</option>
-                </select>
+                  onChange={(val) => setFormData({ ...formData, platform: val })}
+                  options={[
+                    { value: 'shopify', label: 'Shopify' },
+                    { value: 'woocommerce', label: 'WooCommerce' },
+                    { value: 'custom_bridge', label: 'Finovo Custom Bridge (PHP / Custom)' },
+                    { value: 'bigcommerce', label: 'BigCommerce' },
+                    { value: 'magento', label: 'Magento 2 / Adobe Commerce' },
+                    { value: 'prestashop', label: 'PrestaShop' },
+                    { value: 'wix', label: 'Wix' },
+                    { value: 'ebay', label: 'eBay' },
+                    { value: 'manual', label: 'Manual Store' },
+                  ]}
+                />
               </div>
 
               {formData.platform === 'custom_bridge' && (

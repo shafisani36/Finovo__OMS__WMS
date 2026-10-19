@@ -25,6 +25,7 @@ import type {
 } from '../../services/omsService';
 import WarehouseStatusBadge from './WarehouseStatusBadge';
 import WarehouseReadinessCard from './WarehouseReadinessCard';
+import CustomDropdown from '../common/CustomDropdown';
 
 interface WarehouseDetailModalProps {
   warehouseId: number;
@@ -563,38 +564,38 @@ export const WarehouseDetailModal: React.FC<WarehouseDetailModalProps> = ({
                         </div>
 
                         <div>
-                          <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
-                            Location Type
-                          </label>
-                          <select
+                          <CustomDropdown
+                            label="Location Type"
                             value={locType}
-                            onChange={(e) => setLocType(e.target.value as any)}
-                            style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13 }}
-                          >
-                            <option value="zone">Zone</option>
-                            <option value="aisle">Aisle</option>
-                            <option value="rack">Rack</option>
-                            <option value="shelf">Shelf</option>
-                            <option value="bin">Bin</option>
-                          </select>
+                            onChange={(val) => setLocType(val as any)}
+                            options={[
+                              { value: 'zone', label: 'Zone' },
+                              { value: 'aisle', label: 'Aisle' },
+                              { value: 'rack', label: 'Rack' },
+                              { value: 'shelf', label: 'Shelf' },
+                              { value: 'bin', label: 'Bin' },
+                            ]}
+                            size="sm"
+                            searchable={false}
+                          />
                         </div>
 
                         <div>
-                          <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
-                            Parent Location (Optional)
-                          </label>
-                          <select
+                          <CustomDropdown
+                            label="Parent Location (Optional)"
+                            placeholder="No Parent (Root Zone)"
                             value={locParentId}
-                            onChange={(e) => setLocParentId(e.target.value)}
-                            style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13 }}
-                          >
-                            <option value="">No Parent (Root Zone)</option>
-                            {locations.map((l) => (
-                              <option key={l.id} value={l.id}>
-                                {l.code} ({l.location_type})
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(val) => setLocParentId(val ? String(val) : '')}
+                            options={[
+                              { value: '', label: 'No Parent (Root Zone)' },
+                              ...locations.map((l) => ({
+                                value: String(l.id),
+                                label: `${l.code} (${l.location_type})`,
+                              })),
+                            ]}
+                            size="sm"
+                            clearable
+                          />
                         </div>
                       </div>
 
@@ -763,22 +764,22 @@ export const WarehouseDetailModal: React.FC<WarehouseDetailModalProps> = ({
                       </div>
 
                       <div style={{ flex: 1 }}>
-                        <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
-                          Assigned Role
-                        </label>
-                        <select
+                        <CustomDropdown
+                          label="Assigned Role"
                           value={staffRole}
-                          onChange={(e) => setStaffRole(e.target.value)}
-                          style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13 }}
-                        >
-                          <option value="warehouse_manager">Warehouse Manager</option>
-                          <option value="supervisor">Supervisor</option>
-                          <option value="picker">Picker</option>
-                          <option value="packer">Packer</option>
-                          <option value="receiver">Inbound Receiver</option>
-                          <option value="inventory_controller">Inventory Controller</option>
-                          <option value="qa_inspector">QA Inspector</option>
-                        </select>
+                          onChange={(val) => setStaffRole(val)}
+                          options={[
+                            { value: 'warehouse_manager', label: 'Warehouse Manager' },
+                            { value: 'supervisor', label: 'Supervisor' },
+                            { value: 'picker', label: 'Picker' },
+                            { value: 'packer', label: 'Packer' },
+                            { value: 'receiver', label: 'Inbound Receiver' },
+                            { value: 'inventory_controller', label: 'Inventory Controller' },
+                            { value: 'qa_inspector', label: 'QA Inspector' },
+                          ]}
+                          size="sm"
+                          searchable={false}
+                        />
                       </div>
 
                       <div style={{ display: 'flex', gap: 8, alignSelf: 'flex-end' }}>

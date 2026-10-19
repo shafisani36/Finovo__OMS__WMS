@@ -14,6 +14,7 @@ import {
   Building,
   Info,
 } from 'lucide-react';
+import CustomDropdown from '../common/CustomDropdown';
 import omsService from '../../services/omsService';
 
 interface WarehouseWizardModalProps {
@@ -579,21 +580,14 @@ export const WarehouseWizardModal: React.FC<WarehouseWizardModalProps> = ({
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
-                  Operating IANA Timezone <span style={{ color: '#ef4444' }}>*</span>
-                </label>
-                <select
+                <CustomDropdown
+                  label="Operating IANA Timezone"
+                  required
                   value={timezone}
-                  onChange={(e) => setTimezone(e.target.value)}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', fontSize: 14, boxSizing: 'border-box', backgroundColor: '#ffffff' }}
-                >
-                  {TIMEZONES.map((tz) => (
-                    <option key={tz} value={tz}>
-                      {tz}
-                    </option>
-                  ))}
-                </select>
-                <span style={{ fontSize: 11, color: '#94a3b8' }}>Critical for operational shifts and cutoff times</span>
+                  onChange={(val) => setTimezone(val)}
+                  options={TIMEZONES.map((tz) => ({ value: tz, label: tz }))}
+                  helperText="Critical for operational shifts and cutoff times"
+                />
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
@@ -843,33 +837,31 @@ export const WarehouseWizardModal: React.FC<WarehouseWizardModalProps> = ({
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
-                    Stock Reservation Policy
-                  </label>
-                  <select
+                  <CustomDropdown
+                    label="Stock Reservation Policy"
                     value={reservationPolicy}
-                    onChange={(e) => setReservationPolicy(e.target.value)}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
-                  >
-                    <option value="immediate_at_order">Immediate at Order Creation (Recommended)</option>
-                    <option value="at_pick_release">At Pick Release</option>
-                    <option value="manual">Manual Reservation Only</option>
-                  </select>
+                    onChange={(val) => setReservationPolicy(val)}
+                    options={[
+                      { value: 'immediate_at_order', label: 'Immediate at Order Creation (Recommended)' },
+                      { value: 'at_pick_release', label: 'At Pick Release' },
+                      { value: 'manual', label: 'Manual Reservation Only' },
+                    ]}
+                    searchable={false}
+                  />
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
-                    Picking Strategy / Stock Rotation
-                  </label>
-                  <select
+                  <CustomDropdown
+                    label="Picking Strategy / Stock Rotation"
                     value={pickingStrategy}
-                    onChange={(e) => setPickingStrategy(e.target.value)}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
-                  >
-                    <option value="fifo">FIFO (First In, First Out)</option>
-                    <option value="fefo">FEFO (First Expired, First Out)</option>
-                    <option value="lefo">LEFO (Last In, First Out)</option>
-                  </select>
+                    onChange={(val) => setPickingStrategy(val)}
+                    options={[
+                      { value: 'fifo', label: 'FIFO (First In, First Out)' },
+                      { value: 'fefo', label: 'FEFO (First Expired, First Out)' },
+                      { value: 'lefo', label: 'LEFO (Last In, First Out)' },
+                    ]}
+                    searchable={false}
+                  />
                 </div>
               </div>
 
@@ -910,19 +902,18 @@ export const WarehouseWizardModal: React.FC<WarehouseWizardModalProps> = ({
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
-                  Cycle Count Frequency
-                </label>
-                <select
+                <CustomDropdown
+                  label="Cycle Count Frequency"
                   value={cycleCountFrequency}
-                  onChange={(e) => setCycleCountFrequency(e.target.value)}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
-                >
-                  <option value="continuous">Continuous Cycle Counting</option>
-                  <option value="daily">Daily High-Velocity Recounts</option>
-                  <option value="weekly">Weekly Category Audits</option>
-                  <option value="monthly">Monthly Full Reconciliation</option>
-                </select>
+                  onChange={(val) => setCycleCountFrequency(val)}
+                  options={[
+                    { value: 'continuous', label: 'Continuous Cycle Counting' },
+                    { value: 'daily', label: 'Daily High-Velocity Recounts' },
+                    { value: 'weekly', label: 'Weekly Category Audits' },
+                    { value: 'monthly', label: 'Monthly Full Reconciliation' },
+                  ]}
+                  searchable={false}
+                />
               </div>
             </div>
           )}
@@ -965,18 +956,18 @@ export const WarehouseWizardModal: React.FC<WarehouseWizardModalProps> = ({
                   </label>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
-                    Putaway Routing
-                  </label>
-                  <select
+                  <CustomDropdown
+                    label="Putaway Routing"
                     value={putawayStrategy}
-                    onChange={(e) => setPutawayStrategy(e.target.value)}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
-                  >
-                    <option value="direct_to_bin">Direct to Primary Storage Bin</option>
-                    <option value="staged_putaway">Staged Inbound Staging Area</option>
-                    <option value="cross_dock">Cross-Dock to Outbound Staging</option>
-                  </select>
+                    onChange={(val) => setPutawayStrategy(val)}
+                    options={[
+                      { value: 'direct_to_bin', label: 'Direct to Primary Storage Bin' },
+                      { value: 'staged_putaway', label: 'Staged Inbound Staging Area' },
+                      { value: 'cross_dock', label: 'Cross-Dock to Outbound Staging' },
+                    ]}
+                    size="sm"
+                    searchable={false}
+                  />
                 </div>
               </div>
 
@@ -1015,19 +1006,19 @@ export const WarehouseWizardModal: React.FC<WarehouseWizardModalProps> = ({
                   </label>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
-                    Picking Workflow Strategy
-                  </label>
-                  <select
+                  <CustomDropdown
+                    label="Picking Workflow Strategy"
                     value={outboundPickingStrategy}
-                    onChange={(e) => setOutboundPickingStrategy(e.target.value)}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
-                  >
-                    <option value="batch">Batch Picking (Multi-Order Consolidated)</option>
-                    <option value="discrete">Discrete Order Picking (Single Order)</option>
-                    <option value="wave">Wave Picking (Scheduled Windows)</option>
-                    <option value="zone">Zone Picking (Zone Handoff)</option>
-                  </select>
+                    onChange={(val) => setOutboundPickingStrategy(val)}
+                    options={[
+                      { value: 'batch', label: 'Batch Picking (Multi-Order Consolidated)' },
+                      { value: 'discrete', label: 'Discrete Order Picking (Single Order)' },
+                      { value: 'wave', label: 'Wave Picking (Scheduled Windows)' },
+                      { value: 'zone', label: 'Zone Picking (Zone Handoff)' },
+                    ]}
+                    size="sm"
+                    searchable={false}
+                  />
                 </div>
               </div>
             </div>
