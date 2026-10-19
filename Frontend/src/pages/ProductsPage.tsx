@@ -193,12 +193,19 @@ export const ProductsPage: React.FC = () => {
       </div>
 
       {modalOpen && (
-        <div className="modal-overlay" onClick={() => setModalOpen(false)}>
-          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between' }}>
-              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Add Product</h3>
-              <button onClick={() => setModalOpen(false)} style={{ border: 'none', background: 'none', cursor: 'pointer' }}>
-                <X size={20} />
+        <div className="modal-overlay" style={{ zIndex: 9999 }} onClick={() => setModalOpen(false)}>
+          <div
+            className="modal-container"
+            style={{ maxWidth: 540, backgroundColor: '#ffffff', borderRadius: 18, border: '1px solid #e2e8f0', boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)', padding: 0 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Add Product & SKU</h3>
+                <p style={{ margin: '2px 0 0 0', fontSize: 12, color: '#64748b' }}>Register new item identity and SKU in the master catalog.</p>
+              </div>
+              <button onClick={() => setModalOpen(false)} className="btn-finovo-secondary" style={{ padding: 6 }}>
+                <X size={16} />
               </button>
             </div>
 
@@ -215,7 +222,7 @@ export const ProductsPage: React.FC = () => {
                 />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div className="finovo-form-grid-2">
                 <div>
                   <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>SKU *</label>
                   <input

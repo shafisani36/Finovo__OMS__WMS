@@ -101,6 +101,14 @@ export const InventoryPage: React.FC = () => {
   const [recommendations, setRecommendations] = useState<ReplenishmentRecommendationModel[]>([]);
   const [showNewRuleModal, setShowNewRuleModal] = useState(false);
 
+  // SKU Registration Modal State
+  const [showNewSkuModal, setShowNewSkuModal] = useState(false);
+  const [skuName, setSkuName] = useState('');
+  const [skuCode, setSkuCode] = useState('');
+  const [skuCategory, setSkuCategory] = useState('General');
+  const [skuBarcode, setSkuBarcode] = useState('');
+  const [skuPrice, setSkuPrice] = useState('29.99');
+
   // Detail Modal State
   const [detailVariantId, setDetailVariantId] = useState<number | null>(null);
   const [skuDetail, setSkuDetail] = useState<InventorySkuDetailModel | null>(null);
@@ -398,6 +406,39 @@ export const InventoryPage: React.FC = () => {
   }, [showPutawayModal]);
 
   // Submission Handlers
+  const handleCreateSku = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!skuName.trim() || !skuCode.trim()) {
+      setFeedback({ type: 'error', text: 'Product name and unique SKU code are required.' });
+      return;
+    }
+    try {
+      setLoading(true);
+      await omsService.createProduct({
+        name: skuName.trim(),
+        sku: skuCode.trim().toUpperCase(),
+        category: skuCategory.trim() || 'General',
+        barcode: skuBarcode.trim() || undefined,
+        price: parseFloat(skuPrice) || 0,
+      });
+      setShowNewSkuModal(false);
+      setSkuName('');
+      setSkuCode('');
+      setSkuBarcode('');
+      setSkuPrice('29.99');
+      setFeedback({
+        type: 'success',
+        text: `Product SKU "${skuCode.trim().toUpperCase()}" created in catalog. You can now receive, putaway, or adjust stock for it.`,
+      });
+      await fetchMetadata();
+      await fetchKpis();
+    } catch (err: any) {
+      setFeedback({ type: 'error', text: err.message || 'Failed to create product SKU.' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleCreateReceipt = async (e: React.FormEvent) => {
     e.preventDefault();
     const whId = Number(receiptWhId || (warehouses[0]?.id || 0));
@@ -673,13 +714,23 @@ export const InventoryPage: React.FC = () => {
 
           <div className="inventory-header-btn-group">
             <button
-              onClick={handleRunReconciliation}
+              onClick={() => setShowNewSkuModal(true)}
+              className="btn-finovo-primary"
+              style={{ padding: '8px 14px', fontSize: 12 }}
+              title="Register a new Product SKU in the master catalog"
+            >
+              <Package size={14} />
+              <span>New SKU</span>
+            </button>
+
+            <button
+              onClick={() => setShowNewAdjustmentModal(true)}
               className="btn-finovo-secondary"
               style={{ padding: '8px 12px', fontSize: 12 }}
-              title="Verify Ledger vs Materialized Balances"
+              title="Add, deduct, or recount stock quantities"
             >
-              <Sparkles size={14} color="#1e56ff" />
-              <span>Audit Ledger</span>
+              <Plus size={14} />
+              <span>Adjust Stock</span>
             </button>
 
             <button
@@ -692,12 +743,13 @@ export const InventoryPage: React.FC = () => {
             </button>
 
             <button
-              onClick={() => setShowNewAdjustmentModal(true)}
-              className="btn-finovo-primary"
-              style={{ padding: '8px 14px', fontSize: 12 }}
+              onClick={handleRunReconciliation}
+              className="btn-finovo-secondary"
+              style={{ padding: '8px 12px', fontSize: 12 }}
+              title="Verify Ledger vs Materialized Balances"
             >
-              <Plus size={14} />
-              <span>Adjust Stock</span>
+              <Sparkles size={14} color="#1e56ff" />
+              <span>Audit Ledger</span>
             </button>
           </div>
         </div>
@@ -1723,6 +1775,117 @@ export const InventoryPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* ------------------------------------------------------------- */}
+      {/* MODAL 0: REGISTER NEW PRODUCT / SKU */}
+      {/* ------------------------------------------------------------- */}
+      {showNewSkuModal && (
+        <div className="modal-overlay" style={{ zIndex: 9999 }} onClick={() => setShowNewSkuModal(false)}>
+          <div
+            className="modal-container"
+            style={{ maxWidth: 540, maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#ffffff', padding: 24, borderRadius: 18, border: '1px solid #e2e8f0', boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Register New Product / SKU</h3>
+                <p style={{ margin: '4px 0 0 0', fontSize: 12, color: '#64748b' }}>
+                  Define product identity in the master catalog. Physical stock is created separately via dock receiving or adjustments.
+                </p>
+              </div>
+              <button onClick={() => setShowNewSkuModal(false)} className="btn-finovo-secondary" style={{ padding: 6 }}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateSku} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
+                  Product Name *
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Wireless Ergonomic Mouse"
+                  value={skuName}
+                  onChange={(e) => setSkuName(e.target.value)}
+                  required
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div className="finovo-form-grid-2">
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
+                    Unique SKU Code *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. WM-1001"
+                    value={skuCode}
+                    onChange={(e) => setSkuCode(e.target.value.toUpperCase())}
+                    required
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, fontFamily: 'monospace', fontWeight: 600, boxSizing: 'border-box' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
+                    Category
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Electronics, Hardware"
+                    value={skuCategory}
+                    onChange={(e) => setSkuCategory(e.target.value)}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
+
+              <div className="finovo-form-grid-2">
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
+                    Barcode / GTIN / UPC
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 890123456789"
+                    value={skuBarcode}
+                    onChange={(e) => setSkuBarcode(e.target.value)}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
+                    Base Unit Price ($)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="29.99"
+                    value={skuPrice}
+                    onChange={(e) => setSkuPrice(e.target.value)}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ padding: 12, borderRadius: 8, backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', fontSize: 12, color: '#1e40af' }}>
+                <strong>Enterprise Architecture Note:</strong> Creating this SKU registers the item catalog master. Stock will only exist after a validated dock receiving, opening-stock adjustment, or inbound transfer.
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+                <button type="button" onClick={() => setShowNewSkuModal(false)} className="btn-finovo-secondary" style={{ padding: '8px 16px', fontSize: 13 }}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn-finovo-primary" style={{ padding: '8px 16px', fontSize: 13 }}>
+                  Register SKU in Catalog
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ------------------------------------------------------------- */}
       {/* MODAL: SKU STOCK INSPECTOR */}
