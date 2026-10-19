@@ -61,6 +61,7 @@ export const WarehouseDetailPage: React.FC = () => {
   const [showAssignStaff, setShowAssignStaff] = useState(false);
   const [staffUserId, setStaffUserId] = useState<number>(1);
   const [staffRole, setStaffRole] = useState('picker');
+  const [eligibleUsers, setEligibleUsers] = useState<Array<{ id: number; name: string; email: string; role: string }>>([]);
 
   // Controlled Opening Stock State
   const [stockRows, setStockRows] = useState<
@@ -83,9 +84,24 @@ export const WarehouseDetailPage: React.FC = () => {
 
       setWarehouse(whRes.data);
       setReadiness(readRes.data);
-      setLocations(locRes.data);
-      setStaff(staffRes.data);
-      setAuditLogs(logRes.data);
+      setLocations(Array.isArray(locRes.data) ? locRes.data : (locRes.data?.items || []));
+
+      const staffData = staffRes.data;
+      if (Array.isArray(staffData)) {
+        setStaff(staffData);
+      } else if (staffData && Array.isArray(staffData.assigned_staff)) {
+        setStaff(staffData.assigned_staff);
+        if (Array.isArray(staffData.eligible_users)) {
+          setEligibleUsers(staffData.eligible_users);
+          if (staffData.eligible_users.length > 0) {
+            setStaffUserId(staffData.eligible_users[0].id);
+          }
+        }
+      } else {
+        setStaff([]);
+      }
+
+      setAuditLogs(Array.isArray(logRes.data) ? logRes.data : (logRes.data?.items || []));
     } catch (err: any) {
       console.error(err);
       setMessage({ type: 'error', text: err.message || 'Failed to load warehouse data.' });
@@ -864,16 +880,28 @@ export const WarehouseDetailPage: React.FC = () => {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
                   <div>
                     <label style={{ display: 'block', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
-                      User ID / Account *
+                      User Account *
                     </label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={staffUserId}
-                      onChange={(e) => setStaffUserId(Number(e.target.value))}
-                      style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12, boxSizing: 'border-box' }}
-                      required
-                    />
+                    {eligibleUsers.length > 0 ? (
+                      <CustomDropdown
+                        value={String(staffUserId)}
+                        onChange={(val) => setStaffUserId(Number(val))}
+                        options={eligibleUsers.map((u) => ({
+                          value: String(u.id),
+                          label: `${u.name} (${u.email})`,
+                        }))}
+                        size="sm"
+                      />
+                    ) : (
+                      <input
+                        type="number"
+                        min="1"
+                        value={staffUserId}
+                        onChange={(e) => setStaffUserId(Number(e.target.value))}
+                        style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 12, boxSizing: 'border-box' }}
+                        required
+                      />
+                    )}
                   </div>
 
                   <div>
