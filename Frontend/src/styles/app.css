@@ -372,7 +372,13 @@ body {
   margin-bottom: 24px;
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1200px) {
+  .kpi-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
   .kpi-grid {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -380,7 +386,57 @@ body {
 
 @media (max-width: 640px) {
   .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .kpi-card {
+    padding: 10px 12px;
+    gap: 10px;
+    border-radius: 12px;
+  }
+
+  .kpi-card-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+  }
+
+  .kpi-card-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .kpi-card-title {
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .kpi-card-value {
+    font-size: 16px;
+  }
+
+  .kpi-pill {
+    font-size: 10px;
+    padding: 1px 6px;
+  }
+
+  /* Make the 7th card span full width on 2-col mobile view */
+  .kpi-grid > *:last-child {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 380px) {
+  .kpi-grid {
     grid-template-columns: 1fr;
+  }
+
+  .kpi-grid > *:last-child {
+    grid-column: auto;
   }
 }
 
@@ -661,7 +717,9 @@ body {
   border-color: #cbd5e1;
 }
 
-/* Tabs */
+/* ==========================================================================
+   Finovo Enterprise Workspace Tabs & Navigation System
+   ========================================================================== */
 .finovo-tabs {
   display: flex;
   align-items: center;
@@ -691,6 +749,290 @@ body {
   color: #1e56ff;
   font-weight: 600;
   border-bottom-color: #1e56ff;
+}
+
+.finovo-tabs-wrapper {
+  background: #ffffff;
+  border-bottom: 1px solid var(--finovo-border);
+  padding: 0 16px;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  position: relative;
+}
+
+.finovo-tabs-wrapper::-webkit-scrollbar {
+  display: none;
+}
+
+.finovo-tab-btn {
+  padding: 14px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  background: transparent;
+  border: none;
+  border-bottom: 2.5px solid transparent;
+  color: #64748b;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  user-select: none;
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
+
+.finovo-tab-btn:hover {
+  color: #0f172a;
+  background-color: rgba(241, 245, 249, 0.7);
+}
+
+.finovo-tab-btn.active {
+  color: #1e56ff;
+  font-weight: 600;
+  border-bottom-color: #1e56ff;
+  background-color: #eff6ff;
+}
+
+.finovo-tab-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  background-color: #f1f5f9;
+  color: #475569;
+  transition: all 0.15s ease;
+  line-height: 1.2;
+}
+
+.finovo-tab-btn.active .finovo-tab-badge {
+  background-color: #1e56ff;
+  color: #ffffff;
+}
+
+.finovo-tab-badge.badge-amber {
+  background-color: #fef3c7;
+  color: #b45309;
+}
+
+.finovo-tab-btn.active .finovo-tab-badge.badge-amber {
+  background-color: #d97706;
+  color: #ffffff;
+}
+
+.tab-label-short {
+  display: none;
+}
+
+.tab-label-full {
+  display: inline;
+}
+
+/* Tab responsive tweaks on tablet & phone */
+@media (max-width: 840px) {
+  .finovo-tabs-wrapper {
+    padding: 0 8px;
+    gap: 2px;
+  }
+
+  .finovo-tab-btn {
+    padding: 12px 10px;
+    font-size: 12px;
+    gap: 6px;
+  }
+
+  .tab-label-full {
+    display: none;
+  }
+
+  .tab-label-short {
+    display: inline;
+  }
+}
+
+/* Header & action row responsive rules */
+.inventory-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.inventory-header-dropdown {
+  width: 220px;
+}
+
+.inventory-header-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .inventory-header-actions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .inventory-header-dropdown {
+    width: 100%;
+  }
+
+  .inventory-header-btn-group {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    width: 100%;
+    gap: 8px;
+  }
+
+  .inventory-header-btn-group button {
+    justify-content: center;
+    padding: 8px 6px !important;
+    font-size: 11px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .inventory-header-btn-group {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Tab Section Toolbar Header */
+.tab-content-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--finovo-border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.tab-content-header-title {
+  margin: 0 0 4px 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.tab-content-header-subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+@media (max-width: 640px) {
+  .tab-content-header {
+    padding: 14px 14px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .tab-content-header > div:first-child {
+    width: 100%;
+  }
+
+  .tab-content-header > button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* Responsive Form Grid for Modals */
+.finovo-form-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 600px) {
+  .finovo-form-grid-2 {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+}
+
+/* Tab Pane Container */
+.tab-pane-container {
+  padding: 20px;
+}
+
+@media (max-width: 640px) {
+  .tab-pane-container {
+    padding: 14px 12px;
+  }
+}
+
+/* Tab 1 Filter Bar */
+.inventory-filter-bar {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--finovo-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.inventory-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 260px;
+}
+
+.inventory-search-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 360px;
+}
+
+.inventory-status-dropdown-wrap {
+  width: 175px;
+}
+
+@media (max-width: 640px) {
+  .inventory-filter-bar {
+    padding: 12px 14px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .inventory-filter-group {
+    flex-direction: column;
+    width: 100%;
+    min-width: 0;
+    gap: 10px;
+  }
+
+  .inventory-search-wrap {
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .inventory-status-dropdown-wrap {
+    width: 100%;
+  }
+
+  .inventory-filter-bar > button {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 /* Modal Overlay */
@@ -879,6 +1221,16 @@ body {
 
   .modal-overlay {
     padding: 12px;
+  }
+
+  .modal-container {
+    padding: 16px 14px !important;
+    border-radius: 14px !important;
+    max-height: 94vh !important;
+  }
+
+  .modal-container form {
+    max-height: calc(94vh - 70px) !important;
   }
 }
 

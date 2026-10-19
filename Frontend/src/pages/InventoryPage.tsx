@@ -305,6 +305,12 @@ export const InventoryPage: React.FC = () => {
     return list;
   }, [products]);
 
+  // Tab Badge Metrics
+  const draftReceiptsCount = useMemo(() => receipts.filter((r) => r.status === 'draft').length, [receipts]);
+  const inTransitTransfersCount = useMemo(() => transfers.filter((t) => t.status === 'in_transit').length, [transfers]);
+  const pendingAdjustmentsCount = useMemo(() => adjustments.filter((a) => a.status === 'pending_approval').length, [adjustments]);
+  const reviewCountsCount = useMemo(() => cycleCounts.filter((c) => c.status === 'review').length, [cycleCounts]);
+
   // Form State: Inbound Receipt
   const [receiptWhId, setReceiptWhId] = useState<string>('');
   const [receiptSupplier, setReceiptSupplier] = useState<string>('');
@@ -652,8 +658,8 @@ export const InventoryPage: React.FC = () => {
         </div>
 
         {/* Global Warehouse Filter & Actions */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <div style={{ width: 220 }}>
+        <div className="inventory-header-actions">
+          <div className="inventory-header-dropdown">
             <CustomDropdown
               value={selectedWarehouseId}
               onChange={(val) => setSelectedWarehouseId(val)}
@@ -665,33 +671,35 @@ export const InventoryPage: React.FC = () => {
             />
           </div>
 
-          <button
-            onClick={handleRunReconciliation}
-            className="btn-finovo-secondary"
-            style={{ padding: '8px 12px', fontSize: 12 }}
-            title="Verify Ledger vs Materialized Balances"
-          >
-            <Sparkles size={14} color="#1e56ff" />
-            <span>Audit Ledger</span>
-          </button>
+          <div className="inventory-header-btn-group">
+            <button
+              onClick={handleRunReconciliation}
+              className="btn-finovo-secondary"
+              style={{ padding: '8px 12px', fontSize: 12 }}
+              title="Verify Ledger vs Materialized Balances"
+            >
+              <Sparkles size={14} color="#1e56ff" />
+              <span>Audit Ledger</span>
+            </button>
 
-          <button
-            onClick={() => setShowNewTransferModal(true)}
-            className="btn-finovo-secondary"
-            style={{ padding: '8px 12px', fontSize: 12 }}
-          >
-            <ArrowLeftRight size={14} />
-            <span>New Transfer</span>
-          </button>
+            <button
+              onClick={() => setShowNewTransferModal(true)}
+              className="btn-finovo-secondary"
+              style={{ padding: '8px 12px', fontSize: 12 }}
+            >
+              <ArrowLeftRight size={14} />
+              <span>New Transfer</span>
+            </button>
 
-          <button
-            onClick={() => setShowNewAdjustmentModal(true)}
-            className="btn-finovo-primary"
-            style={{ padding: '8px 14px', fontSize: 12 }}
-          >
-            <Plus size={14} />
-            <span>Adjust Stock</span>
-          </button>
+            <button
+              onClick={() => setShowNewAdjustmentModal(true)}
+              className="btn-finovo-primary"
+              style={{ padding: '8px 14px', fontSize: 12 }}
+            >
+              <Plus size={14} />
+              <span>Adjust Stock</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -813,159 +821,99 @@ export const InventoryPage: React.FC = () => {
       {/* Main Content Workspace Card */}
       <div className="content-card">
         {/* Navigation Tabs Bar */}
-        <div style={{ display: 'flex', borderBottom: '1px solid #e2e8f0', padding: '0 16px', overflowX: 'auto', gap: 4 }}>
+        <div className="finovo-tabs-wrapper" role="tablist">
           <button
             onClick={() => setActiveTab('balances')}
-            className={`tab-btn ${activeTab === 'balances' ? 'active' : ''}`}
-            style={{
-              padding: '14px 16px',
-              fontSize: 13,
-              fontWeight: 600,
-              background: 'none',
-              border: 'none',
-              borderBottom: activeTab === 'balances' ? '2px solid #1e56ff' : '2px solid transparent',
-              color: activeTab === 'balances' ? '#1e56ff' : '#64748b',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              whiteSpace: 'nowrap',
-            }}
+            className={`finovo-tab-btn ${activeTab === 'balances' ? 'active' : ''}`}
+            role="tab"
+            aria-selected={activeTab === 'balances'}
           >
             <Boxes size={16} />
-            <span>Stock Balances & Topology</span>
+            <span className="tab-label-full">Stock Balances & Topology</span>
+            <span className="tab-label-short">Balances</span>
+            <span className="finovo-tab-badge">{kpis.total_skus}</span>
           </button>
 
           <button
             onClick={() => setActiveTab('receipts')}
-            className={`tab-btn ${activeTab === 'receipts' ? 'active' : ''}`}
-            style={{
-              padding: '14px 16px',
-              fontSize: 13,
-              fontWeight: 600,
-              background: 'none',
-              border: 'none',
-              borderBottom: activeTab === 'receipts' ? '2px solid #1e56ff' : '2px solid transparent',
-              color: activeTab === 'receipts' ? '#1e56ff' : '#64748b',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              whiteSpace: 'nowrap',
-            }}
+            className={`finovo-tab-btn ${activeTab === 'receipts' ? 'active' : ''}`}
+            role="tab"
+            aria-selected={activeTab === 'receipts'}
           >
             <Package size={16} />
-            <span>Receiving & Putaway</span>
+            <span className="tab-label-full">Receiving & Putaway</span>
+            <span className="tab-label-short">Receiving</span>
+            <span className={`finovo-tab-badge ${draftReceiptsCount > 0 ? 'badge-amber' : ''}`}>
+              {draftReceiptsCount > 0 ? `${draftReceiptsCount} Draft` : receipts.length}
+            </span>
           </button>
 
           <button
             onClick={() => setActiveTab('transfers')}
-            className={`tab-btn ${activeTab === 'transfers' ? 'active' : ''}`}
-            style={{
-              padding: '14px 16px',
-              fontSize: 13,
-              fontWeight: 600,
-              background: 'none',
-              border: 'none',
-              borderBottom: activeTab === 'transfers' ? '2px solid #1e56ff' : '2px solid transparent',
-              color: activeTab === 'transfers' ? '#1e56ff' : '#64748b',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              whiteSpace: 'nowrap',
-            }}
+            className={`finovo-tab-btn ${activeTab === 'transfers' ? 'active' : ''}`}
+            role="tab"
+            aria-selected={activeTab === 'transfers'}
           >
             <ArrowLeftRight size={16} />
-            <span>Inter-Warehouse Transfers</span>
+            <span className="tab-label-full">Inter-Warehouse Transfers</span>
+            <span className="tab-label-short">Transfers</span>
+            <span className="finovo-tab-badge">
+              {inTransitTransfersCount > 0 ? `${inTransitTransfersCount} Transit` : transfers.length}
+            </span>
           </button>
 
           <button
             onClick={() => setActiveTab('adjustments')}
-            className={`tab-btn ${activeTab === 'adjustments' ? 'active' : ''}`}
-            style={{
-              padding: '14px 16px',
-              fontSize: 13,
-              fontWeight: 600,
-              background: 'none',
-              border: 'none',
-              borderBottom: activeTab === 'adjustments' ? '2px solid #1e56ff' : '2px solid transparent',
-              color: activeTab === 'adjustments' ? '#1e56ff' : '#64748b',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              whiteSpace: 'nowrap',
-            }}
+            className={`finovo-tab-btn ${activeTab === 'adjustments' ? 'active' : ''}`}
+            role="tab"
+            aria-selected={activeTab === 'adjustments'}
           >
             <SlidersHorizontal size={16} />
-            <span>Adjustments & Approvals</span>
+            <span className="tab-label-full">Adjustments & Approvals</span>
+            <span className="tab-label-short">Adjustments</span>
+            <span className={`finovo-tab-badge ${pendingAdjustmentsCount > 0 ? 'badge-amber' : ''}`}>
+              {pendingAdjustmentsCount > 0 ? `${pendingAdjustmentsCount} Pending` : adjustments.length}
+            </span>
           </button>
 
           <button
             onClick={() => setActiveTab('counts')}
-            className={`tab-btn ${activeTab === 'counts' ? 'active' : ''}`}
-            style={{
-              padding: '14px 16px',
-              fontSize: 13,
-              fontWeight: 600,
-              background: 'none',
-              border: 'none',
-              borderBottom: activeTab === 'counts' ? '2px solid #1e56ff' : '2px solid transparent',
-              color: activeTab === 'counts' ? '#1e56ff' : '#64748b',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              whiteSpace: 'nowrap',
-            }}
+            className={`finovo-tab-btn ${activeTab === 'counts' ? 'active' : ''}`}
+            role="tab"
+            aria-selected={activeTab === 'counts'}
           >
             <ClipboardList size={16} />
-            <span>Cycle Counts & Audit</span>
+            <span className="tab-label-full">Cycle Counts & Audit</span>
+            <span className="tab-label-short">Counts</span>
+            <span className={`finovo-tab-badge ${reviewCountsCount > 0 ? 'badge-amber' : ''}`}>
+              {reviewCountsCount > 0 ? `${reviewCountsCount} Review` : cycleCounts.length}
+            </span>
           </button>
 
           <button
             onClick={() => setActiveTab('ledger')}
-            className={`tab-btn ${activeTab === 'ledger' ? 'active' : ''}`}
-            style={{
-              padding: '14px 16px',
-              fontSize: 13,
-              fontWeight: 600,
-              background: 'none',
-              border: 'none',
-              borderBottom: activeTab === 'ledger' ? '2px solid #1e56ff' : '2px solid transparent',
-              color: activeTab === 'ledger' ? '#1e56ff' : '#64748b',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              whiteSpace: 'nowrap',
-            }}
+            className={`finovo-tab-btn ${activeTab === 'ledger' ? 'active' : ''}`}
+            role="tab"
+            aria-selected={activeTab === 'ledger'}
           >
             <Clock size={16} />
-            <span>Movement Ledger</span>
+            <span className="tab-label-full">Movement Ledger</span>
+            <span className="tab-label-short">Ledger</span>
+            <span className="finovo-tab-badge">{movements.length}</span>
           </button>
 
           <button
             onClick={() => setActiveTab('replenishment')}
-            className={`tab-btn ${activeTab === 'replenishment' ? 'active' : ''}`}
-            style={{
-              padding: '14px 16px',
-              fontSize: 13,
-              fontWeight: 600,
-              background: 'none',
-              border: 'none',
-              borderBottom: activeTab === 'replenishment' ? '2px solid #1e56ff' : '2px solid transparent',
-              color: activeTab === 'replenishment' ? '#1e56ff' : '#64748b',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              whiteSpace: 'nowrap',
-            }}
+            className={`finovo-tab-btn ${activeTab === 'replenishment' ? 'active' : ''}`}
+            role="tab"
+            aria-selected={activeTab === 'replenishment'}
           >
             <RotateCcw size={16} />
-            <span>Replenishment Rules</span>
+            <span className="tab-label-full">Replenishment Rules</span>
+            <span className="tab-label-short">Replenish</span>
+            <span className={`finovo-tab-badge ${recommendations.length > 0 ? 'badge-amber' : ''}`}>
+              {recommendations.length > 0 ? `${recommendations.length} Alert` : '0'}
+            </span>
           </button>
         </div>
 
@@ -975,19 +923,9 @@ export const InventoryPage: React.FC = () => {
         {activeTab === 'balances' && (
           <div>
             {/* Filter Bar */}
-            <div
-              style={{
-                padding: '14px 20px',
-                borderBottom: '1px solid #e2e8f0',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                flexWrap: 'wrap',
-                gap: 12,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 260 }}>
-                <div style={{ position: 'relative', width: '100%', maxWidth: 360 }}>
+            <div className="inventory-filter-bar">
+              <div className="inventory-filter-group">
+                <div className="inventory-search-wrap">
                   <Search size={15} style={{ position: 'absolute', left: 12, top: 10, color: '#94a3b8' }} />
                   <input
                     type="text"
@@ -1006,7 +944,7 @@ export const InventoryPage: React.FC = () => {
                   />
                 </div>
 
-                <div style={{ width: 170 }}>
+                <div className="inventory-status-dropdown-wrap">
                   <CustomDropdown
                     value={statusFilter}
                     onChange={(val) => setStatusFilter(val as any)}
@@ -1190,11 +1128,11 @@ export const InventoryPage: React.FC = () => {
         {/* TAB 2: RECEIVING & PUTAWAY */}
         {/* ------------------------------------------------------------- */}
         {activeTab === 'receipts' && (
-          <div style={{ padding: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div className="tab-pane-container">
+            <div className="tab-content-header" style={{ borderBottom: 'none', padding: 0, marginBottom: 16 }}>
               <div>
-                <h3 style={{ margin: '0 0 4px 0', fontSize: 15, fontWeight: 700 }}>Inbound Shipments & Receiving Dock</h3>
-                <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
+                <h3 className="tab-content-header-title">Inbound Shipments & Receiving Dock</h3>
+                <p className="tab-content-header-subtitle">
                   Register arriving vendor purchase orders, verify dock counts, and execute directed putaway to storage bins.
                 </p>
               </div>
@@ -1303,11 +1241,11 @@ export const InventoryPage: React.FC = () => {
         {/* TAB 3: INTER-WAREHOUSE TRANSFERS */}
         {/* ------------------------------------------------------------- */}
         {activeTab === 'transfers' && (
-          <div style={{ padding: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div className="tab-pane-container">
+            <div className="tab-content-header" style={{ borderBottom: 'none', padding: 0, marginBottom: 16 }}>
               <div>
-                <h3 style={{ margin: '0 0 4px 0', fontSize: 15, fontWeight: 700 }}>Inter-Warehouse Transfers & Transit</h3>
-                <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
+                <h3 className="tab-content-header-title">Inter-Warehouse Transfers & Transit</h3>
+                <p className="tab-content-header-subtitle">
                   Track stock movement between fulfillment hubs with full in-transit visibility and destination shortage discrepancy handling.
                 </p>
               </div>
@@ -1391,11 +1329,11 @@ export const InventoryPage: React.FC = () => {
         {/* TAB 4: ADJUSTMENTS & APPROVALS */}
         {/* ------------------------------------------------------------- */}
         {activeTab === 'adjustments' && (
-          <div style={{ padding: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div className="tab-pane-container">
+            <div className="tab-content-header" style={{ borderBottom: 'none', padding: 0, marginBottom: 16 }}>
               <div>
-                <h3 style={{ margin: '0 0 4px 0', fontSize: 15, fontWeight: 700 }}>Stock Adjustments & Separation of Duties</h3>
-                <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
+                <h3 className="tab-content-header-title">Stock Adjustments & Separation of Duties</h3>
+                <p className="tab-content-header-subtitle">
                   Controlled adjustments for damage, recount, or scrap. Requires dual-authorization when policy enforces approval.
                 </p>
               </div>
@@ -1527,11 +1465,11 @@ export const InventoryPage: React.FC = () => {
         {/* TAB 5: CYCLE COUNTS & RECONCILIATION */}
         {/* ------------------------------------------------------------- */}
         {activeTab === 'counts' && (
-          <div style={{ padding: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div className="tab-pane-container">
+            <div className="tab-content-header" style={{ borderBottom: 'none', padding: 0, marginBottom: 16 }}>
               <div>
-                <h3 style={{ margin: '0 0 4px 0', fontSize: 15, fontWeight: 700 }}>Cycle Count Audits & Baseline Freezes</h3>
-                <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
+                <h3 className="tab-content-header-title">Cycle Count Audits & Baseline Freezes</h3>
+                <p className="tab-content-header-subtitle">
                   Execute scheduled inventory counts, verify physical quantities against system snapshots, and reconcile variances.
                 </p>
               </div>
@@ -1624,10 +1562,13 @@ export const InventoryPage: React.FC = () => {
         {/* ------------------------------------------------------------- */}
         {activeTab === 'ledger' && (
           <div>
-            <div style={{ padding: '14px 20px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: '#334155' }}>
-                Immutable Stock Movement Log (Append-Only)
-              </span>
+            <div className="tab-content-header">
+              <div>
+                <h3 className="tab-content-header-title">Immutable Stock Movement Log</h3>
+                <p className="tab-content-header-subtitle">
+                  Append-only audit trail recording every validated receipt, transfer, reservation, and count event.
+                </p>
+              </div>
               <button onClick={fetchMovements} className="btn-finovo-secondary" style={{ padding: '6px 12px', fontSize: 12 }}>
                 <RefreshCw size={13} />
                 <span>Refresh Ledger</span>
@@ -1705,11 +1646,11 @@ export const InventoryPage: React.FC = () => {
         {/* TAB 7: REPLENISHMENT & REORDER */}
         {/* ------------------------------------------------------------- */}
         {activeTab === 'replenishment' && (
-          <div style={{ padding: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div className="tab-pane-container">
+            <div className="tab-content-header" style={{ borderBottom: 'none', padding: 0, marginBottom: 16 }}>
               <div>
-                <h3 style={{ margin: '0 0 4px 0', fontSize: 15, fontWeight: 700 }}>Automated Replenishment Recommendations</h3>
-                <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
+                <h3 className="tab-content-header-title">Automated Replenishment Recommendations</h3>
+                <p className="tab-content-header-subtitle">
                   Deterministic reorder recommendations calculated via: Effective Position = (On-Hand + In-Transit - Reserved) vs Reorder Point.
                 </p>
               </div>
@@ -1812,7 +1753,7 @@ export const InventoryPage: React.FC = () => {
             ) : skuDetail ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
                 {/* Metrics Row */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
                   <div style={{ padding: 12, borderRadius: 8, backgroundColor: '#f8fafc', border: '1px solid #e2e8f0' }}>
                     <span style={{ fontSize: 11, color: '#64748b' }}>Total On-Hand</span>
                     <h4 style={{ margin: '4px 0 0 0', fontSize: 18, fontWeight: 700 }}>{skuDetail.total_on_hand} units</h4>
@@ -1834,56 +1775,60 @@ export const InventoryPage: React.FC = () => {
                 {/* Warehouse Breakdown */}
                 <div>
                   <h4 style={{ margin: '0 0 8px 0', fontSize: 13, fontWeight: 700 }}>Warehouse Facility Breakdown</h4>
-                  <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', border: '1px solid #e2e8f0', borderRadius: 8 }}>
-                    <thead>
-                      <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
-                        <th style={{ padding: 8 }}>Warehouse</th>
-                        <th style={{ padding: 8, textAlign: 'right' }}>On-Hand</th>
-                        <th style={{ padding: 8, textAlign: 'right' }}>Reserved</th>
-                        <th style={{ padding: 8, textAlign: 'right' }}>Available</th>
-                        <th style={{ padding: 8, textAlign: 'right' }}>In-Transit</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {skuDetail.warehouse_balances.map((wh) => (
-                        <tr key={wh.warehouse_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                          <td style={{ padding: 8, fontWeight: 600 }}>{wh.warehouse_name}</td>
-                          <td style={{ padding: 8, textAlign: 'right' }}>{wh.on_hand}</td>
-                          <td style={{ padding: 8, textAlign: 'right', color: '#b45309' }}>{wh.reserved}</td>
-                          <td style={{ padding: 8, textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>{wh.available}</td>
-                          <td style={{ padding: 8, textAlign: 'right', color: '#2563eb' }}>{wh.in_transit}</td>
+                  <div className="table-responsive-wrapper">
+                    <table style={{ width: '100%', minWidth: 420, fontSize: 12, borderCollapse: 'collapse', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                      <thead>
+                        <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
+                          <th style={{ padding: 8 }}>Warehouse</th>
+                          <th style={{ padding: 8, textAlign: 'right' }}>On-Hand</th>
+                          <th style={{ padding: 8, textAlign: 'right' }}>Reserved</th>
+                          <th style={{ padding: 8, textAlign: 'right' }}>Available</th>
+                          <th style={{ padding: 8, textAlign: 'right' }}>In-Transit</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {skuDetail.warehouse_balances.map((wh) => (
+                          <tr key={wh.warehouse_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                            <td style={{ padding: 8, fontWeight: 600 }}>{wh.warehouse_name}</td>
+                            <td style={{ padding: 8, textAlign: 'right' }}>{wh.on_hand}</td>
+                            <td style={{ padding: 8, textAlign: 'right', color: '#b45309' }}>{wh.reserved}</td>
+                            <td style={{ padding: 8, textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>{wh.available}</td>
+                            <td style={{ padding: 8, textAlign: 'right', color: '#2563eb' }}>{wh.in_transit}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
 
                 {/* Physical Location Bins & Lots */}
                 {skuDetail.location_balances.length > 0 && (
                   <div>
                     <h4 style={{ margin: '0 0 8px 0', fontSize: 13, fontWeight: 700 }}>Physical Storage Bins & Lots</h4>
-                    <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', border: '1px solid #e2e8f0', borderRadius: 8 }}>
-                      <thead>
-                        <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
-                          <th style={{ padding: 8 }}>Bin Location</th>
-                          <th style={{ padding: 8 }}>Type</th>
-                          <th style={{ padding: 8 }}>Lot / Batch</th>
-                          <th style={{ padding: 8 }}>Condition</th>
-                          <th style={{ padding: 8, textAlign: 'right' }}>Quantity</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {skuDetail.location_balances.map((loc) => (
-                          <tr key={loc.location_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                            <td style={{ padding: 8, fontFamily: 'monospace', fontWeight: 600 }}>{loc.location_code}</td>
-                            <td style={{ padding: 8, textTransform: 'capitalize' }}>{loc.location_type}</td>
-                            <td style={{ padding: 8 }}>{loc.lot_number || 'Standard'}</td>
-                            <td style={{ padding: 8 }}>{loc.condition}</td>
-                            <td style={{ padding: 8, textAlign: 'right', fontWeight: 600 }}>{loc.quantity}</td>
+                    <div className="table-responsive-wrapper">
+                      <table style={{ width: '100%', minWidth: 420, fontSize: 12, borderCollapse: 'collapse', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                        <thead>
+                          <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
+                            <th style={{ padding: 8 }}>Bin Location</th>
+                            <th style={{ padding: 8 }}>Type</th>
+                            <th style={{ padding: 8 }}>Lot / Batch</th>
+                            <th style={{ padding: 8 }}>Condition</th>
+                            <th style={{ padding: 8, textAlign: 'right' }}>Quantity</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {skuDetail.location_balances.map((loc) => (
+                            <tr key={loc.location_id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: 8, fontFamily: 'monospace', fontWeight: 600 }}>{loc.location_code}</td>
+                              <td style={{ padding: 8, textTransform: 'capitalize' }}>{loc.location_type}</td>
+                              <td style={{ padding: 8 }}>{loc.lot_number || 'Standard'}</td>
+                              <td style={{ padding: 8 }}>{loc.condition}</td>
+                              <td style={{ padding: 8, textAlign: 'right', fontWeight: 600 }}>{loc.quantity}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1915,7 +1860,7 @@ export const InventoryPage: React.FC = () => {
             </div>
 
             <form onSubmit={handleCreateReceipt} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+              <div className="finovo-form-grid-2">
                 <div>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
                     Receiving Warehouse Hub *
@@ -1941,7 +1886,7 @@ export const InventoryPage: React.FC = () => {
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+              <div className="finovo-form-grid-2">
                 <div>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
                     Purchase Order / Tracking #
@@ -1985,8 +1930,8 @@ export const InventoryPage: React.FC = () => {
                   </button>
                 </div>
 
-                <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
-                  <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                <div className="table-responsive-wrapper" style={{ border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                  <table style={{ width: '100%', minWidth: 460, fontSize: 12, borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
                         <th style={{ padding: 8 }}>Product SKU *</th>
@@ -2109,8 +2054,8 @@ export const InventoryPage: React.FC = () => {
                 Stock received at dock will be placed into the warehouse receiving stage. Damaged or quarantined stock will be isolated from fulfillable availability.
               </div>
 
-              <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
-                <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+              <div className="table-responsive-wrapper" style={{ border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                <table style={{ width: '100%', minWidth: 560, fontSize: 12, borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left' }}>
                       <th style={{ padding: 8 }}>Product & SKU</th>
@@ -2306,7 +2251,7 @@ export const InventoryPage: React.FC = () => {
             </div>
 
             <form onSubmit={handleCreateTransfer} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+              <div className="finovo-form-grid-2">
                 <div>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
                     Source Warehouse Hub *
@@ -2343,7 +2288,7 @@ export const InventoryPage: React.FC = () => {
                 />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+              <div className="finovo-form-grid-2">
                 <div>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
                     Transfer Quantity *
@@ -2520,7 +2465,7 @@ export const InventoryPage: React.FC = () => {
                 />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+              <div className="finovo-form-grid-2">
                 <div>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
                     Adjustment Type *
@@ -2644,7 +2589,7 @@ export const InventoryPage: React.FC = () => {
                 />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+              <div className="finovo-form-grid-2">
                 <div>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
                     Audit Scope Type *
@@ -2746,7 +2691,7 @@ export const InventoryPage: React.FC = () => {
                 />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
                 <div>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
                     Reorder Point *
@@ -2788,7 +2733,7 @@ export const InventoryPage: React.FC = () => {
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+              <div className="finovo-form-grid-2">
                 <div>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
                     Preferred Supplier
