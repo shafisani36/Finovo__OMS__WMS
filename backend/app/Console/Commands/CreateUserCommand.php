@@ -60,7 +60,7 @@ class CreateUserCommand extends Command
         ], [
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
             'name' => ['required', 'string', 'max:255'],
-            'password' => ['required', 'string', 'min:12', 'max:128'],
+            'password' => ['required', 'string', 'min:6', 'max:128'],
         ]);
 
         if ($validator->fails()) {
