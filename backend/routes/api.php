@@ -52,10 +52,27 @@ Route::prefix('v1')->group(function () {
         Route::post('stores/{store}/sync', [StoreController::class, 'sync']);
         Route::delete('stores/{store}', [StoreController::class, 'destroy']);
 
-        // Warehouses & Locations
+        // Warehouses & Configuration Lifecycle
+        Route::get('warehouses/metadata', [WarehouseController::class, 'metadata']);
         Route::get('warehouses', [WarehouseController::class, 'index']);
         Route::post('warehouses', [WarehouseController::class, 'store']);
         Route::get('warehouses/{warehouse}', [WarehouseController::class, 'show']);
+        Route::put('warehouses/{warehouse}', [WarehouseController::class, 'update']);
+        Route::get('warehouses/{warehouse}/readiness', [WarehouseController::class, 'readiness']);
+        Route::post('warehouses/{warehouse}/activate', [WarehouseController::class, 'activate']);
+        Route::post('warehouses/{warehouse}/deactivate', [WarehouseController::class, 'deactivate']);
+        Route::post('warehouses/{warehouse}/begin-closure', [WarehouseController::class, 'beginClosure']);
+        Route::get('warehouses/{warehouse}/locations', [WarehouseController::class, 'locations']);
+        Route::post('warehouses/{warehouse}/locations', [WarehouseController::class, 'storeLocation']);
+        Route::put('warehouses/{warehouse}/locations/{location}', [WarehouseController::class, 'updateLocation']);
+        Route::delete('warehouses/{warehouse}/locations/{location}', [WarehouseController::class, 'destroyLocation']);
+        Route::post('warehouses/{warehouse}/locations/starter-layout', [WarehouseController::class, 'starterLayout']);
+        Route::get('warehouses/{warehouse}/staff', [WarehouseController::class, 'staff']);
+        Route::post('warehouses/{warehouse}/staff', [WarehouseController::class, 'assignStaff']);
+        Route::delete('warehouses/{warehouse}/staff/{staffAssignment}', [WarehouseController::class, 'removeStaff']);
+        Route::post('warehouses/{warehouse}/opening-stock/preview', [WarehouseController::class, 'previewOpeningStock']);
+        Route::post('warehouses/{warehouse}/opening-stock/commit', [WarehouseController::class, 'commitOpeningStock']);
+        Route::get('warehouses/{warehouse}/audit-logs', [WarehouseController::class, 'auditLogs']);
 
         // Catalog & Products
         Route::get('products', [ProductController::class, 'index']);
