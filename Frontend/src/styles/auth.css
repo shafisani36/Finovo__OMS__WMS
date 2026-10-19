@@ -219,11 +219,11 @@ body {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: calc(var(--hero-text-w) + 60px);
+  left: calc(var(--hero-text-w) - 10px);
   right: 0;
   display: flex;
   align-items: flex-end;
-  justify-content: center;
+  justify-content: flex-start;
   z-index: 1;
   pointer-events: none;
 }
@@ -233,7 +233,7 @@ body {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  object-position: center bottom;
+  object-position: left bottom; /* sits close to the heading, like Figma */
 }
 
 .bottom-wave-accent {
@@ -1039,8 +1039,13 @@ body {
     inset: auto 0 0 0;
     height: 62vh;
     left: 0;
+    justify-content: center;
     opacity: 0.3;
     z-index: 0;
+  }
+
+  .hero-illustration-img {
+    object-position: center bottom;
   }
 
   .bottom-wave-accent {
