@@ -165,7 +165,7 @@ export const LoginPage: React.FC = () => {
                 </svg>
               }
             >
-              Sign in with Microsoft
+              Microsoft
             </Button>
 
             <Button
@@ -175,7 +175,7 @@ export const LoginPage: React.FC = () => {
               onClick={() => alert('SAML / OIDC Single Sign-On is available for corporate domain users.')}
               leftIcon={<Shield size={16} color="#64748b" aria-hidden="true" />}
             >
-              Sign in with SSO
+              Enterprise SSO
             </Button>
           </div>
         </form>
