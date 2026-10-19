@@ -6,12 +6,15 @@ use App\Http\Controllers\Api\V1\CycleCountController;
 use App\Http\Controllers\Api\V1\InventoryController;
 use App\Http\Controllers\Api\V1\InventoryReceiptController;
 use App\Http\Controllers\Api\V1\InventoryTransferController;
+use App\Http\Controllers\Api\V1\GoodsReceivedNoteController;
 use App\Http\Controllers\Api\V1\OperationsController;
 use App\Http\Controllers\Api\V1\OrderController;
 use App\Http\Controllers\Api\V1\PasswordChangeController;
 use App\Http\Controllers\Api\V1\PasswordRecoveryController;
 use App\Http\Controllers\Api\V1\PickingController;
 use App\Http\Controllers\Api\V1\ProductController;
+use App\Http\Controllers\Api\V1\PurchaseOrderController;
+use App\Http\Controllers\Api\V1\PurchaseRequisitionController;
 use App\Http\Controllers\Api\V1\ReplenishmentController;
 use App\Http\Controllers\Api\V1\StockAdjustmentController;
 use App\Http\Controllers\Api\V1\StockMovementController;
@@ -138,6 +141,38 @@ Route::prefix('v1')->group(function () {
         Route::put('picking/{pickTask}/status', [PickingController::class, 'updateStatus']);
         Route::post('picking/{pickTask}/complete', [PickingController::class, 'complete']);
         Route::post('picking/bulk-update', [PickingController::class, 'bulkUpdate']);
+
+        // Purchase Requisitions (Procurement Planning & Approval)
+        Route::prefix('purchase-requisitions')->group(function () {
+            Route::get('/', [PurchaseRequisitionController::class, 'index']);
+            Route::post('/', [PurchaseRequisitionController::class, 'store']);
+            Route::get('stock-context', [PurchaseRequisitionController::class, 'stockContext']);
+            Route::get('{id}', [PurchaseRequisitionController::class, 'show']);
+            Route::post('{id}/submit', [PurchaseRequisitionController::class, 'submit']);
+            Route::post('{id}/approve', [PurchaseRequisitionController::class, 'approve']);
+            Route::post('{id}/reject', [PurchaseRequisitionController::class, 'reject']);
+            Route::post('{id}/convert-po', [PurchaseRequisitionController::class, 'convertToPo']);
+            Route::get('{id}/pdf', [PurchaseRequisitionController::class, 'downloadPdf']);
+        });
+
+        // Purchase Orders (Supplier Commitments)
+        Route::prefix('purchase-orders')->group(function () {
+            Route::get('/', [PurchaseOrderController::class, 'index']);
+            Route::post('/', [PurchaseOrderController::class, 'store']);
+            Route::get('{id}', [PurchaseOrderController::class, 'show']);
+            Route::post('{id}/issue', [PurchaseOrderController::class, 'issue']);
+            Route::post('{id}/cancel', [PurchaseOrderController::class, 'cancel']);
+        });
+
+        // Goods Received Notes (Physical Receiving, Inspection & Authoritative Stock Posting)
+        Route::prefix('goods-received-notes')->group(function () {
+            Route::get('/', [GoodsReceivedNoteController::class, 'index']);
+            Route::post('/', [GoodsReceivedNoteController::class, 'store']);
+            Route::get('{id}', [GoodsReceivedNoteController::class, 'show']);
+            Route::put('{id}/inspect', [GoodsReceivedNoteController::class, 'inspect']);
+            Route::post('{id}/post', [GoodsReceivedNoteController::class, 'postToInventory']);
+            Route::get('{id}/pdf', [GoodsReceivedNoteController::class, 'downloadPdf']);
+        });
 
         // Role-guarded overview
         Route::get('admin/overview', [OperationsController::class, 'adminOverview'])->middleware('role:admin');

@@ -1,4 +1,4 @@
-import apiClient from './apiClient';
+import apiClient, { getAuthToken } from './apiClient';
 
 export interface StoreModel {
   id: number;
@@ -829,6 +829,269 @@ export const omsService = {
   async createProduct(payload: { name: string; sku: string; category?: string; barcode?: string; price?: number }) {
     const { data } = await apiClient.post('/products', payload);
     return data;
+  },
+
+  // ==========================================
+  // Purchase Requisitions (PR)
+  // ==========================================
+  async getPurchaseRequisitions(params?: {
+    search?: string;
+    status?: string;
+    warehouse_id?: number;
+    priority?: string;
+    page?: number;
+    per_page?: number;
+  }) {
+    const { data } = await apiClient.get('/purchase-requisitions', { params });
+    return data;
+  },
+
+  async createPurchaseRequisition(payload: {
+    warehouse_id: number;
+    delivery_location_id?: number;
+    department?: string;
+    priority?: 'low' | 'normal' | 'high' | 'urgent';
+    required_by_date?: string;
+    purpose?: string;
+    justification?: string;
+    notes?: string;
+    currency?: string;
+    tax_rate?: number;
+    items: Array<{
+      product_variant_id: number;
+      product_id?: number;
+      sku: string;
+      product_name: string;
+      requested_quantity: number;
+      estimated_unit_price: number;
+      uom?: string;
+      notes?: string;
+    }>;
+  }) {
+    const { data } = await apiClient.post('/purchase-requisitions', payload);
+    return data;
+  },
+
+  async getPurchaseRequisition(id: number) {
+    const { data } = await apiClient.get(`/purchase-requisitions/${id}`);
+    return data;
+  },
+
+  async submitPurchaseRequisition(id: number, comments?: string) {
+    const { data } = await apiClient.post(`/purchase-requisitions/${id}/submit`, { comments });
+    return data;
+  },
+
+  async approvePurchaseRequisition(id: number, approved_quantities?: Record<number, number>, comments?: string) {
+    const { data } = await apiClient.post(`/purchase-requisitions/${id}/approve`, {
+      approved_quantities,
+      comments,
+    });
+    return data;
+  },
+
+  async rejectPurchaseRequisition(id: number, reason: string, comments?: string) {
+    const { data } = await apiClient.post(`/purchase-requisitions/${id}/reject`, {
+      reason,
+      comments,
+    });
+    return data;
+  },
+
+  async convertPrToPo(id: number, payload: {
+    supplier_name: string;
+    supplier_email?: string;
+    supplier_contact?: string;
+    warehouse_id?: number;
+    order_date?: string;
+    expected_delivery_date?: string;
+    payment_terms?: string;
+    currency?: string;
+    notes?: string;
+    items?: Array<{
+      purchase_requisition_item_id: number;
+      ordered_quantity: number;
+      unit_cost?: number;
+    }>;
+  }) {
+    const { data } = await apiClient.post(`/purchase-requisitions/${id}/convert-po`, payload);
+    return data;
+  },
+
+  async getStockPlanningContext(warehouseId: number, variantId: number) {
+    const { data } = await apiClient.get('/purchase-requisitions/stock-context', {
+      params: { warehouse_id: warehouseId, variant_id: variantId },
+    });
+    return data;
+  },
+
+  async downloadPrPdf(id: number, filename?: string) {
+    const token = getAuthToken();
+    const response = await fetch(`/api/v1/purchase-requisitions/${id}/pdf`, {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      credentials: 'include',
+    });
+    if (!response.ok) throw new Error('Failed to download PR PDF');
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename || `PR-${id}.pdf`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
+  // ==========================================
+  // Purchase Orders (PO)
+  // ==========================================
+  async getPurchaseOrders(params?: {
+    search?: string;
+    status?: string;
+    warehouse_id?: number;
+    page?: number;
+    per_page?: number;
+  }) {
+    const { data } = await apiClient.get('/purchase-orders', { params });
+    return data;
+  },
+
+  async createPurchaseOrder(payload: {
+    supplier_name: string;
+    supplier_email?: string;
+    supplier_contact?: string;
+    warehouse_id: number;
+    purchase_requisition_id?: number;
+    order_date?: string;
+    expected_delivery_date?: string;
+    payment_terms?: string;
+    currency?: string;
+    tax_rate?: number;
+    notes?: string;
+    items: Array<{
+      product_variant_id: number;
+      sku: string;
+      product_name: string;
+      ordered_quantity: number;
+      unit_cost: number;
+      uom?: string;
+      notes?: string;
+    }>;
+  }) {
+    const { data } = await apiClient.post('/purchase-orders', payload);
+    return data;
+  },
+
+  async getPurchaseOrder(id: number) {
+    const { data } = await apiClient.get(`/purchase-orders/${id}`);
+    return data;
+  },
+
+  async issuePurchaseOrder(id: number) {
+    const { data } = await apiClient.post(`/purchase-orders/${id}/issue`);
+    return data;
+  },
+
+  async cancelPurchaseOrder(id: number, reason?: string) {
+    const { data } = await apiClient.post(`/purchase-orders/${id}/cancel`, { reason });
+    return data;
+  },
+
+  // ==========================================
+  // Goods Received Notes (GRN)
+  // ==========================================
+  async getGoodsReceivedNotes(params?: {
+    search?: string;
+    status?: string;
+    warehouse_id?: number;
+    purchase_order_id?: number;
+    page?: number;
+    per_page?: number;
+  }) {
+    const { data } = await apiClient.get('/goods-received-notes', { params });
+    return data;
+  },
+
+  async createGoodsReceivedNote(payload: {
+    purchase_order_id: number;
+    warehouse_id?: number;
+    receiving_location_id?: number;
+    supplier_delivery_note?: string;
+    carrier?: string;
+    tracking_or_vehicle_number?: string;
+    received_at?: string;
+    notes?: string;
+    discrepancy_summary?: string;
+    allow_over_receipt?: boolean;
+    items?: Array<{
+      purchase_order_item_id: number;
+      received_quantity: number;
+      accepted_quantity: number;
+      damaged_quantity?: number;
+      quarantined_quantity?: number;
+      rejected_quantity?: number;
+      pending_inspection_quantity?: number;
+      destination_location_id?: number;
+      lot_number?: string;
+      expiry_date?: string;
+      discrepancy_reason?: string;
+      notes?: string;
+    }>;
+  }) {
+    const { data } = await apiClient.post('/goods-received-notes', payload);
+    return data;
+  },
+
+  async getGoodsReceivedNote(id: number) {
+    const { data } = await apiClient.get(`/goods-received-notes/${id}`);
+    return data;
+  },
+
+  async inspectGoodsReceivedNote(id: number, payload: {
+    notes?: string;
+    discrepancy_summary?: string;
+    items: Array<{
+      id: number;
+      accepted_quantity: number;
+      damaged_quantity?: number;
+      quarantined_quantity?: number;
+      rejected_quantity?: number;
+      pending_inspection_quantity?: number;
+      lot_number?: string;
+      expiry_date?: string;
+      discrepancy_reason?: string;
+    }>;
+  }) {
+    const { data } = await apiClient.put(`/goods-received-notes/${id}/inspect`, payload);
+    return data;
+  },
+
+  async postGrnToInventory(id: number) {
+    const { data } = await apiClient.post(`/goods-received-notes/${id}/post`);
+    return data;
+  },
+
+  async downloadGrnPdf(id: number, filename?: string) {
+    const token = getAuthToken();
+    const response = await fetch(`/api/v1/goods-received-notes/${id}/pdf`, {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      credentials: 'include',
+    });
+    if (!response.ok) throw new Error('Failed to download GRN PDF');
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename || `GRN-${id}.pdf`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
   },
 };
 

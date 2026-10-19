@@ -70,4 +70,20 @@ class Organization extends Model
     {
         return $this->hasMany(PickTask::class);
     }
+
+    public function purchaseRequisitions(): HasMany
+    {
+        return $this->hasMany(PurchaseRequisition::class);
+    }
+
+    public function purchaseOrders(): HasMany
+    {
+        return $this->hasMany(PurchaseOrder::class);
+    }
+
+    public function goodsReceivedNotes(): HasMany
+    {
+        return $this->hasMany(GoodsReceivedNote::class);
+    }
 }
+

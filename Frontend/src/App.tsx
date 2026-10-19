@@ -121,6 +121,8 @@ export const App: React.FC = () => {
             <Route path="/shipments" element={<ShipmentsPage />} />
             <Route path="/picking" element={<PickingPage />} />
             <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
+            <Route path="/purchase-requisitions" element={<PurchaseOrdersPage />} />
+            <Route path="/goods-received-notes" element={<PurchaseOrdersPage />} />
             <Route path="/stock-movements" element={<StockMovementsPage />} />
             <Route path="/returns" element={<ReturnsPage />} />
             <Route path="/customers" element={<CustomersPage />} />
