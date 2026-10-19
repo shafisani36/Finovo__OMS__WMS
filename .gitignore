@@ -1,0 +1,25 @@
+# Environment files
+.env
+.env.backup
+.env.production
+
+# Dependencies
+**/node_modules/
+**/vendor/
+
+# Build and dist
+**/dist/
+**/build/
+
+# Storage and logs
+backend/storage/*.key
+backend/storage/logs/*.log
+backend/storage/framework/cache/*
+backend/storage/framework/sessions/*
+backend/storage/framework/views/*
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
