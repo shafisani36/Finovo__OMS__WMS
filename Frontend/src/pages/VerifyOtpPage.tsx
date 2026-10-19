@@ -14,7 +14,6 @@ interface LocationState {
   destination?: string;
   expires_in_seconds?: number;
   resend_cooldown_seconds?: number;
-  dev_code?: string;
 }
 
 export const VerifyOtpPage: React.FC = () => {
@@ -26,7 +25,6 @@ export const VerifyOtpPage: React.FC = () => {
   const [challengeId, setChallengeId] = useState<string>(state.challenge_id || '');
   const [destination, setDestination] = useState<string>(state.destination || 'your email');
   const [code, setCode] = useState<string>('');
-  const [devCode, setDevCode] = useState<string | undefined>(state.dev_code);
 
   const [secondsRemaining, setSecondsRemaining] = useState<number>(
     state.resend_cooldown_seconds || 60
@@ -99,9 +97,6 @@ export const VerifyOtpPage: React.FC = () => {
       setDestination(response.data.destination);
       setSecondsRemaining(response.data.resend_cooldown_seconds || 60);
       setCode('');
-      if (response.data.dev_code) {
-        setDevCode(response.data.dev_code);
-      }
       setSuccessMessage('A fresh verification code has been dispatched to your email.');
     } catch (err) {
       if (err instanceof ApiError) {
@@ -131,38 +126,6 @@ export const VerifyOtpPage: React.FC = () => {
           <p className="card-subtitle">
             Enter the 6-digit numeric verification code dispatched to <strong style={{ color: '#0f172a' }}>{destination}</strong>.
           </p>
-          {devCode && (
-            <div style={{
-              marginTop: '12px',
-              padding: '8px 12px',
-              borderRadius: '8px',
-              background: '#f0fdf4',
-              border: '1px solid #bbf7d0',
-              fontSize: '12px',
-              color: '#166534',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}>
-              <span><strong>Local Dev Code:</strong> <code style={{ fontSize: '13px', fontWeight: 700, letterSpacing: '0.05em' }}>{devCode}</code></span>
-              <button
-                type="button"
-                onClick={() => { setCode(devCode); handleVerify(devCode); }}
-                style={{
-                  background: '#16a34a',
-                  color: '#fff',
-                  border: 'none',
-                  padding: '3px 10px',
-                  borderRadius: '5px',
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  cursor: 'pointer'
-                }}
-              >
-                Auto-fill
-              </button>
-            </div>
-          )}
         </div>
 
         {errorMessage && <Alert type="error" message={errorMessage} />}

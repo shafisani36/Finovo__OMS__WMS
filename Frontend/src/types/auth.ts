@@ -25,7 +25,6 @@ export interface LoginResponseData {
   destination: string;
   expires_in_seconds: number;
   resend_cooldown_seconds: number;
-  dev_code?: string;
 }
 
 export interface VerifyOtpResponseData {
@@ -38,7 +37,6 @@ export interface ResendOtpResponseData {
   destination: string;
   expires_in_seconds: number;
   resend_cooldown_seconds: number;
-  dev_code?: string;
 }
 
 export interface ForgotPasswordResponseData {

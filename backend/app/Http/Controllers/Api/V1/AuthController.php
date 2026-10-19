@@ -72,22 +72,16 @@ class AuthController extends Controller
             'challenge_id' => $challenge->challenge_id,
         ], $request);
 
-        $responseData = [
-            'requires_otp' => true,
-            'challenge_id' => $challenge->challenge_id,
-            'destination' => $this->otpService->maskEmail($user->email),
-            'expires_in_seconds' => OtpService::LOGIN_EXPIRY_MINUTES * 60,
-            'resend_cooldown_seconds' => OtpService::RESEND_COOLDOWN_SECONDS,
-        ];
-
-        if (config('app.env') === 'local' && isset($challenge->raw_code)) {
-            $responseData['dev_code'] = $challenge->raw_code;
-        }
-
         return response()->json([
             'success' => true,
             'message' => 'Verification code sent to your registered email.',
-            'data' => $responseData,
+            'data' => [
+                'requires_otp' => true,
+                'challenge_id' => $challenge->challenge_id,
+                'destination' => $this->otpService->maskEmail($user->email),
+                'expires_in_seconds' => OtpService::LOGIN_EXPIRY_MINUTES * 60,
+                'resend_cooldown_seconds' => OtpService::RESEND_COOLDOWN_SECONDS,
+            ],
             'errors' => null,
         ]);
     }
@@ -165,21 +159,15 @@ class AuthController extends Controller
 
         $newChallenge = $this->otpService->resendChallenge($challengeId, $request);
 
-        $responseData = [
-            'challenge_id' => $newChallenge->challenge_id,
-            'destination' => $this->otpService->maskEmail($newChallenge->destination),
-            'expires_in_seconds' => OtpService::LOGIN_EXPIRY_MINUTES * 60,
-            'resend_cooldown_seconds' => OtpService::RESEND_COOLDOWN_SECONDS,
-        ];
-
-        if (config('app.env') === 'local' && isset($newChallenge->raw_code)) {
-            $responseData['dev_code'] = $newChallenge->raw_code;
-        }
-
         return response()->json([
             'success' => true,
             'message' => 'A new verification code has been dispatched to your email.',
-            'data' => $responseData,
+            'data' => [
+                'challenge_id' => $newChallenge->challenge_id,
+                'destination' => $this->otpService->maskEmail($newChallenge->destination),
+                'expires_in_seconds' => OtpService::LOGIN_EXPIRY_MINUTES * 60,
+                'resend_cooldown_seconds' => OtpService::RESEND_COOLDOWN_SECONDS,
+            ],
             'errors' => null,
         ]);
     }
