@@ -2097,21 +2097,22 @@ export const InventoryPage: React.FC = () => {
                               style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12, textAlign: 'right', boxSizing: 'border-box' }}
                             />
                           </td>
-                          <td style={{ padding: 8 }}>
-                            <select
+                          <td style={{ padding: 8, minWidth: 130 }}>
+                            <CustomDropdown
                               value={row.condition}
-                              onChange={(e) => {
+                              onChange={(val) => {
                                 setConfirmRows({
                                   ...confirmRows,
-                                  [item.id]: { ...row, condition: e.target.value },
+                                  [item.id]: { ...row, condition: val },
                                 });
                               }}
-                              style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: 12, boxSizing: 'border-box' }}
-                            >
-                              <option value="available">Available</option>
-                              <option value="damaged">Damaged</option>
-                              <option value="quarantined">Quarantine</option>
-                            </select>
+                              options={[
+                                { value: 'available', label: 'Available' },
+                                { value: 'damaged', label: 'Damaged' },
+                                { value: 'quarantined', label: 'Quarantine' },
+                              ]}
+                              size="sm"
+                            />
                           </td>
                           <td style={{ padding: 8 }}>
                             <input
@@ -2470,15 +2471,16 @@ export const InventoryPage: React.FC = () => {
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
                     Adjustment Type *
                   </label>
-                  <select
+                  <CustomDropdown
                     value={adjType}
-                    onChange={(e) => setAdjType(e.target.value as any)}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
-                  >
-                    <option value="add">Add Stock (+)</option>
-                    <option value="subtract">Deduct Stock (-)</option>
-                    <option value="recount">Recount / Set Absolute (=)</option>
-                  </select>
+                    onChange={(val) => setAdjType(val as 'add' | 'subtract' | 'recount')}
+                    options={[
+                      { value: 'add', label: 'Add Stock (+)' },
+                      { value: 'subtract', label: 'Deduct Stock (-)' },
+                      { value: 'recount', label: 'Recount / Set Absolute (=)' },
+                    ]}
+                    size="sm"
+                  />
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
@@ -2499,19 +2501,20 @@ export const InventoryPage: React.FC = () => {
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
                   Adjustment Reason Category *
                 </label>
-                <select
+                <CustomDropdown
                   value={adjReason}
-                  onChange={(e) => setAdjReason(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
-                >
-                  <option value="Cycle Count Variance">Cycle Count Variance</option>
-                  <option value="Damaged Stock">Damaged Stock</option>
-                  <option value="Expired / Spoilage">Expired / Spoilage</option>
-                  <option value="Found Inventory">Found Inventory</option>
-                  <option value="Internal Use / Sample">Internal Use / Sample</option>
-                  <option value="Scrap / Disposal">Scrap / Disposal</option>
-                  <option value="Correction">Data Correction</option>
-                </select>
+                  onChange={(val) => setAdjReason(val)}
+                  options={[
+                    { value: 'Cycle Count Variance', label: 'Cycle Count Variance' },
+                    { value: 'Damaged Stock', label: 'Damaged Stock' },
+                    { value: 'Expired / Spoilage', label: 'Expired / Spoilage' },
+                    { value: 'Found Inventory', label: 'Found Inventory' },
+                    { value: 'Internal Use / Sample', label: 'Internal Use / Sample' },
+                    { value: 'Scrap / Disposal', label: 'Scrap / Disposal' },
+                    { value: 'Correction', label: 'Data Correction' },
+                  ]}
+                  size="sm"
+                />
               </div>
 
               <div>
@@ -2594,15 +2597,16 @@ export const InventoryPage: React.FC = () => {
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
                     Audit Scope Type *
                   </label>
-                  <select
+                  <CustomDropdown
                     value={countScope}
-                    onChange={(e) => setCountScope(e.target.value as any)}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
-                  >
-                    <option value="full">Full Facility Audit</option>
-                    <option value="zone">Specific Zone</option>
-                    <option value="location">Specific Storage Bins</option>
-                  </select>
+                    onChange={(val) => setCountScope(val as 'full' | 'zone' | 'location')}
+                    options={[
+                      { value: 'full', label: 'Full Facility Audit' },
+                      { value: 'zone', label: 'Specific Zone' },
+                      { value: 'location', label: 'Specific Storage Bins' },
+                    ]}
+                    size="sm"
+                  />
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
