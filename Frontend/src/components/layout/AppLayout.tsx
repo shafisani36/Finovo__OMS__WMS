@@ -51,10 +51,6 @@ export const AppLayout: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <NavLink to="/dashboard" className="sidebar-brand">
             <Logo />
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', lineHeight: 1.1 }}>Finovo</span>
-              <span style={{ fontSize: 11, fontWeight: 500, color: '#94a3b8' }}>OMS / WMS</span>
-            </div>
           </NavLink>
           {mobileMenuOpen && (
             <button
@@ -280,7 +276,7 @@ export const AppLayout: React.FC = () => {
                     {user?.name || 'Admin user'}
                   </span>
                   <span style={{ fontSize: 11, color: '#94a3b8' }}>
-                    {user?.role === 'admin' ? 'Agents' : 'Operator'}
+                    {user?.role_label || (user?.role === 'admin' ? 'Administrator' : 'Operator')}
                   </span>
                 </div>
               </div>

@@ -735,3 +735,125 @@ body {
     padding: 20px 16px;
   }
 }
+
+/* Sidebar logo: one logo only, sized for the sidebar */
+.sidebar-brand .brand-logo-icon {
+  width: 40px;
+  height: 40px;
+}
+
+.sidebar-brand .brand-name {
+  font-size: 20px;
+}
+
+.sidebar-brand .brand-sub {
+  font-size: 12px;
+}
+
+/* ==========================================================================
+   Mobile & tablet fixes (tested: 1920, 1366, 1024, 768, 390, 360)
+   ========================================================================== */
+
+@media (max-width: 1024px) {
+  .app-topbar {
+    padding: 0 16px;
+    gap: 12px;
+  }
+
+  /* Left side of the topbar (menu button + search) takes the free space */
+  .app-topbar > div:first-child {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .topbar-search-input {
+    width: auto;
+    flex: 1;
+    min-width: 0;
+    max-width: 320px;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-topbar {
+    padding: 0 12px;
+    gap: 8px;
+  }
+
+  .app-topbar > div:first-child {
+    gap: 8px !important;
+  }
+
+  .topbar-right-controls {
+    gap: 4px;
+  }
+
+  /* Help button and the name/role text are hidden on phones (avatar stays) */
+  .topbar-right-controls > button[title='Help & Docs'],
+  .topbar-right-controls > div > div > div:last-child {
+    display: none !important;
+  }
+
+  .page-container {
+    padding: 16px 12px 32px;
+  }
+
+  .page-title {
+    font-size: 22px;
+  }
+
+  /* Header: title, info box and button stack one below the other */
+  .page-header-row > * {
+    width: 100%;
+    max-width: none;
+  }
+
+  .page-header-row > div:last-child {
+    flex-wrap: wrap;
+  }
+
+  .header-info-callout {
+    max-width: none;
+    flex: 1 1 100%;
+  }
+
+  .alert-banner-attention {
+    flex-wrap: wrap;
+    padding: 12px 14px;
+  }
+
+  .content-card-header {
+    padding: 14px 16px;
+  }
+
+  .content-card-header input {
+    width: 100%;
+  }
+
+  /* Tables keep their columns and scroll sideways inside the card */
+  .finovo-table th,
+  .finovo-table td {
+    padding: 12px 14px;
+    white-space: nowrap;
+  }
+
+  .table-pagination-footer {
+    padding: 12px 14px;
+    justify-content: center;
+  }
+
+  /* Tabs scroll sideways instead of squeezing */
+  .finovo-tabs {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .finovo-tab-item {
+    white-space: nowrap;
+    padding: 10px 12px;
+  }
+
+  .modal-overlay {
+    padding: 12px;
+  }
+}

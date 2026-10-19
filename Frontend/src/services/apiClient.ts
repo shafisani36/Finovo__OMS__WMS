@@ -95,25 +95,25 @@ export const apiClient = {
       if (qs) url += (url.includes('?') ? '&' : '?') + qs;
     }
     const res = await request<T>(url, { method: 'GET' });
-    return { data: res.data || res };
+    return { data: res as any };
   },
   async post<T = any>(endpoint: string, body?: any) {
     const res = await request<T>(endpoint, {
       method: 'POST',
       body: body ? JSON.stringify(body) : undefined,
     });
-    return { data: res.data || res };
+    return { data: res as any };
   },
   async put<T = any>(endpoint: string, body?: any) {
     const res = await request<T>(endpoint, {
       method: 'PUT',
       body: body ? JSON.stringify(body) : undefined,
     });
-    return { data: res.data || res };
+    return { data: res as any };
   },
   async delete<T = any>(endpoint: string) {
     const res = await request<T>(endpoint, { method: 'DELETE' });
-    return { data: res.data || res };
+    return { data: res as any };
   },
 };
 
