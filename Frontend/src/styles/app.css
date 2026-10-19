@@ -25,6 +25,26 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Custom Sleek Global Scrollbars for Entire Application */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f8fafc;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+html, body {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #f8fafc;
+}
+
 /* App Shell */
 .app-shell {
   display: flex;
@@ -1039,13 +1059,32 @@ body {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background-color: rgba(15, 23, 42, 0.6) !important;
+  background-color: rgba(15, 23, 42, 0.65) !important;
   backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   z-index: 9999;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
+  overflow-y: auto;
+  animation: modalFadeIn 0.15s ease-out;
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modalSlideUp {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
 .modal-dialog {
@@ -1249,4 +1288,183 @@ body {
 
 .custom-dropdown-menu {
   z-index: 100000 !important;
-}
+}
+
+/* ==========================================================================
+   Procurement & Inbound Receiving Hub Layout & Modal System
+   ========================================================================== */
+.procurement-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #64748b;
+  border-bottom: 2px solid transparent;
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  margin-bottom: -1px;
+}
+
+.procurement-tab-btn:hover {
+  color: #0f172a;
+  background-color: #f8fafc;
+  border-radius: 8px 8px 0 0;
+}
+
+.procurement-tab-btn.is-active {
+  color: #1e56ff;
+  font-weight: 700;
+  border-bottom: 2px solid #1e56ff;
+}
+
+.procurement-tab-count {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background-color: #f1f5f9;
+  color: #64748b;
+  transition: all 0.15s ease;
+}
+
+.procurement-tab-btn.is-active .procurement-tab-count {
+  background-color: #eff6ff;
+  color: #1e56ff;
+}
+
+/* Professional Modal Container Architecture */
+.procurement-modal {
+  background-color: #ffffff !important;
+  border-radius: 18px;
+  width: 100%;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(15, 23, 42, 0.08);
+  border: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+  position: relative;
+  z-index: 10000;
+  overflow: hidden;
+  box-sizing: border-box;
+  animation: modalSlideUp 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.procurement-modal-header {
+  padding: 18px 24px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #ffffff;
+  flex-shrink: 0;
+}
+
+.procurement-modal-body {
+  padding: 20px 24px;
+  overflow-y: auto;
+  flex: 1;
+  background-color: #ffffff;
+}
+
+.procurement-modal-footer {
+  padding: 16px 24px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #f8fafc;
+  flex-shrink: 0;
+}
+
+/* Custom modal scrollbars */
+.procurement-modal-body::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.procurement-modal-body::-webkit-scrollbar-track {
+  background: #f8fafc;
+}
+.procurement-modal-body::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+.procurement-modal-body::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Form section headers inside modals */
+.procurement-section-header {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.procurement-meta-box {
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  font-size: 12px;
+  margin-bottom: 16px;
+}
+
+.procurement-meta-item strong {
+  color: #64748b;
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-bottom: 2px;
+}
+
+.procurement-meta-item span {
+  color: #0f172a;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .procurement-modal {
+    max-height: 96vh;
+    border-radius: 14px;
+  }
+  .procurement-modal-header {
+    padding: 14px 16px;
+  }
+  .procurement-modal-body {
+    padding: 16px 14px;
+  }
+  .procurement-modal-footer {
+    padding: 12px 14px;
+    flex-direction: column-reverse;
+    gap: 10px;
+    align-items: stretch;
+  }
+  .procurement-modal-footer > div {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    gap: 8px;
+  }
+  .procurement-meta-box {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+

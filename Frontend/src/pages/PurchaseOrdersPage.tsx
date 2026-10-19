@@ -16,7 +16,9 @@ import {
   Eye,
   X,
   Boxes,
-  Loader2
+  Loader2,
+  Layers,
+  UserCheck
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import omsService from '../services/omsService';
@@ -47,6 +49,7 @@ export const PurchaseOrdersPage: React.FC = () => {
   }, [location.pathname]);
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
 
@@ -86,6 +89,8 @@ export const PurchaseOrdersPage: React.FC = () => {
 
   const [showCreateGrnModal, setShowCreateGrnModal] = useState(false);
   const [showViewGrnModal, setShowViewGrnModal] = useState(false);
+  const [showInspectGrnModal, setShowInspectGrnModal] = useState(false);
+  const [showSelectPoForGrnModal, setShowSelectPoForGrnModal] = useState(false);
   const [selectedGrn, setSelectedGrn] = useState<any | null>(null);
 
   // Stock planning cache for PR creation: variantId -> context
@@ -268,6 +273,7 @@ export const PurchaseOrdersPage: React.FC = () => {
       return;
     }
 
+    setIsSubmitting(true);
     try {
       const payload = {
         warehouse_id: prWarehouseId,
@@ -302,6 +308,8 @@ export const PurchaseOrdersPage: React.FC = () => {
       fetchRequisitions();
     } catch (e: any) {
       showNotification(e.response?.data?.message || 'Failed to save requisition.', true);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -332,10 +340,9 @@ export const PurchaseOrdersPage: React.FC = () => {
   };
 
   const handleApprovePr = async (pr: any) => {
-    // Front-end warning if self-approving
     if (pr.requester_id === user?.id) {
       showNotification(
-        'Separation of Duties Warning: You requested this requisition and cannot approve it. An independent manager must review and approve.',
+        'Separation of Duties Violation: You cannot approve your own purchase requisition. An independent manager must review and approve.',
         true
       );
       return;
@@ -381,7 +388,7 @@ export const PurchaseOrdersPage: React.FC = () => {
   const openConvertPoModal = (pr: any) => {
     setSelectedPr(pr);
     const initialMap: Record<number, number> = {};
-    pr.items.forEach((item: any) => {
+    (pr.items || []).forEach((item: any) => {
       initialMap[item.id] = item.remaining_quantity !== undefined ? item.remaining_quantity : (item.approved_quantity || item.requested_quantity);
     });
     setConvertItemQuantities(initialMap);
@@ -407,6 +414,7 @@ export const PurchaseOrdersPage: React.FC = () => {
       return;
     }
 
+    setIsSubmitting(true);
     try {
       const res = await omsService.convertPrToPo(selectedPr.id, {
         supplier_name: poSupplierName,
@@ -422,6 +430,8 @@ export const PurchaseOrdersPage: React.FC = () => {
       setActiveTab('po');
     } catch (e: any) {
       showNotification(e.response?.data?.message || 'Failed to convert PR to Purchase Order.', true);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -450,10 +460,11 @@ export const PurchaseOrdersPage: React.FC = () => {
 
   const handleCreatePo = async () => {
     if (!poSupplier.trim() || !poWhId || poStandaloneItems.length === 0) {
-      showNotification('Please fill in all required fields and add items.', true);
+      showNotification('Please fill in all required fields and add at least one line item.', true);
       return;
     }
 
+    setIsSubmitting(true);
     try {
       const payload = {
         supplier_name: poSupplier,
@@ -474,6 +485,8 @@ export const PurchaseOrdersPage: React.FC = () => {
       fetchPurchaseOrders();
     } catch (e: any) {
       showNotification(e.response?.data?.message || 'Failed to create PO.', true);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -528,9 +541,29 @@ export const PurchaseOrdersPage: React.FC = () => {
     setShowCreateGrnModal(true);
   };
 
+  const handleOpenReceiveGrnFromTop = () => {
+    const openOrders = purchaseOrders.filter(
+      (po) => po.status !== 'received' && po.status !== 'cancelled'
+    );
+    if (openOrders.length === 0) {
+      if (purchaseOrders.length === 0) {
+        showNotification('No Purchase Orders found. Please issue a Purchase Order first.', true);
+      } else {
+        showNotification('All existing Purchase Orders are already fully received or cancelled.', true);
+      }
+      return;
+    }
+    if (openOrders.length === 1) {
+      openCreateGrnFromPo(openOrders[0]);
+    } else {
+      setShowSelectPoForGrnModal(true);
+    }
+  };
+
   const handleSaveGrn = async () => {
     if (!selectedPo) return;
 
+    setIsSubmitting(true);
     try {
       const itemsPayload = Object.entries(grnItemDistributions).map(([poiId, dist]) => ({
         purchase_order_item_id: Number(poiId),
@@ -560,6 +593,8 @@ export const PurchaseOrdersPage: React.FC = () => {
       setActiveTab('grn');
     } catch (e: any) {
       showNotification(e.response?.data?.message || 'Failed to create GRN.', true);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -572,6 +607,7 @@ export const PurchaseOrdersPage: React.FC = () => {
       return;
     }
 
+    setIsSubmitting(true);
     try {
       const res = await omsService.postGrnToInventory(grn.id);
       showNotification(`GRN #${res.data?.grn_number || ''} successfully posted! Stock balances and ledger updated.`);
@@ -582,6 +618,8 @@ export const PurchaseOrdersPage: React.FC = () => {
       }
     } catch (e: any) {
       showNotification(e.response?.data?.message || 'Failed to post GRN to inventory.', true);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -595,26 +633,65 @@ export const PurchaseOrdersPage: React.FC = () => {
     }
   };
 
+  // Inspect GRN State
+  const [inspectItems, setInspectItems] = useState<any[]>([]);
+  const openInspectGrn = (grn: any) => {
+    setSelectedGrn(grn);
+    setInspectItems((grn.items || []).map((x: any) => ({ ...x })));
+    setShowInspectGrnModal(true);
+  };
+
+  const handleSaveInspection = async () => {
+    if (!selectedGrn) return;
+    setIsSubmitting(true);
+    try {
+      const payload = {
+        items: inspectItems.map((item) => ({
+          id: item.id,
+          accepted_quantity: Number(item.accepted_quantity),
+          damaged_quantity: Number(item.damaged_quantity || 0),
+          quarantined_quantity: Number(item.quarantined_quantity || 0),
+          rejected_quantity: Number(item.rejected_quantity || 0),
+          lot_number: item.lot_number,
+          expiry_date: item.expiry_date ? String(item.expiry_date).slice(0, 10) : undefined,
+          discrepancy_reason: item.discrepancy_reason,
+        })),
+      };
+
+      const res = await omsService.inspectGoodsReceivedNote(selectedGrn.id, payload);
+      showNotification(`Inspection recorded for GRN #${res.data?.grn_number || ''}.`);
+      setShowInspectGrnModal(false);
+      fetchGrns();
+      if (selectedGrn && selectedGrn.id === res.data?.id) {
+        handleViewGrn(selectedGrn.id);
+      }
+    } catch (e: any) {
+      showNotification(e.response?.data?.message || 'Failed to record inspection.', true);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="page-container" style={{ paddingBottom: 60 }}>
       {/* Breadcrumb Navigation */}
       <nav className="breadcrumb-nav">
         <span>Finovo</span>
         <span>&gt;</span>
-        <span style={{ color: '#0f172a', fontWeight: 600 }}>Procurement &amp; Receiving</span>
+        <span style={{ color: '#0f172a', fontWeight: 600 }}>Procurement &amp; Inbound</span>
       </nav>
 
       {/* Header Banner */}
       <div className="page-header-row">
         <div className="page-title-section">
           <div className="page-title-badge-wrap">
-            <h1 className="page-title">Procurement &amp; Inbound Hub</h1>
+            <h1 className="page-title">Procurement &amp; Receiving Hub</h1>
             <span className="page-count-pill" style={{ background: '#dbeafe', color: '#1e40af' }}>
               Enterprise Grade
             </span>
           </div>
           <p className="page-subtitle">
-            Manage Purchase Requisitions (PR), supplier commitments (PO), dock receiving &amp; inspection (GRN), and authoritative inventory ledger posting.
+            Manage Purchase Requisitions (PR), supplier commitments (PO), physical dock receiving (GRN), and authoritative inventory ledger posting.
           </p>
         </div>
 
@@ -630,7 +707,7 @@ export const PurchaseOrdersPage: React.FC = () => {
         <div style={{
           backgroundColor: '#fef2f2',
           border: '1px solid #fecaca',
-          borderRadius: 8,
+          borderRadius: 10,
           padding: '12px 16px',
           marginBottom: 16,
           display: 'flex',
@@ -640,7 +717,7 @@ export const PurchaseOrdersPage: React.FC = () => {
           fontSize: 13,
           fontWeight: 500,
         }}>
-          <AlertCircle size={18} />
+          <AlertCircle size={18} style={{ flexShrink: 0 }} />
           <span>{errorBanner}</span>
         </div>
       )}
@@ -649,7 +726,7 @@ export const PurchaseOrdersPage: React.FC = () => {
         <div style={{
           backgroundColor: '#f0fdf4',
           border: '1px solid #bbf7d0',
-          borderRadius: 8,
+          borderRadius: 10,
           padding: '12px 16px',
           marginBottom: 16,
           display: 'flex',
@@ -659,7 +736,7 @@ export const PurchaseOrdersPage: React.FC = () => {
           fontSize: 13,
           fontWeight: 500,
         }}>
-          <CheckCircle2 size={18} />
+          <CheckCircle2 size={18} style={{ flexShrink: 0 }} />
           <span>{successBanner}</span>
         </div>
       )}
@@ -704,113 +781,50 @@ export const PurchaseOrdersPage: React.FC = () => {
         borderBottom: '1px solid #e2e8f0',
         marginBottom: 20,
         gap: 12,
-        flexWrap: 'wrap'
+        flexWrap: 'wrap',
       }}>
-        <div style={{ display: 'flex', gap: 4 }}>
+        <div style={{ display: 'flex', gap: 4, overflowX: 'auto', maxWidth: '100%' }}>
           <button
             onClick={() => setActiveTab('po')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '10px 18px',
-              fontSize: 14,
-              fontWeight: activeTab === 'po' ? 700 : 500,
-              color: activeTab === 'po' ? '#1e56ff' : '#64748b',
-              borderBottom: activeTab === 'po' ? '2px solid #1e56ff' : '2px solid transparent',
-              background: 'none',
-              borderTop: 'none',
-              borderLeft: 'none',
-              borderRight: 'none',
-              cursor: 'pointer',
-            }}
+            className={`procurement-tab-btn ${activeTab === 'po' ? 'is-active' : ''}`}
           >
             <FileSpreadsheet size={16} />
             <span>Purchase Orders</span>
-            <span style={{
-              background: activeTab === 'po' ? '#dbeafe' : '#f1f5f9',
-              color: activeTab === 'po' ? '#1e40af' : '#64748b',
-              fontSize: 11,
-              fontWeight: 700,
-              padding: '2px 6px',
-              borderRadius: 12,
-            }}>
+            <span className="procurement-tab-count">
               {poKpis.total || purchaseOrders.length}
             </span>
           </button>
 
           <button
             onClick={() => setActiveTab('pr')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '10px 18px',
-              fontSize: 14,
-              fontWeight: activeTab === 'pr' ? 700 : 500,
-              color: activeTab === 'pr' ? '#1e56ff' : '#64748b',
-              borderBottom: activeTab === 'pr' ? '2px solid #1e56ff' : '2px solid transparent',
-              background: 'none',
-              borderTop: 'none',
-              borderLeft: 'none',
-              borderRight: 'none',
-              cursor: 'pointer',
-            }}
+            className={`procurement-tab-btn ${activeTab === 'pr' ? 'is-active' : ''}`}
           >
             <ClipboardCheck size={16} />
             <span>Purchase Requisitions (PR)</span>
-            <span style={{
-              background: activeTab === 'pr' ? '#dbeafe' : '#f1f5f9',
-              color: activeTab === 'pr' ? '#1e40af' : '#64748b',
-              fontSize: 11,
-              fontWeight: 700,
-              padding: '2px 6px',
-              borderRadius: 12,
-            }}>
+            <span className="procurement-tab-count">
               {prKpis.total || requisitions.length}
             </span>
           </button>
 
           <button
             onClick={() => setActiveTab('grn')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '10px 18px',
-              fontSize: 14,
-              fontWeight: activeTab === 'grn' ? 700 : 500,
-              color: activeTab === 'grn' ? '#1e56ff' : '#64748b',
-              borderBottom: activeTab === 'grn' ? '2px solid #1e56ff' : '2px solid transparent',
-              background: 'none',
-              borderTop: 'none',
-              borderLeft: 'none',
-              borderRight: 'none',
-              cursor: 'pointer',
-            }}
+            className={`procurement-tab-btn ${activeTab === 'grn' ? 'is-active' : ''}`}
           >
             <PackageCheck size={16} />
             <span>Goods Received Notes (GRN)</span>
-            <span style={{
-              background: activeTab === 'grn' ? '#dbeafe' : '#f1f5f9',
-              color: activeTab === 'grn' ? '#1e40af' : '#64748b',
-              fontSize: 11,
-              fontWeight: 700,
-              padding: '2px 6px',
-              borderRadius: 12,
-            }}>
+            <span className="procurement-tab-count">
               {grnKpis.total || grns.length}
             </span>
           </button>
         </div>
 
         {/* Primary Action Button according to tab */}
-        <div>
+        <div style={{ padding: '6px 0' }}>
           {activeTab === 'po' && (
             <button
               onClick={openCreatePoModal}
               className="btn-primary"
-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px' }}
             >
               <Plus size={16} />
               <span>Create Purchase Order</span>
@@ -821,7 +835,7 @@ export const PurchaseOrdersPage: React.FC = () => {
             <button
               onClick={openCreatePrModal}
               className="btn-primary"
-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px' }}
             >
               <Plus size={16} />
               <span>New Requisition</span>
@@ -830,15 +844,9 @@ export const PurchaseOrdersPage: React.FC = () => {
 
           {activeTab === 'grn' && (
             <button
-              onClick={() => {
-                if (purchaseOrders.length > 0) {
-                  openCreateGrnFromPo(purchaseOrders[0]);
-                } else {
-                  showNotification('Please issue a Purchase Order first before receiving a shipment.', true);
-                }
-              }}
+              onClick={handleOpenReceiveGrnFromTop}
               className="btn-primary"
-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px' }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px' }}
             >
               <Truck size={16} />
               <span>Receive Shipment (GRN)</span>
@@ -861,8 +869,8 @@ export const PurchaseOrdersPage: React.FC = () => {
             marginBottom: 16,
             flexWrap: 'wrap',
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 260 }}>
-              <div style={{ position: 'relative', width: '100%', maxWidth: 320 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 260 }}>
+              <div style={{ position: 'relative', width: '100%', maxWidth: 340 }}>
                 <Search size={16} style={{ position: 'absolute', left: 12, top: 10, color: '#94a3b8' }} />
                 <input
                   type="text"
@@ -871,11 +879,11 @@ export const PurchaseOrdersPage: React.FC = () => {
                   onChange={(e) => setPoSearch(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && fetchPurchaseOrders()}
                   className="form-input"
-                  style={{ paddingLeft: 36, height: 36, fontSize: 13 }}
+                  style={{ paddingLeft: 36, height: 38, fontSize: 13 }}
                 />
               </div>
 
-              <div style={{ width: 170 }}>
+              <div style={{ width: 185 }}>
                 <CustomDropdown
                   value={poStatusFilter}
                   onChange={(val) => setPoStatusFilter(val)}
@@ -891,7 +899,7 @@ export const PurchaseOrdersPage: React.FC = () => {
               </div>
             </div>
 
-            <span style={{ fontSize: 12, color: '#64748b' }}>
+            <span style={{ fontSize: 13, color: '#64748b' }}>
               Showing {purchaseOrders.length} purchase orders
             </span>
           </div>
@@ -906,7 +914,7 @@ export const PurchaseOrdersPage: React.FC = () => {
                     <th>Supplier</th>
                     <th>Warehouse</th>
                     <th>Order Date</th>
-                    <th>Items</th>
+                    <th>Items &amp; Delivery</th>
                     <th>Total Amount</th>
                     <th>Status</th>
                     <th style={{ textAlign: 'right' }}>Actions</th>
@@ -916,18 +924,24 @@ export const PurchaseOrdersPage: React.FC = () => {
                   {isLoading ? (
                     <tr>
                       <td colSpan={8} style={{ textAlign: 'center', padding: '48px 16px', color: '#1e56ff' }}>
-                        <Loader2 className="animate-spin" size={24} style={{ margin: '0 auto 8px' }} />
+                        <Loader2 className="animate-spin" size={26} style={{ margin: '0 auto 8px' }} />
                         <div style={{ fontSize: 13, color: '#64748b' }}>Loading purchase orders...</div>
                       </td>
                     </tr>
                   ) : purchaseOrders.length === 0 ? (
                     <tr>
-                      <td colSpan={8} style={{ textAlign: 'center', padding: '48px 16px', color: '#64748b' }}>
-                        <FileSpreadsheet size={36} color="#cbd5e1" style={{ marginBottom: 12 }} />
-                        <div style={{ fontWeight: 600, fontSize: 14, color: '#1e293b' }}>No Purchase Orders Found</div>
-                        <div style={{ fontSize: 12, marginTop: 4 }}>
-                          Create a new purchase order or convert an approved Purchase Requisition.
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '54px 16px', color: '#64748b' }}>
+                        <div style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: '#f1f5f9', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
+                          <FileSpreadsheet size={28} />
                         </div>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>No Purchase Orders Found</div>
+                        <p style={{ margin: '4px auto 16px', fontSize: 13, color: '#64748b', maxWidth: 420 }}>
+                          Issue purchase orders to suppliers or convert approved purchase requisitions into POs.
+                        </p>
+                        <button onClick={openCreatePoModal} className="btn-primary" style={{ padding: '7px 16px', fontSize: 12 }}>
+                          <Plus size={14} style={{ marginRight: 6 }} />
+                          <span>Create Purchase Order</span>
+                        </button>
                       </td>
                     </tr>
                   ) : (
@@ -937,35 +951,35 @@ export const PurchaseOrdersPage: React.FC = () => {
 
                       let badgeColor = '#64748b';
                       let badgeBg = '#f1f5f9';
-                      if (po.status === 'issued') { badgeColor = '#2563eb'; badgeBg = '#dbeafe'; }
-                      else if (po.status === 'partially_received') { badgeColor = '#d97706'; badgeBg = '#fef3c7'; }
-                      else if (po.status === 'received') { badgeColor = '#16a34a'; badgeBg = '#dcfce7'; }
-                      else if (po.status === 'cancelled') { badgeColor = '#dc2626'; badgeBg = '#fee2e2'; }
+                      if (po.status === 'issued') { badgeColor = '#1e40af'; badgeBg = '#dbeafe'; }
+                      else if (po.status === 'partially_received') { badgeColor = '#9a3412'; badgeBg = '#ffedd5'; }
+                      else if (po.status === 'received') { badgeColor = '#15803d'; badgeBg = '#dcfce7'; }
+                      else if (po.status === 'cancelled') { badgeColor = '#b91c1c'; badgeBg = '#fee2e2'; }
 
                       return (
                         <tr key={po.id}>
                           <td>
-                            <span style={{ fontWeight: 700, color: '#1e56ff' }}>{po.po_number}</span>
+                            <div style={{ fontWeight: 700, color: '#1e56ff', fontSize: 13 }}>{po.po_number}</div>
                             {po.requisition && (
-                              <div style={{ fontSize: 10, color: '#64748b' }}>From {po.requisition.pr_number}</div>
+                              <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>From {po.requisition.pr_number}</div>
                             )}
                           </td>
                           <td>
                             <div style={{ fontWeight: 600, color: '#0f172a' }}>{po.supplier_name}</div>
-                            <div style={{ fontSize: 11, color: '#64748b' }}>{po.payment_terms || 'Net 30'}</div>
+                            <div style={{ fontSize: 11, color: '#64748b' }}>Terms: {po.payment_terms || 'Net 30'}</div>
                           </td>
                           <td>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
                               <Building size={14} color="#64748b" />
-                              <span>{po.warehouse?.name || 'Warehouse'}</span>
+                              <span style={{ fontWeight: 500 }}>{po.warehouse?.name || 'Warehouse'}</span>
                             </div>
                           </td>
                           <td>
                             <span style={{ fontSize: 12 }}>{po.order_date || po.created_at?.slice(0, 10)}</span>
                           </td>
                           <td>
-                            <div style={{ fontSize: 12, fontWeight: 600 }}>{recQty} / {totalQty} units</div>
-                            <div style={{ fontSize: 10, color: '#64748b' }}>{(po.items || []).length} SKUs</div>
+                            <div style={{ fontSize: 12, fontWeight: 700 }}>{recQty} / {totalQty} units</div>
+                            <div style={{ fontSize: 11, color: '#64748b' }}>{(po.items || []).length} SKU lines</div>
                           </td>
                           <td>
                             <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>
@@ -975,8 +989,8 @@ export const PurchaseOrdersPage: React.FC = () => {
                           <td>
                             <span style={{
                               display: 'inline-block',
-                              padding: '3px 8px',
-                              borderRadius: 4,
+                              padding: '4px 10px',
+                              borderRadius: 6,
                               fontSize: 11,
                               fontWeight: 700,
                               textTransform: 'uppercase',
@@ -1034,21 +1048,21 @@ export const PurchaseOrdersPage: React.FC = () => {
             marginBottom: 16,
             flexWrap: 'wrap',
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 260 }}>
-              <div style={{ position: 'relative', width: '100%', maxWidth: 320 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 260 }}>
+              <div style={{ position: 'relative', width: '100%', maxWidth: 340 }}>
                 <Search size={16} style={{ position: 'absolute', left: 12, top: 10, color: '#94a3b8' }} />
                 <input
                   type="text"
-                  placeholder="Search PR # or purpose..."
+                  placeholder="Search PR #, requester, or purpose..."
                   value={prSearch}
                   onChange={(e) => setPrSearch(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && fetchRequisitions()}
                   className="form-input"
-                  style={{ paddingLeft: 36, height: 36, fontSize: 13 }}
+                  style={{ paddingLeft: 36, height: 38, fontSize: 13 }}
                 />
               </div>
 
-              <div style={{ width: 170 }}>
+              <div style={{ width: 185 }}>
                 <CustomDropdown
                   value={prStatusFilter}
                   onChange={(val) => setPrStatusFilter(val)}
@@ -1065,7 +1079,7 @@ export const PurchaseOrdersPage: React.FC = () => {
               </div>
             </div>
 
-            <span style={{ fontSize: 12, color: '#64748b' }}>
+            <span style={{ fontSize: 13, color: '#64748b' }}>
               Showing {requisitions.length} requisitions
             </span>
           </div>
@@ -1087,30 +1101,43 @@ export const PurchaseOrdersPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {requisitions.length === 0 ? (
+                  {isLoading ? (
                     <tr>
-                      <td colSpan={8} style={{ textAlign: 'center', padding: '48px 16px', color: '#64748b' }}>
-                        <ClipboardCheck size={36} color="#cbd5e1" style={{ marginBottom: 12 }} />
-                        <div style={{ fontWeight: 600, fontSize: 14, color: '#1e293b' }}>No Purchase Requisitions Found</div>
-                        <div style={{ fontSize: 12, marginTop: 4 }}>
-                          Employees can submit purchase requisitions for management authorization.
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '48px 16px', color: '#1e56ff' }}>
+                        <Loader2 className="animate-spin" size={26} style={{ margin: '0 auto 8px' }} />
+                        <div style={{ fontSize: 13, color: '#64748b' }}>Loading requisitions...</div>
+                      </td>
+                    </tr>
+                  ) : requisitions.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '54px 16px', color: '#64748b' }}>
+                        <div style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: '#f1f5f9', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
+                          <ClipboardCheck size={28} />
                         </div>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>No Purchase Requisitions Found</div>
+                        <p style={{ margin: '4px auto 16px', fontSize: 13, color: '#64748b', maxWidth: 420 }}>
+                          Submit purchase requisitions with business justifications and live stock availability.
+                        </p>
+                        <button onClick={openCreatePrModal} className="btn-primary" style={{ padding: '7px 16px', fontSize: 12 }}>
+                          <Plus size={14} style={{ marginRight: 6 }} />
+                          <span>New Requisition</span>
+                        </button>
                       </td>
                     </tr>
                   ) : (
                     requisitions.map((pr) => {
                       let badgeColor = '#64748b';
                       let badgeBg = '#f1f5f9';
-                      if (pr.status === 'submitted') { badgeColor = '#d97706'; badgeBg = '#fef3c7'; }
-                      else if (pr.status === 'approved') { badgeColor = '#16a34a'; badgeBg = '#dcfce7'; }
-                      else if (pr.status === 'partially_ordered' || pr.status === 'ordered') { badgeColor = '#2563eb'; badgeBg = '#dbeafe'; }
-                      else if (pr.status === 'rejected') { badgeColor = '#dc2626'; badgeBg = '#fee2e2'; }
+                      if (pr.status === 'submitted') { badgeColor = '#9a3412'; badgeBg = '#ffedd5'; }
+                      else if (pr.status === 'approved') { badgeColor = '#15803d'; badgeBg = '#dcfce7'; }
+                      else if (pr.status === 'partially_ordered' || pr.status === 'ordered') { badgeColor = '#1e40af'; badgeBg = '#dbeafe'; }
+                      else if (pr.status === 'rejected') { badgeColor = '#b91c1c'; badgeBg = '#fee2e2'; }
 
                       return (
                         <tr key={pr.id}>
                           <td>
-                            <span style={{ fontWeight: 700, color: '#1e56ff' }}>{pr.pr_number}</span>
-                            <div style={{ fontSize: 10, color: '#64748b' }}>{pr.created_at?.slice(0, 10)}</div>
+                            <div style={{ fontWeight: 700, color: '#1e56ff', fontSize: 13 }}>{pr.pr_number}</div>
+                            <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{pr.created_at?.slice(0, 10)}</div>
                           </td>
                           <td>
                             <div style={{ fontWeight: 600, color: '#0f172a' }}>{pr.requester?.name || 'Staff'}</div>
@@ -1122,19 +1149,19 @@ export const PurchaseOrdersPage: React.FC = () => {
                           <td>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
                               <Building size={14} color="#64748b" />
-                              <span>{pr.warehouse?.name || 'Warehouse'}</span>
+                              <span style={{ fontWeight: 500 }}>{pr.warehouse?.name || 'Warehouse'}</span>
                             </div>
                           </td>
                           <td>
                             <span style={{
                               display: 'inline-block',
-                              padding: '2px 6px',
+                              padding: '2px 8px',
                               borderRadius: 4,
                               fontSize: 10,
                               fontWeight: 700,
                               textTransform: 'uppercase',
-                              backgroundColor: pr.priority === 'urgent' ? '#fee2e2' : (pr.priority === 'high' ? '#fef3c7' : '#f1f5f9'),
-                              color: pr.priority === 'urgent' ? '#dc2626' : (pr.priority === 'high' ? '#b45309' : '#475569'),
+                              backgroundColor: pr.priority === 'urgent' ? '#fee2e2' : (pr.priority === 'high' ? '#ffedd5' : '#f1f5f9'),
+                              color: pr.priority === 'urgent' ? '#dc2626' : (pr.priority === 'high' ? '#c2410c' : '#475569'),
                             }}>
                               {pr.priority}
                             </span>
@@ -1147,8 +1174,8 @@ export const PurchaseOrdersPage: React.FC = () => {
                           <td>
                             <span style={{
                               display: 'inline-block',
-                              padding: '3px 8px',
-                              borderRadius: 4,
+                              padding: '4px 10px',
+                              borderRadius: 6,
                               fontSize: 11,
                               fontWeight: 700,
                               textTransform: 'uppercase',
@@ -1232,21 +1259,21 @@ export const PurchaseOrdersPage: React.FC = () => {
             marginBottom: 16,
             flexWrap: 'wrap',
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 260 }}>
-              <div style={{ position: 'relative', width: '100%', maxWidth: 320 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 260 }}>
+              <div style={{ position: 'relative', width: '100%', maxWidth: 340 }}>
                 <Search size={16} style={{ position: 'absolute', left: 12, top: 10, color: '#94a3b8' }} />
                 <input
                   type="text"
-                  placeholder="Search GRN # or carrier..."
+                  placeholder="Search GRN #, PO #, or carrier..."
                   value={grnSearch}
                   onChange={(e) => setGrnSearch(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && fetchGrns()}
                   className="form-input"
-                  style={{ paddingLeft: 36, height: 36, fontSize: 13 }}
+                  style={{ paddingLeft: 36, height: 38, fontSize: 13 }}
                 />
               </div>
 
-              <div style={{ width: 170 }}>
+              <div style={{ width: 185 }}>
                 <CustomDropdown
                   value={grnStatusFilter}
                   onChange={(val) => setGrnStatusFilter(val)}
@@ -1261,7 +1288,7 @@ export const PurchaseOrdersPage: React.FC = () => {
               </div>
             </div>
 
-            <span style={{ fontSize: 12, color: '#64748b' }}>
+            <span style={{ fontSize: 13, color: '#64748b' }}>
               Showing {grns.length} goods received notes
             </span>
           </div>
@@ -1283,62 +1310,71 @@ export const PurchaseOrdersPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {grns.length === 0 ? (
+                  {isLoading ? (
                     <tr>
-                      <td colSpan={8} style={{ textAlign: 'center', padding: '48px 16px', color: '#64748b' }}>
-                        <PackageCheck size={36} color="#cbd5e1" style={{ marginBottom: 12 }} />
-                        <div style={{ fontWeight: 600, fontSize: 14, color: '#1e293b' }}>No Goods Received Notes</div>
-                        <div style={{ fontSize: 12, marginTop: 4 }}>
-                          Receive inbound shipments against Purchase Orders to record physical inventory.
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '48px 16px', color: '#1e56ff' }}>
+                        <Loader2 className="animate-spin" size={26} style={{ margin: '0 auto 8px' }} />
+                        <div style={{ fontSize: 13, color: '#64748b' }}>Loading goods received notes...</div>
+                      </td>
+                    </tr>
+                  ) : grns.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: 'center', padding: '54px 16px', color: '#64748b' }}>
+                        <div style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: '#f1f5f9', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
+                          <PackageCheck size={28} />
                         </div>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>No Goods Received Notes</div>
+                        <p style={{ margin: '4px auto 16px', fontSize: 13, color: '#64748b', maxWidth: 420 }}>
+                          Receive inbound shipments against Purchase Orders to record physical inventory.
+                        </p>
                       </td>
                     </tr>
                   ) : (
                     grns.map((grn) => {
                       let badgeColor = '#64748b';
                       let badgeBg = '#f1f5f9';
-                      if (grn.status === 'inspected') { badgeColor = '#d97706'; badgeBg = '#fef3c7'; }
-                      else if (grn.status === 'posted') { badgeColor = '#16a34a'; badgeBg = '#dcfce7'; }
+                      if (grn.status === 'inspected') { badgeColor = '#9a3412'; badgeBg = '#ffedd5'; }
+                      else if (grn.status === 'posted') { badgeColor = '#15803d'; badgeBg = '#dcfce7'; }
 
                       return (
                         <tr key={grn.id}>
                           <td>
-                            <span style={{ fontWeight: 700, color: '#1e56ff' }}>{grn.grn_number}</span>
+                            <div style={{ fontWeight: 700, color: '#1e56ff', fontSize: 13 }}>{grn.grn_number}</div>
                             {grn.supplier_delivery_note && (
-                              <div style={{ fontSize: 10, color: '#64748b' }}>Note: {grn.supplier_delivery_note}</div>
+                              <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>Note: {grn.supplier_delivery_note}</div>
                             )}
                           </td>
                           <td>
                             <div style={{ fontWeight: 600, color: '#0f172a' }}>{grn.purchase_order?.po_number}</div>
-                            <div style={{ fontSize: 10, color: '#64748b' }}>{grn.purchase_order?.supplier_name}</div>
+                            <div style={{ fontSize: 11, color: '#64748b' }}>{grn.purchase_order?.supplier_name}</div>
                           </td>
                           <td>
                             <div style={{ fontSize: 12, fontWeight: 500 }}>{grn.carrier || 'Freight Line'}</div>
-                            <div style={{ fontSize: 10, color: '#64748b' }}>{grn.tracking_or_vehicle_number || 'N/A'}</div>
+                            <div style={{ fontSize: 11, color: '#64748b' }}>{grn.tracking_or_vehicle_number || 'N/A'}</div>
                           </td>
                           <td>
                             <div style={{ fontSize: 12, fontWeight: 600 }}>{grn.warehouse?.name}</div>
-                            <div style={{ fontSize: 10, color: '#0284c7' }}>{grn.receiving_location?.code || 'Inbound Dock'}</div>
+                            <div style={{ fontSize: 11, color: '#0284c7', fontWeight: 500 }}>{grn.receiving_location?.code || 'Inbound Dock'}</div>
                           </td>
                           <td>
                             <div style={{ fontSize: 12, fontWeight: 700 }}>
                               Total: {grn.total_received_units} units
                             </div>
-                            <div style={{ display: 'flex', gap: 6, fontSize: 10, marginTop: 2 }}>
-                              <span style={{ color: '#16a34a', fontWeight: 600 }}>Good: {grn.total_accepted_units}</span>
+                            <div style={{ display: 'flex', gap: 8, fontSize: 11, marginTop: 2 }}>
+                              <span style={{ color: '#15803d', fontWeight: 600 }}>Good: {grn.total_accepted_units}</span>
                               <span style={{ color: '#dc2626', fontWeight: 600 }}>Damaged: {grn.total_damaged_units}</span>
-                              <span style={{ color: '#d97706', fontWeight: 600 }}>Quar: {grn.total_quarantined_units}</span>
+                              <span style={{ color: '#c2410c', fontWeight: 600 }}>Quar: {grn.total_quarantined_units}</span>
                             </div>
                           </td>
                           <td>
                             <span style={{ fontSize: 12 }}>{grn.received_at?.slice(0, 16).replace('T', ' ')}</span>
-                            <div style={{ fontSize: 10, color: '#64748b' }}>By {grn.received_by?.name || 'Staff'}</div>
+                            <div style={{ fontSize: 11, color: '#64748b' }}>By {grn.received_by?.name || 'Staff'}</div>
                           </td>
                           <td>
                             <span style={{
                               display: 'inline-block',
-                              padding: '3px 8px',
-                              borderRadius: 4,
+                              padding: '4px 10px',
+                              borderRadius: 6,
                               fontSize: 11,
                               fontWeight: 700,
                               textTransform: 'uppercase',
@@ -1367,15 +1403,24 @@ export const PurchaseOrdersPage: React.FC = () => {
                               </button>
 
                               {grn.status !== 'posted' && (
-                                <button
-                                  onClick={() => handlePostGrnToInventory(grn)}
-                                  className="btn-primary"
-                                  style={{ padding: '4px 10px', fontSize: 11, backgroundColor: '#059669', borderColor: '#059669', display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                                  title="Post quantities to authoritative inventory engine"
-                                >
-                                  <Boxes size={13} />
-                                  <span>Post Stock</span>
-                                </button>
+                                <>
+                                  <button
+                                    onClick={() => openInspectGrn(grn)}
+                                    className="table-action-btn"
+                                    title="Inspect & Adjust Conditions"
+                                  >
+                                    <ClipboardCheck size={15} />
+                                  </button>
+                                  <button
+                                    onClick={() => handlePostGrnToInventory(grn)}
+                                    className="btn-primary"
+                                    style={{ padding: '4px 10px', fontSize: 11, backgroundColor: '#059669', borderColor: '#059669', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                    title="Post quantities to authoritative inventory engine"
+                                  >
+                                    <Boxes size={13} />
+                                    <span>Post Stock</span>
+                                  </button>
+                                </>
                               )}
                             </div>
                           </td>
@@ -1394,13 +1439,20 @@ export const PurchaseOrdersPage: React.FC = () => {
       {/* MODAL 1: CREATE PURCHASE REQUISITION                      */}
       {/* ========================================================= */}
       {showCreatePrModal && (
-        <div className="modal-overlay" style={{ zIndex: 9999 }}>
-          <div className="modal-container" style={{ maxWidth: 840, width: '92%', backgroundColor: '#ffffff', borderRadius: 12, padding: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', paddingBottom: 14, marginBottom: 18 }}>
+        <div
+          className="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowCreatePrModal(false);
+          }}
+        >
+          <div className="procurement-modal" style={{ maxWidth: 880 }}>
+            <div className="procurement-modal-header">
               <div>
-                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#0f172a' }}>New Purchase Requisition</h3>
-                <p style={{ margin: '4px 0 0 0', fontSize: 12, color: '#64748b' }}>
-                  Request catalog items with business justification and live stock context.
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#0f172a' }}>
+                  New Purchase Requisition
+                </h3>
+                <p style={{ margin: '3px 0 0 0', fontSize: 12, color: '#64748b' }}>
+                  Request catalog products with required-by dates, business justification, and live stock context.
                 </p>
               </div>
               <button onClick={() => setShowCreatePrModal(false)} className="topbar-icon-button">
@@ -1408,193 +1460,206 @@ export const PurchaseOrdersPage: React.FC = () => {
               </button>
             </div>
 
-            <div className="finovo-form-grid-2" style={{ marginBottom: 16 }}>
-              <div>
-                <label className="form-label">Destination Warehouse *</label>
-                <CustomDropdown
-                  value={String(prWarehouseId)}
-                  onChange={(val) => setPrWarehouseId(Number(val))}
-                  options={warehouses.map((w) => ({ value: String(w.id), label: `${w.name} (${w.code})` }))}
-                />
-              </div>
-
-              <div>
-                <label className="form-label">Department *</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={prDepartment}
-                  onChange={(e) => setPrDepartment(e.target.value)}
-                  placeholder="e.g. Warehouse Tech, Operations"
-                />
-              </div>
-
-              <div>
-                <label className="form-label">Priority</label>
-                <CustomDropdown
-                  value={prPriority}
-                  onChange={(val: any) => setPrPriority(val)}
-                  options={[
-                    { value: 'low', label: 'Low' },
-                    { value: 'normal', label: 'Normal' },
-                    { value: 'high', label: 'High' },
-                    { value: 'urgent', label: 'Urgent' },
-                  ]}
-                />
-              </div>
-
-              <div>
-                <label className="form-label">Required By Date</label>
-                <input
-                  type="date"
-                  className="form-input"
-                  value={prRequiredBy}
-                  onChange={(e) => setPrRequiredBy(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div style={{ marginBottom: 16 }}>
-              <label className="form-label">Purpose / Objective</label>
-              <input
-                type="text"
-                className="form-input"
-                value={prPurpose}
-                onChange={(e) => setPrPurpose(e.target.value)}
-                placeholder="e.g. Replenishment for Black Friday wave; seasonal buffer"
-              />
-            </div>
-
-            <div style={{ marginBottom: 18 }}>
-              <label className="form-label">Business Justification</label>
-              <textarea
-                className="form-input"
-                style={{ height: 60, resize: 'vertical' }}
-                value={prJustification}
-                onChange={(e) => setPrJustification(e.target.value)}
-                placeholder="Why is this purchase required? State stock deficit or operational need..."
-              />
-            </div>
-
-            {/* Line Items Picker */}
-            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 16, marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#0f172a' }}>Requisition Items</h4>
-                <div style={{ width: 280 }}>
+            <div className="procurement-modal-body">
+              <div className="finovo-form-grid-2" style={{ marginBottom: 16 }}>
+                <div>
+                  <label className="form-label">Destination Warehouse *</label>
                   <CustomDropdown
-                    value=""
-                    onChange={(val) => addPrItem(Number(val))}
-                    placeholder="+ Add Product Variant..."
-                    options={allVariants.map((v) => ({
-                      value: String(v.id),
-                      label: `${v.sku} - ${v.name}`,
-                    }))}
+                    value={String(prWarehouseId)}
+                    onChange={(val) => setPrWarehouseId(Number(val))}
+                    options={warehouses.map((w) => ({ value: String(w.id), label: `${w.name} (${w.code})` }))}
+                  />
+                </div>
+
+                <div>
+                  <label className="form-label">Department *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={prDepartment}
+                    onChange={(e) => setPrDepartment(e.target.value)}
+                    placeholder="e.g. Warehouse Tech, Operations"
+                  />
+                </div>
+
+                <div>
+                  <label className="form-label">Priority</label>
+                  <CustomDropdown
+                    value={prPriority}
+                    onChange={(val: any) => setPrPriority(val)}
+                    options={[
+                      { value: 'low', label: 'Low Priority' },
+                      { value: 'normal', label: 'Normal' },
+                      { value: 'high', label: 'High Priority' },
+                      { value: 'urgent', label: 'Urgent (Priority Order)' },
+                    ]}
+                  />
+                </div>
+
+                <div>
+                  <label className="form-label">Required By Date</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={prRequiredBy}
+                    onChange={(e) => setPrRequiredBy(e.target.value)}
                   />
                 </div>
               </div>
 
-              {prItems.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '24px 0', border: '1px dashed #cbd5e1', borderRadius: 8, color: '#64748b', fontSize: 13 }}>
-                  Select product variants from the dropdown above to add them to your requisition.
+              <div style={{ marginBottom: 14 }}>
+                <label className="form-label">Purpose / Operational Goal</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={prPurpose}
+                  onChange={(e) => setPrPurpose(e.target.value)}
+                  placeholder="e.g. Replenishment for seasonal surge; terminal upgrade"
+                />
+              </div>
+
+              <div style={{ marginBottom: 18 }}>
+                <label className="form-label">Business Justification</label>
+                <textarea
+                  className="form-input"
+                  style={{ height: 60, resize: 'vertical' }}
+                  value={prJustification}
+                  onChange={(e) => setPrJustification(e.target.value)}
+                  placeholder="Why is this purchase required? State stock deficit or operational need..."
+                />
+              </div>
+
+              {/* Line Items Picker */}
+              <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                  <div className="procurement-section-header" style={{ margin: 0 }}>
+                    <Layers size={15} color="#1e56ff" />
+                    <span>Requisition Line Items</span>
+                  </div>
+
+                  <div style={{ width: 300 }}>
+                    <CustomDropdown
+                      value=""
+                      searchable={true}
+                      onChange={(val) => addPrItem(Number(val))}
+                      placeholder="+ Add Product Variant..."
+                      options={allVariants.map((v) => ({
+                        value: String(v.id),
+                        label: `${v.sku} - ${v.name}`,
+                      }))}
+                    />
+                  </div>
                 </div>
-              ) : (
-                <div className="table-responsive-wrapper" style={{ maxHeight: 220, overflowY: 'auto' }}>
-                  <table className="enterprise-data-table">
-                    <thead>
-                      <tr>
-                        <th>SKU &amp; Product</th>
-                        <th style={{ width: 120 }}>Requested Qty</th>
-                        <th style={{ width: 130 }}>Est. Price ($)</th>
-                        <th>Stock Context</th>
-                        <th style={{ width: 110, textAlign: 'right' }}>Est. Subtotal</th>
-                        <th style={{ width: 40 }}></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {prItems.map((item, idx) => {
-                        const planning = stockPlanning[item.variant_id];
-                        return (
-                          <tr key={item.variant_id}>
-                            <td>
-                              <div style={{ fontWeight: 600 }}>{item.sku}</div>
-                              <div style={{ fontSize: 11, color: '#64748b' }}>{item.name}</div>
-                            </td>
-                            <td>
-                              <input
-                                type="number"
-                                min={1}
-                                className="form-input"
-                                style={{ height: 32, padding: '4px 8px' }}
-                                value={item.qty}
-                                onChange={(e) => {
-                                  const val = Math.max(1, parseInt(e.target.value) || 1);
-                                  setPrItems((prev) => prev.map((x, i) => (i === idx ? { ...x, qty: val } : x)));
-                                }}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                type="number"
-                                min={0}
-                                step="0.01"
-                                className="form-input"
-                                style={{ height: 32, padding: '4px 8px' }}
-                                value={item.unit_price}
-                                onChange={(e) => {
-                                  const val = Math.max(0, parseFloat(e.target.value) || 0);
-                                  setPrItems((prev) => prev.map((x, i) => (i === idx ? { ...x, unit_price: val } : x)));
-                                }}
-                              />
-                            </td>
-                            <td>
-                              {planning ? (
-                                <div style={{ fontSize: 10, lineHeight: 1.3 }}>
-                                  <span style={{ color: '#0284c7', fontWeight: 600 }}>Avail: {planning.available}</span> &bull;{' '}
-                                  <span style={{ color: '#64748b' }}>On Hand: {planning.on_hand}</span> &bull;{' '}
-                                  <span style={{ color: '#d97706' }}>On Order: {planning.on_order}</span>
-                                </div>
-                              ) : (
-                                <span style={{ fontSize: 10, color: '#94a3b8' }}>Live stock synced</span>
-                              )}
-                            </td>
-                            <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                              ${(item.qty * item.unit_price).toFixed(2)}
-                            </td>
-                            <td>
-                              <button
-                                onClick={() => setPrItems((prev) => prev.filter((_, i) => i !== idx))}
-                                style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer' }}
-                              >
-                                <X size={16} />
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+
+                {prItems.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '32px 16px', border: '1px dashed #cbd5e1', borderRadius: 10, color: '#64748b', fontSize: 13, background: '#f8fafc' }}>
+                    Select product variants from the dropdown above to add line items to your requisition.
+                  </div>
+                ) : (
+                  <div className="table-responsive-wrapper" style={{ maxHeight: 220, overflowY: 'auto' }}>
+                    <table className="enterprise-data-table">
+                      <thead>
+                        <tr>
+                          <th>SKU &amp; Product</th>
+                          <th style={{ width: 110 }}>Requested</th>
+                          <th style={{ width: 120 }}>Est. Price ($)</th>
+                          <th>Stock Advisory</th>
+                          <th style={{ width: 110, textAlign: 'right' }}>Est. Subtotal</th>
+                          <th style={{ width: 36 }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {prItems.map((item, idx) => {
+                          const planning = stockPlanning[item.variant_id];
+                          return (
+                            <tr key={item.variant_id}>
+                              <td>
+                                <div style={{ fontWeight: 600 }}>{item.sku}</div>
+                                <div style={{ fontSize: 11, color: '#64748b' }}>{item.name}</div>
+                              </td>
+                              <td>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  className="form-input"
+                                  style={{ height: 32, padding: '4px 8px' }}
+                                  value={item.qty}
+                                  onChange={(e) => {
+                                    const val = Math.max(1, parseInt(e.target.value) || 1);
+                                    setPrItems((prev) => prev.map((x, i) => (i === idx ? { ...x, qty: val } : x)));
+                                  }}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  className="form-input"
+                                  style={{ height: 32, padding: '4px 8px' }}
+                                  value={item.unit_price}
+                                  onChange={(e) => {
+                                    const val = Math.max(0, parseFloat(e.target.value) || 0);
+                                    setPrItems((prev) => prev.map((x, i) => (i === idx ? { ...x, unit_price: val } : x)));
+                                  }}
+                                />
+                              </td>
+                              <td>
+                                {planning ? (
+                                  <div style={{ display: 'flex', gap: 6, fontSize: 10, flexWrap: 'wrap' }}>
+                                    <span style={{ background: '#dcfce7', color: '#15803d', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>
+                                      Avail: {planning.available}
+                                    </span>
+                                    <span style={{ background: '#f1f5f9', color: '#475569', padding: '1px 5px', borderRadius: 4, fontWeight: 600 }}>
+                                      On Hand: {planning.on_hand}
+                                    </span>
+                                    <span style={{ background: '#ffedd5', color: '#c2410c', padding: '1px 5px', borderRadius: 4, fontWeight: 600 }}>
+                                      On Order: {planning.on_order}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span style={{ fontSize: 11, color: '#94a3b8' }}>Live stock synced</span>
+                                )}
+                              </td>
+                              <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                                ${(item.qty * item.unit_price).toFixed(2)}
+                              </td>
+                              <td>
+                                <button
+                                  onClick={() => setPrItems((prev) => prev.filter((_, i) => i !== idx))}
+                                  style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer' }}
+                                >
+                                  <X size={15} />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Total Footer */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #e2e8f0', paddingTop: 14 }}>
+            {/* Modal Footer */}
+            <div className="procurement-modal-footer">
               <div>
-                <span style={{ fontSize: 13, color: '#64748b' }}>Estimated Total: </span>
+                <span style={{ fontSize: 13, color: '#64748b' }}>Estimated Subtotal: </span>
                 <span style={{ fontSize: 18, fontWeight: 800, color: '#0f172a' }}>
                   ${prItems.reduce((acc, x) => acc + x.qty * x.unit_price, 0).toFixed(2)}
                 </span>
               </div>
 
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => setShowCreatePrModal(false)} className="btn-outline">
+                <button onClick={() => setShowCreatePrModal(false)} className="btn-outline" disabled={isSubmitting}>
                   Cancel
                 </button>
-                <button onClick={() => handleSaveRequisition(false)} className="btn-outline">
+                <button onClick={() => handleSaveRequisition(false)} className="btn-outline" disabled={isSubmitting}>
                   Save as Draft
                 </button>
-                <button onClick={() => handleSaveRequisition(true)} className="btn-primary">
-                  Submit for Approval
+                <button onClick={() => handleSaveRequisition(true)} className="btn-primary" disabled={isSubmitting}>
+                  {isSubmitting ? 'Submitting...' : 'Submit for Approval'}
                 </button>
               </div>
             </div>
@@ -1606,17 +1671,22 @@ export const PurchaseOrdersPage: React.FC = () => {
       {/* MODAL 2: VIEW PURCHASE REQUISITION DETAILS                */}
       {/* ========================================================= */}
       {showViewPrModal && selectedPr && (
-        <div className="modal-overlay" style={{ zIndex: 9999 }}>
-          <div className="modal-container" style={{ maxWidth: 780, width: '92%', backgroundColor: '#ffffff', borderRadius: 12, padding: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', paddingBottom: 14, marginBottom: 16 }}>
+        <div
+          className="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowViewPrModal(false);
+          }}
+        >
+          <div className="procurement-modal" style={{ maxWidth: 840 }}>
+            <div className="procurement-modal-header">
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#0f172a' }}>
                     Requisition {selectedPr.pr_number}
                   </h3>
                   <span style={{
-                    padding: '2px 8px',
-                    borderRadius: 4,
+                    padding: '3px 8px',
+                    borderRadius: 6,
                     fontSize: 10,
                     fontWeight: 700,
                     textTransform: 'uppercase',
@@ -1635,93 +1705,105 @@ export const PurchaseOrdersPage: React.FC = () => {
               </button>
             </div>
 
-            {/* Requisition Meta Details */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-              gap: 12,
-              backgroundColor: '#f8fafc',
-              padding: 12,
-              borderRadius: 8,
-              marginBottom: 16,
-              fontSize: 12,
-            }}>
-              <div><strong>Warehouse:</strong> {selectedPr.warehouse?.name}</div>
-              <div><strong>Priority:</strong> {selectedPr.priority?.toUpperCase()}</div>
-              <div><strong>Required By:</strong> {selectedPr.required_by_date || 'Flexible'}</div>
-              <div><strong>Approved By:</strong> {selectedPr.approver?.name || 'Pending'}</div>
-            </div>
-
-            {selectedPr.purpose && (
-              <div style={{ marginBottom: 12, fontSize: 13 }}>
-                <strong>Purpose:</strong> {selectedPr.purpose}
+            <div className="procurement-modal-body">
+              {/* Meta Grid */}
+              <div className="procurement-meta-box">
+                <div className="procurement-meta-item">
+                  <strong>Warehouse</strong>
+                  <span>{selectedPr.warehouse?.name} ({selectedPr.warehouse?.code})</span>
+                </div>
+                <div className="procurement-meta-item">
+                  <strong>Priority</strong>
+                  <span style={{ textTransform: 'uppercase', color: selectedPr.priority === 'urgent' ? '#dc2626' : '#2563eb' }}>
+                    {selectedPr.priority}
+                  </span>
+                </div>
+                <div className="procurement-meta-item">
+                  <strong>Required By</strong>
+                  <span>{selectedPr.required_by_date || 'Flexible'}</span>
+                </div>
+                <div className="procurement-meta-item">
+                  <strong>Approver</strong>
+                  <span>{selectedPr.approver?.name || 'Pending Review'}</span>
+                </div>
               </div>
-            )}
-            {selectedPr.justification && (
-              <div style={{ marginBottom: 16, fontSize: 13, color: '#475569' }}>
-                <strong>Justification:</strong> {selectedPr.justification}
-              </div>
-            )}
 
-            {/* Line Items */}
-            <div className="table-responsive-wrapper" style={{ maxHeight: 200, overflowY: 'auto', marginBottom: 16 }}>
-              <table className="enterprise-data-table">
-                <thead>
-                  <tr>
-                    <th>SKU &amp; Description</th>
-                    <th>Requested</th>
-                    <th>Approved</th>
-                    <th>Ordered</th>
-                    <th>Remaining</th>
-                    <th style={{ textAlign: 'right' }}>Est. Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(selectedPr.items || []).map((item: any) => (
-                    <tr key={item.id}>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{item.sku}</div>
-                        <div style={{ fontSize: 11, color: '#64748b' }}>{item.product_name}</div>
-                      </td>
-                      <td>{item.requested_quantity} {item.uom}</td>
-                      <td>{item.approved_quantity || 0}</td>
-                      <td>{item.ordered_quantity || 0}</td>
-                      <td><strong style={{ color: '#2563eb' }}>{item.remaining_quantity || 0}</strong></td>
-                      <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                        ${Number(item.estimated_subtotal || 0).toFixed(2)}
-                      </td>
+              {selectedPr.purpose && (
+                <div style={{ marginBottom: 12, fontSize: 13 }}>
+                  <strong style={{ color: '#475569' }}>Purpose:</strong> {selectedPr.purpose}
+                </div>
+              )}
+              {selectedPr.justification && (
+                <div style={{ marginBottom: 16, fontSize: 13, color: '#475569' }}>
+                  <strong style={{ color: '#475569' }}>Business Justification:</strong> {selectedPr.justification}
+                </div>
+              )}
+
+              {/* Items Table */}
+              <div className="procurement-section-header">
+                <Layers size={14} color="#1e56ff" />
+                <span>Requisition Items</span>
+              </div>
+              <div className="table-responsive-wrapper" style={{ maxHeight: 200, overflowY: 'auto', marginBottom: 16 }}>
+                <table className="enterprise-data-table">
+                  <thead>
+                    <tr>
+                      <th>SKU &amp; Description</th>
+                      <th>Requested</th>
+                      <th>Approved</th>
+                      <th>Ordered</th>
+                      <th>Remaining</th>
+                      <th style={{ textAlign: 'right' }}>Est. Total</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {(selectedPr.items || []).map((item: any) => (
+                      <tr key={item.id}>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{item.sku}</div>
+                          <div style={{ fontSize: 11, color: '#64748b' }}>{item.product_name}</div>
+                        </td>
+                        <td>{item.requested_quantity} {item.uom}</td>
+                        <td>{item.approved_quantity || 0}</td>
+                        <td>{item.ordered_quantity || 0}</td>
+                        <td><strong style={{ color: '#2563eb' }}>{item.remaining_quantity || 0}</strong></td>
+                        <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                          ${Number(item.estimated_subtotal || 0).toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
-            {/* Audit History */}
-            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 12, marginBottom: 16 }}>
-              <h5 style={{ margin: '0 0 8px 0', fontSize: 12, textTransform: 'uppercase', color: '#64748b' }}>
-                Approval Audit Trail
-              </h5>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11 }}>
-                {(selectedPr.approvals || []).map((app: any, idx: number) => (
-                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', color: '#475569' }}>
-                    <span>
-                      <strong>{app.user?.name || 'User'}</strong> ({app.action}): {app.comments || 'No comment'}
-                    </span>
-                    <span style={{ color: '#94a3b8' }}>{app.created_at?.slice(0, 16).replace('T', ' ')}</span>
-                  </div>
-                ))}
+              {/* Approval Audit Trail */}
+              <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 14 }}>
+                <div className="procurement-section-header">
+                  <UserCheck size={14} color="#1e56ff" />
+                  <span>Approval Audit History</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12 }}>
+                  {(selectedPr.approvals || []).map((app: any, idx: number) => (
+                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 10px', background: '#f8fafc', borderRadius: 6, color: '#475569' }}>
+                      <span>
+                        <strong>{app.user?.name || 'User'}</strong> ({app.action}): {app.comments || 'No comment'}
+                      </span>
+                      <span style={{ color: '#94a3b8', fontSize: 11 }}>{app.created_at?.slice(0, 16).replace('T', ' ')}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 
-            {/* Modal Actions */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #e2e8f0', paddingTop: 14 }}>
+            {/* Modal Footer */}
+            <div className="procurement-modal-footer">
               <button
                 onClick={() => omsService.downloadPrPdf(selectedPr.id, `${selectedPr.pr_number}.pdf`)}
                 className="btn-outline"
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
               >
                 <Download size={14} />
-                <span>Download PDF</span>
+                <span>Download Official PDF</span>
               </button>
 
               <div style={{ display: 'flex', gap: 8 }}>
@@ -1762,15 +1844,20 @@ export const PurchaseOrdersPage: React.FC = () => {
       {/* MODAL 3: CONVERT PR TO PURCHASE ORDER                     */}
       {/* ========================================================= */}
       {showConvertPoModal && selectedPr && (
-        <div className="modal-overlay" style={{ zIndex: 10000 }}>
-          <div className="modal-container" style={{ maxWidth: 680, width: '92%', backgroundColor: '#ffffff', borderRadius: 12, padding: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', paddingBottom: 14, marginBottom: 16 }}>
+        <div
+          className="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowConvertPoModal(false);
+          }}
+        >
+          <div className="procurement-modal" style={{ maxWidth: 720 }}>
+            <div className="procurement-modal-header">
               <div>
-                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#0f172a' }}>
-                  Convert PR #{selectedPr.pr_number} to PO
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#0f172a' }}>
+                  Convert PR #{selectedPr.pr_number} to Purchase Order
                 </h3>
-                <p style={{ margin: '4px 0 0 0', fontSize: 12, color: '#64748b' }}>
-                  Assign supplier and specify quantities to commit into an active Purchase Order.
+                <p style={{ margin: '3px 0 0 0', fontSize: 12, color: '#64748b' }}>
+                  Assign supplier and specify line quantities to commit into a formal Purchase Order.
                 </p>
               </div>
               <button onClick={() => setShowConvertPoModal(false)} className="topbar-icon-button">
@@ -1778,44 +1865,45 @@ export const PurchaseOrdersPage: React.FC = () => {
               </button>
             </div>
 
-            <div className="finovo-form-grid-2" style={{ marginBottom: 16 }}>
-              <div>
-                <label className="form-label">Supplier Name *</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={poSupplierName}
-                  onChange={(e) => setPoSupplierName(e.target.value)}
-                  placeholder="e.g. Zebra Technologies, Honeywell"
-                />
+            <div className="procurement-modal-body">
+              <div className="finovo-form-grid-2" style={{ marginBottom: 16 }}>
+                <div>
+                  <label className="form-label">Supplier / Vendor Name *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={poSupplierName}
+                    onChange={(e) => setPoSupplierName(e.target.value)}
+                    placeholder="e.g. Zebra Technologies, Honeywell"
+                  />
+                </div>
+
+                <div>
+                  <label className="form-label">Payment Terms</label>
+                  <CustomDropdown
+                    value={poPaymentTerms}
+                    onChange={(val) => setPoPaymentTerms(val)}
+                    options={[
+                      { value: 'Net 15', label: 'Net 15 Days' },
+                      { value: 'Net 30', label: 'Net 30 Days' },
+                      { value: 'Net 60', label: 'Net 60 Days' },
+                      { value: 'Immediate', label: 'Cash on Delivery (Immediate)' },
+                    ]}
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="form-label">Payment Terms</label>
-                <CustomDropdown
-                  value={poPaymentTerms}
-                  onChange={(val) => setPoPaymentTerms(val)}
-                  options={[
-                    { value: 'Net 15', label: 'Net 15 Days' },
-                    { value: 'Net 30', label: 'Net 30 Days' },
-                    { value: 'Net 60', label: 'Net 60 Days' },
-                    { value: 'Immediate', label: 'Cash on Delivery' },
-                  ]}
-                />
+              <div className="procurement-section-header">
+                <Layers size={14} color="#1e56ff" />
+                <span>Allocate Quantities to Order</span>
               </div>
-            </div>
-
-            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 14, marginBottom: 16 }}>
-              <h4 style={{ margin: '0 0 10px 0', fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
-                Allocate Quantities to Order
-              </h4>
               <div className="table-responsive-wrapper">
                 <table className="enterprise-data-table">
                   <thead>
                     <tr>
                       <th>SKU &amp; Description</th>
                       <th>Approved</th>
-                      <th>Already Ordered</th>
+                      <th>Ordered</th>
                       <th style={{ width: 140 }}>Order Now Qty</th>
                     </tr>
                   </thead>
@@ -1843,7 +1931,7 @@ export const PurchaseOrdersPage: React.FC = () => {
                                 setConvertItemQuantities((prev) => ({ ...prev, [item.id]: val }));
                               }}
                             />
-                            <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>Max: {maxOrder}</div>
+                            <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>Remaining: {maxOrder}</div>
                           </td>
                         </tr>
                       );
@@ -1853,12 +1941,12 @@ export const PurchaseOrdersPage: React.FC = () => {
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, borderTop: '1px solid #e2e8f0', paddingTop: 14 }}>
-              <button onClick={() => setShowConvertPoModal(false)} className="btn-outline">
+            <div className="procurement-modal-footer">
+              <button onClick={() => setShowConvertPoModal(false)} className="btn-outline" disabled={isSubmitting}>
                 Cancel
               </button>
-              <button onClick={handleExecuteConvertPo} className="btn-primary">
-                Generate Purchase Order
+              <button onClick={handleExecuteConvertPo} className="btn-primary" disabled={isSubmitting}>
+                {isSubmitting ? 'Generating...' : 'Generate Purchase Order'}
               </button>
             </div>
           </div>
@@ -1869,24 +1957,37 @@ export const PurchaseOrdersPage: React.FC = () => {
       {/* MODAL 4: REJECT PR MODAL                                  */}
       {/* ========================================================= */}
       {showRejectPrModal && (
-        <div className="modal-overlay" style={{ zIndex: 10001 }}>
-          <div className="modal-container" style={{ maxWidth: 460, width: '90%', backgroundColor: '#ffffff', borderRadius: 12, padding: 24 }}>
-            <h3 style={{ margin: '0 0 8px 0', fontSize: 16, fontWeight: 700, color: '#dc2626' }}>
-              Reject Purchase Requisition
-            </h3>
-            <p style={{ margin: '0 0 14px 0', fontSize: 12, color: '#64748b' }}>
-              Please provide a specific business reason for rejecting this requisition.
-            </p>
+        <div
+          className="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowRejectPrModal(false);
+          }}
+        >
+          <div className="procurement-modal" style={{ maxWidth: 480 }}>
+            <div className="procurement-modal-header">
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#dc2626' }}>
+                Reject Purchase Requisition
+              </h3>
+              <button onClick={() => setShowRejectPrModal(false)} className="topbar-icon-button">
+                <X size={16} />
+              </button>
+            </div>
 
-            <textarea
-              className="form-input"
-              style={{ height: 90, marginBottom: 16 }}
-              placeholder="e.g. Out of Q4 budget; inventory surplus discovered in secondary facility..."
-              value={rejectionReason}
-              onChange={(e) => setRejectionReason(e.target.value)}
-            />
+            <div className="procurement-modal-body">
+              <p style={{ margin: '0 0 12px 0', fontSize: 13, color: '#64748b' }}>
+                Please provide a formal business reason for rejecting this requisition.
+              </p>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <textarea
+                className="form-input"
+                style={{ height: 90, width: '100%' }}
+                placeholder="e.g. Budget ceiling reached; alternate surplus located in secondary hub..."
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+              />
+            </div>
+
+            <div className="procurement-modal-footer">
               <button onClick={() => setShowRejectPrModal(false)} className="btn-outline">
                 Cancel
               </button>
@@ -1902,15 +2003,20 @@ export const PurchaseOrdersPage: React.FC = () => {
       {/* MODAL 5: RECEIVE INBOUND SHIPMENT (CREATE GRN)            */}
       {/* ========================================================= */}
       {showCreateGrnModal && selectedPo && (
-        <div className="modal-overlay" style={{ zIndex: 9999 }}>
-          <div className="modal-container" style={{ maxWidth: 860, width: '92%', backgroundColor: '#ffffff', borderRadius: 12, padding: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', paddingBottom: 14, marginBottom: 16 }}>
+        <div
+          className="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowCreateGrnModal(false);
+          }}
+        >
+          <div className="procurement-modal" style={{ maxWidth: 900 }}>
+            <div className="procurement-modal-header">
               <div>
-                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#0f172a' }}>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#0f172a' }}>
                   Dock Receiving: Goods Received Note (GRN)
                 </h3>
-                <p style={{ margin: '4px 0 0 0', fontSize: 12, color: '#64748b' }}>
-                  Receiving shipment against PO #{selectedPo.po_number} ({selectedPo.supplier_name})
+                <p style={{ margin: '3px 0 0 0', fontSize: 12, color: '#64748b' }}>
+                  Receiving inbound shipment against PO #{selectedPo.po_number} ({selectedPo.supplier_name})
                 </p>
               </div>
               <button onClick={() => setShowCreateGrnModal(false)} className="topbar-icon-button">
@@ -1918,57 +2024,58 @@ export const PurchaseOrdersPage: React.FC = () => {
               </button>
             </div>
 
-            <div className="finovo-form-grid-2" style={{ marginBottom: 16 }}>
-              <div>
-                <label className="form-label">Supplier Delivery Note / Bill of Lading *</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={grnDeliveryNote}
-                  onChange={(e) => setGrnDeliveryNote(e.target.value)}
-                  placeholder="e.g. DN-902188"
-                />
-              </div>
-
-              <div>
-                <label className="form-label">Carrier / Transport</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={grnCarrier}
-                  onChange={(e) => setGrnCarrier(e.target.value)}
-                  placeholder="e.g. FedEx, DHL, Freight Line"
-                />
-              </div>
-
-              <div>
-                <label className="form-label">Tracking / Vehicle #</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={grnVehicle}
-                  onChange={(e) => setGrnVehicle(e.target.value)}
-                  placeholder="e.g. TRK-88219"
-                />
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', paddingTop: 24 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+            <div className="procurement-modal-body">
+              <div className="finovo-form-grid-2" style={{ marginBottom: 16 }}>
+                <div>
+                  <label className="form-label">Delivery Note / Bill of Lading # *</label>
                   <input
-                    type="checkbox"
-                    checked={grnAllowOverReceipt}
-                    onChange={(e) => setGrnAllowOverReceipt(e.target.checked)}
+                    type="text"
+                    className="form-input"
+                    value={grnDeliveryNote}
+                    onChange={(e) => setGrnDeliveryNote(e.target.value)}
+                    placeholder="e.g. DN-902188"
                   />
-                  <span>Allow Over-Receipt (&gt; 10% tolerance override)</span>
-                </label>
-              </div>
-            </div>
+                </div>
 
-            {/* Line Items Reconciliation Table */}
-            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 14, marginBottom: 16 }}>
-              <h4 style={{ margin: '0 0 10px 0', fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
-                Item Receiving Count &amp; Condition Breakdown
-              </h4>
+                <div>
+                  <label className="form-label">Carrier / Transport Method</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={grnCarrier}
+                    onChange={(e) => setGrnCarrier(e.target.value)}
+                    placeholder="e.g. FedEx Ground, DHL, Freight Line"
+                  />
+                </div>
+
+                <div>
+                  <label className="form-label">Tracking / Vehicle Plate #</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={grnVehicle}
+                    onChange={(e) => setGrnVehicle(e.target.value)}
+                    placeholder="e.g. TRK-88219"
+                  />
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', paddingTop: 26 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+                    <input
+                      type="checkbox"
+                      checked={grnAllowOverReceipt}
+                      onChange={(e) => setGrnAllowOverReceipt(e.target.checked)}
+                    />
+                    <span>Allow Over-Receipt (&gt; 10% tolerance override)</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Line Items Reconciliation Table */}
+              <div className="procurement-section-header">
+                <Boxes size={14} color="#1e56ff" />
+                <span>Physical Receiving &amp; Quality Condition Breakdown</span>
+              </div>
               <div className="table-responsive-wrapper" style={{ maxHeight: 250, overflowY: 'auto' }}>
                 <table className="enterprise-data-table">
                   <thead>
@@ -1978,8 +2085,8 @@ export const PurchaseOrdersPage: React.FC = () => {
                       <th style={{ width: 100 }}>Received</th>
                       <th style={{ width: 100, color: '#16a34a' }}>Accepted</th>
                       <th style={{ width: 90, color: '#dc2626' }}>Damaged</th>
-                      <th style={{ width: 90, color: '#d97706' }}>Quarantine</th>
-                      <th style={{ width: 120 }}>Lot / Batch #</th>
+                      <th style={{ width: 90, color: '#c2410c' }}>Quarantine</th>
+                      <th style={{ width: 130 }}>Lot / Batch #</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1996,7 +2103,7 @@ export const PurchaseOrdersPage: React.FC = () => {
                         <tr key={poi.id}>
                           <td>
                             <div style={{ fontWeight: 600 }}>{poi.sku}</div>
-                            <div style={{ fontSize: 10, color: '#64748b' }}>{poi.product_name}</div>
+                            <div style={{ fontSize: 11, color: '#64748b' }}>{poi.product_name}</div>
                           </td>
                           <td>
                             {poi.ordered_quantity}
@@ -2090,12 +2197,12 @@ export const PurchaseOrdersPage: React.FC = () => {
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, borderTop: '1px solid #e2e8f0', paddingTop: 14 }}>
-              <button onClick={() => setShowCreateGrnModal(false)} className="btn-outline">
+            <div className="procurement-modal-footer">
+              <button onClick={() => setShowCreateGrnModal(false)} className="btn-outline" disabled={isSubmitting}>
                 Cancel
               </button>
-              <button onClick={handleSaveGrn} className="btn-primary">
-                Record Inbound GRN
+              <button onClick={handleSaveGrn} className="btn-primary" disabled={isSubmitting}>
+                {isSubmitting ? 'Recording...' : 'Record Inbound GRN'}
               </button>
             </div>
           </div>
@@ -2106,22 +2213,27 @@ export const PurchaseOrdersPage: React.FC = () => {
       {/* MODAL 6: VIEW GOODS RECEIVED NOTE DETAILS                 */}
       {/* ========================================================= */}
       {showViewGrnModal && selectedGrn && (
-        <div className="modal-overlay" style={{ zIndex: 9999 }}>
-          <div className="modal-container" style={{ maxWidth: 840, width: '92%', backgroundColor: '#ffffff', borderRadius: 12, padding: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', paddingBottom: 14, marginBottom: 16 }}>
+        <div
+          className="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowViewGrnModal(false);
+          }}
+        >
+          <div className="procurement-modal" style={{ maxWidth: 860 }}>
+            <div className="procurement-modal-header">
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#0f172a' }}>
-                    GRN {selectedGrn.grn_number}
+                    Goods Received Note {selectedGrn.grn_number}
                   </h3>
                   <span style={{
-                    padding: '2px 8px',
-                    borderRadius: 4,
+                    padding: '3px 8px',
+                    borderRadius: 6,
                     fontSize: 10,
                     fontWeight: 700,
                     textTransform: 'uppercase',
-                    backgroundColor: selectedGrn.status === 'posted' ? '#dcfce7' : '#fef3c7',
-                    color: selectedGrn.status === 'posted' ? '#15803d' : '#b45309',
+                    backgroundColor: selectedGrn.status === 'posted' ? '#dcfce7' : '#ffedd5',
+                    color: selectedGrn.status === 'posted' ? '#15803d' : '#c2410c',
                   }}>
                     {selectedGrn.status}
                   </span>
@@ -2135,77 +2247,100 @@ export const PurchaseOrdersPage: React.FC = () => {
               </button>
             </div>
 
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-              gap: 12,
-              backgroundColor: '#f8fafc',
-              padding: 12,
-              borderRadius: 8,
-              marginBottom: 16,
-              fontSize: 12,
-            }}>
-              <div><strong>Supplier:</strong> {selectedGrn.supplier_name}</div>
-              <div><strong>Delivery Note:</strong> {selectedGrn.supplier_delivery_note || 'N/A'}</div>
-              <div><strong>Carrier:</strong> {selectedGrn.carrier || 'N/A'}</div>
-              <div><strong>Receiving Dock:</strong> {selectedGrn.receiving_location?.code || 'Dock Inbound'}</div>
-            </div>
+            <div className="procurement-modal-body">
+              <div className="procurement-meta-box">
+                <div className="procurement-meta-item">
+                  <strong>Supplier</strong>
+                  <span>{selectedGrn.supplier_name}</span>
+                </div>
+                <div className="procurement-meta-item">
+                  <strong>Delivery Note #</strong>
+                  <span>{selectedGrn.supplier_delivery_note || 'N/A'}</span>
+                </div>
+                <div className="procurement-meta-item">
+                  <strong>Carrier &amp; Tracking</strong>
+                  <span>{selectedGrn.carrier || 'Freight Line'} ({selectedGrn.tracking_or_vehicle_number || 'N/A'})</span>
+                </div>
+                <div className="procurement-meta-item">
+                  <strong>Receiving Dock</strong>
+                  <span>{selectedGrn.receiving_location?.code || 'Inbound Dock'}</span>
+                </div>
+              </div>
 
-            {/* Item Breakdown Table */}
-            <div className="table-responsive-wrapper" style={{ maxHeight: 220, overflowY: 'auto', marginBottom: 16 }}>
-              <table className="enterprise-data-table">
-                <thead>
-                  <tr>
-                    <th>SKU &amp; Description</th>
-                    <th>Ordered</th>
-                    <th>Prior</th>
-                    <th>Received</th>
-                    <th style={{ color: '#16a34a' }}>Accepted</th>
-                    <th style={{ color: '#dc2626' }}>Damaged</th>
-                    <th style={{ color: '#d97706' }}>Quarantine</th>
-                    <th>Lot / Batch</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(selectedGrn.items || []).map((item: any) => (
-                    <tr key={item.id}>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{item.sku}</div>
-                        <div style={{ fontSize: 10, color: '#64748b' }}>{item.product_name}</div>
-                      </td>
-                      <td>{item.ordered_quantity}</td>
-                      <td>{item.previously_received_quantity}</td>
-                      <td><strong>{item.received_quantity}</strong></td>
-                      <td style={{ color: '#16a34a', fontWeight: 700 }}>{item.accepted_quantity}</td>
-                      <td style={{ color: '#dc2626', fontWeight: 700 }}>{item.damaged_quantity}</td>
-                      <td style={{ color: '#d97706', fontWeight: 700 }}>{item.quarantined_quantity}</td>
-                      <td>{item.lot_number || '-'}</td>
+              {/* Item Breakdown Table */}
+              <div className="procurement-section-header">
+                <Boxes size={14} color="#1e56ff" />
+                <span>Physical Custody Matrix</span>
+              </div>
+              <div className="table-responsive-wrapper" style={{ maxHeight: 220, overflowY: 'auto' }}>
+                <table className="enterprise-data-table">
+                  <thead>
+                    <tr>
+                      <th>SKU &amp; Description</th>
+                      <th>Ordered</th>
+                      <th>Prior</th>
+                      <th>Received</th>
+                      <th style={{ color: '#15803d' }}>Accepted</th>
+                      <th style={{ color: '#dc2626' }}>Damaged</th>
+                      <th style={{ color: '#c2410c' }}>Quarantine</th>
+                      <th>Lot / Batch</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {(selectedGrn.items || []).map((item: any) => (
+                      <tr key={item.id}>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{item.sku}</div>
+                          <div style={{ fontSize: 11, color: '#64748b' }}>{item.product_name}</div>
+                        </td>
+                        <td>{item.ordered_quantity}</td>
+                        <td>{item.previously_received_quantity}</td>
+                        <td><strong>{item.received_quantity}</strong></td>
+                        <td style={{ color: '#15803d', fontWeight: 700 }}>{item.accepted_quantity}</td>
+                        <td style={{ color: '#dc2626', fontWeight: 700 }}>{item.damaged_quantity}</td>
+                        <td style={{ color: '#c2410c', fontWeight: 700 }}>{item.quarantined_quantity}</td>
+                        <td>{item.lot_number || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #e2e8f0', paddingTop: 14 }}>
+            <div className="procurement-modal-footer">
               <button
                 onClick={() => omsService.downloadGrnPdf(selectedGrn.id, `${selectedGrn.grn_number}.pdf`)}
                 className="btn-outline"
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
               >
                 <Download size={14} />
-                <span>Download PDF</span>
+                <span>Download Official PDF</span>
               </button>
 
               <div style={{ display: 'flex', gap: 8 }}>
                 {selectedGrn.status !== 'posted' && (
-                  <button
-                    onClick={() => handlePostGrnToInventory(selectedGrn)}
-                    className="btn-primary"
-                    style={{ backgroundColor: '#059669', borderColor: '#059669', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                  >
-                    <Boxes size={14} />
-                    <span>Post to Authoritative Inventory</span>
-                  </button>
+                  <>
+                    <button
+                      onClick={() => {
+                        setShowViewGrnModal(false);
+                        openInspectGrn(selectedGrn);
+                      }}
+                      className="btn-outline"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                    >
+                      <ClipboardCheck size={14} />
+                      <span>Inspect &amp; Adjust</span>
+                    </button>
+                    <button
+                      onClick={() => handlePostGrnToInventory(selectedGrn)}
+                      className="btn-primary"
+                      style={{ backgroundColor: '#059669', borderColor: '#059669', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                      disabled={isSubmitting}
+                    >
+                      <Boxes size={14} />
+                      <span>{isSubmitting ? 'Posting...' : 'Post to Authoritative Inventory'}</span>
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -2214,105 +2349,61 @@ export const PurchaseOrdersPage: React.FC = () => {
       )}
 
       {/* ========================================================= */}
-      {/* MODAL 7: STANDALONE PURCHASE ORDER CREATION               */}
+      {/* MODAL 7: INSPECT / RECONCILE GRN                          */}
       {/* ========================================================= */}
-      {showCreatePoModal && (
-        <div className="modal-overlay" style={{ zIndex: 9999 }}>
-          <div className="modal-container" style={{ maxWidth: 800, width: '92%', backgroundColor: '#ffffff', borderRadius: 12, padding: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', paddingBottom: 14, marginBottom: 16 }}>
+      {showInspectGrnModal && selectedGrn && (
+        <div
+          className="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowInspectGrnModal(false);
+          }}
+        >
+          <div className="procurement-modal" style={{ maxWidth: 840 }}>
+            <div className="procurement-modal-header">
               <div>
-                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#0f172a' }}>Create Purchase Order</h3>
-                <p style={{ margin: '4px 0 0 0', fontSize: 12, color: '#64748b' }}>
-                  Issue an official procurement order directly to an authorized supplier.
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#0f172a' }}>
+                  Quality Inspection &amp; Condition Reconciliation: GRN #{selectedGrn.grn_number}
+                </h3>
+                <p style={{ margin: '3px 0 0 0', fontSize: 12, color: '#64748b' }}>
+                  Adjust condition quantities following laboratory/QC inspection.
                 </p>
               </div>
-              <button onClick={() => setShowCreatePoModal(false)} className="topbar-icon-button">
+              <button onClick={() => setShowInspectGrnModal(false)} className="topbar-icon-button">
                 <X size={18} />
               </button>
             </div>
 
-            <div className="finovo-form-grid-2" style={{ marginBottom: 16 }}>
-              <div>
-                <label className="form-label">Supplier Name *</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={poSupplier}
-                  onChange={(e) => setPoSupplier(e.target.value)}
-                  placeholder="e.g. Acme Industrial Supplies Ltd"
-                />
-              </div>
-
-              <div>
-                <label className="form-label">Destination Warehouse *</label>
-                <CustomDropdown
-                  value={String(poWhId)}
-                  onChange={(val) => setPoWhId(Number(val))}
-                  options={warehouses.map((w) => ({ value: String(w.id), label: `${w.name} (${w.code})` }))}
-                />
-              </div>
-            </div>
-
-            {/* Line Items */}
-            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 14, marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                <h4 style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Order Line Items</h4>
-                <div style={{ width: 280 }}>
-                  <CustomDropdown
-                    value=""
-                    onChange={(val) => {
-                      const v = allVariants.find((x) => x.id === Number(val));
-                      if (v && !poStandaloneItems.some((x) => x.variant_id === v.id)) {
-                        setPoStandaloneItems((prev) => [
-                          ...prev,
-                          {
-                            variant_id: v.id,
-                            sku: v.sku,
-                            name: v.name,
-                            qty: 10,
-                            unit_cost: v.price,
-                            uom: v.uom,
-                          },
-                        ]);
-                      }
-                    }}
-                    placeholder="+ Add Product Variant..."
-                    options={allVariants.map((v) => ({
-                      value: String(v.id),
-                      label: `${v.sku} - ${v.name}`,
-                    }))}
-                  />
-                </div>
-              </div>
-
-              <div className="table-responsive-wrapper" style={{ maxHeight: 200, overflowY: 'auto' }}>
+            <div className="procurement-modal-body">
+              <div className="table-responsive-wrapper" style={{ maxHeight: 260, overflowY: 'auto' }}>
                 <table className="enterprise-data-table">
                   <thead>
                     <tr>
-                      <th>SKU &amp; Name</th>
-                      <th style={{ width: 120 }}>Quantity</th>
-                      <th style={{ width: 130 }}>Unit Cost ($)</th>
-                      <th style={{ width: 120, textAlign: 'right' }}>Total Cost</th>
-                      <th style={{ width: 40 }}></th>
+                      <th>SKU</th>
+                      <th>Total Received</th>
+                      <th style={{ width: 100, color: '#15803d' }}>Accepted</th>
+                      <th style={{ width: 90, color: '#dc2626' }}>Damaged</th>
+                      <th style={{ width: 90, color: '#c2410c' }}>Quarantined</th>
+                      <th style={{ width: 130 }}>Lot / Batch #</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {poStandaloneItems.map((item, idx) => (
-                      <tr key={item.variant_id}>
+                    {inspectItems.map((item, idx) => (
+                      <tr key={item.id}>
                         <td>
                           <div style={{ fontWeight: 600 }}>{item.sku}</div>
-                          <div style={{ fontSize: 10, color: '#64748b' }}>{item.name}</div>
+                          <div style={{ fontSize: 10, color: '#64748b' }}>{item.product_name}</div>
                         </td>
+                        <td><strong>{item.received_quantity}</strong></td>
                         <td>
                           <input
                             type="number"
-                            min={1}
+                            min={0}
                             className="form-input"
-                            style={{ height: 32, padding: '4px 8px' }}
-                            value={item.qty}
+                            style={{ height: 32, padding: '2px 6px', borderColor: '#bbf7d0' }}
+                            value={item.accepted_quantity}
                             onChange={(e) => {
-                              const val = Math.max(1, parseInt(e.target.value) || 1);
-                              setPoStandaloneItems((prev) => prev.map((x, i) => (i === idx ? { ...x, qty: val } : x)));
+                              const val = Math.max(0, parseInt(e.target.value) || 0);
+                              setInspectItems((prev) => prev.map((x, i) => (i === idx ? { ...x, accepted_quantity: val } : x)));
                             }}
                           />
                         </td>
@@ -2320,26 +2411,38 @@ export const PurchaseOrdersPage: React.FC = () => {
                           <input
                             type="number"
                             min={0}
-                            step="0.01"
                             className="form-input"
-                            style={{ height: 32, padding: '4px 8px' }}
-                            value={item.unit_cost}
+                            style={{ height: 32, padding: '2px 6px', borderColor: '#fecaca' }}
+                            value={item.damaged_quantity}
                             onChange={(e) => {
-                              const val = Math.max(0, parseFloat(e.target.value) || 0);
-                              setPoStandaloneItems((prev) => prev.map((x, i) => (i === idx ? { ...x, unit_cost: val } : x)));
+                              const val = Math.max(0, parseInt(e.target.value) || 0);
+                              setInspectItems((prev) => prev.map((x, i) => (i === idx ? { ...x, damaged_quantity: val } : x)));
                             }}
                           />
                         </td>
-                        <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                          ${(item.qty * item.unit_cost).toFixed(2)}
+                        <td>
+                          <input
+                            type="number"
+                            min={0}
+                            className="form-input"
+                            style={{ height: 32, padding: '2px 6px', borderColor: '#fed7aa' }}
+                            value={item.quarantined_quantity}
+                            onChange={(e) => {
+                              const val = Math.max(0, parseInt(e.target.value) || 0);
+                              setInspectItems((prev) => prev.map((x, i) => (i === idx ? { ...x, quarantined_quantity: val } : x)));
+                            }}
+                          />
                         </td>
                         <td>
-                          <button
-                            onClick={() => setPoStandaloneItems((prev) => prev.filter((_, i) => i !== idx))}
-                            style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer' }}
-                          >
-                            <X size={16} />
-                          </button>
+                          <input
+                            type="text"
+                            className="form-input"
+                            style={{ height: 32, padding: '2px 6px' }}
+                            value={item.lot_number || ''}
+                            onChange={(e) => {
+                              setInspectItems((prev) => prev.map((x, i) => (i === idx ? { ...x, lot_number: e.target.value } : x)));
+                            }}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -2348,7 +2451,168 @@ export const PurchaseOrdersPage: React.FC = () => {
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #e2e8f0', paddingTop: 14 }}>
+            <div className="procurement-modal-footer">
+              <button onClick={() => setShowInspectGrnModal(false)} className="btn-outline" disabled={isSubmitting}>
+                Cancel
+              </button>
+              <button onClick={handleSaveInspection} className="btn-primary" disabled={isSubmitting}>
+                {isSubmitting ? 'Saving...' : 'Record Inspection'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL 8: STANDALONE PURCHASE ORDER CREATION               */}
+      {/* ========================================================= */}
+      {showCreatePoModal && (
+        <div
+          className="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowCreatePoModal(false);
+          }}
+        >
+          <div className="procurement-modal" style={{ maxWidth: 840 }}>
+            <div className="procurement-modal-header">
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#0f172a' }}>
+                  Create Purchase Order
+                </h3>
+                <p style={{ margin: '3px 0 0 0', fontSize: 12, color: '#64748b' }}>
+                  Issue an official procurement order directly to an authorized vendor.
+                </p>
+              </div>
+              <button onClick={() => setShowCreatePoModal(false)} className="topbar-icon-button">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="procurement-modal-body">
+              <div className="finovo-form-grid-2" style={{ marginBottom: 16 }}>
+                <div>
+                  <label className="form-label">Supplier / Vendor Name *</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={poSupplier}
+                    onChange={(e) => setPoSupplier(e.target.value)}
+                    placeholder="e.g. Acme Industrial Supplies Ltd"
+                  />
+                </div>
+
+                <div>
+                  <label className="form-label">Destination Warehouse *</label>
+                  <CustomDropdown
+                    value={String(poWhId)}
+                    onChange={(val) => setPoWhId(Number(val))}
+                    options={warehouses.map((w) => ({ value: String(w.id), label: `${w.name} (${w.code})` }))}
+                  />
+                </div>
+              </div>
+
+              {/* Line Items */}
+              <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                  <div className="procurement-section-header" style={{ margin: 0 }}>
+                    <Layers size={14} color="#1e56ff" />
+                    <span>Order Line Items</span>
+                  </div>
+
+                  <div style={{ width: 290 }}>
+                    <CustomDropdown
+                      value=""
+                      searchable={true}
+                      onChange={(val) => {
+                        const v = allVariants.find((x) => x.id === Number(val));
+                        if (v && !poStandaloneItems.some((x) => x.variant_id === v.id)) {
+                          setPoStandaloneItems((prev) => [
+                            ...prev,
+                            {
+                              variant_id: v.id,
+                              sku: v.sku,
+                              name: v.name,
+                              qty: 10,
+                              unit_cost: v.price,
+                              uom: v.uom,
+                            },
+                          ]);
+                        }
+                      }}
+                      placeholder="+ Add Product Variant..."
+                      options={allVariants.map((v) => ({
+                        value: String(v.id),
+                        label: `${v.sku} - ${v.name}`,
+                      }))}
+                    />
+                  </div>
+                </div>
+
+                <div className="table-responsive-wrapper" style={{ maxHeight: 200, overflowY: 'auto' }}>
+                  <table className="enterprise-data-table">
+                    <thead>
+                      <tr>
+                        <th>SKU &amp; Name</th>
+                        <th style={{ width: 120 }}>Quantity</th>
+                        <th style={{ width: 130 }}>Unit Cost ($)</th>
+                        <th style={{ width: 120, textAlign: 'right' }}>Total Cost</th>
+                        <th style={{ width: 36 }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {poStandaloneItems.map((item, idx) => (
+                        <tr key={item.variant_id}>
+                          <td>
+                            <div style={{ fontWeight: 600 }}>{item.sku}</div>
+                            <div style={{ fontSize: 11, color: '#64748b' }}>{item.name}</div>
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              min={1}
+                              className="form-input"
+                              style={{ height: 32, padding: '4px 8px' }}
+                              value={item.qty}
+                              onChange={(e) => {
+                                const val = Math.max(1, parseInt(e.target.value) || 1);
+                                setPoStandaloneItems((prev) => prev.map((x, i) => (i === idx ? { ...x, qty: val } : x)));
+                              }}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              className="form-input"
+                              style={{ height: 32, padding: '4px 8px' }}
+                              value={item.unit_cost}
+                              onChange={(e) => {
+                                const val = Math.max(0, parseFloat(e.target.value) || 0);
+                                setPoStandaloneItems((prev) => prev.map((x, i) => (i === idx ? { ...x, unit_cost: val } : x)));
+                              }}
+                            />
+                          </td>
+                          <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                            ${(item.qty * item.unit_cost).toFixed(2)}
+                          </td>
+                          <td>
+                            <button
+                              onClick={() => setPoStandaloneItems((prev) => prev.filter((_, i) => i !== idx))}
+                              style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer' }}
+                            >
+                              <X size={15} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div className="procurement-modal-footer">
               <div>
                 <span style={{ fontSize: 13, color: '#64748b' }}>Total Order Cost: </span>
                 <span style={{ fontSize: 18, fontWeight: 800, color: '#0f172a' }}>
@@ -2357,11 +2621,11 @@ export const PurchaseOrdersPage: React.FC = () => {
               </div>
 
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => setShowCreatePoModal(false)} className="btn-outline">
+                <button onClick={() => setShowCreatePoModal(false)} className="btn-outline" disabled={isSubmitting}>
                   Cancel
                 </button>
-                <button onClick={handleCreatePo} className="btn-primary">
-                  Issue Purchase Order
+                <button onClick={handleCreatePo} className="btn-primary" disabled={isSubmitting}>
+                  {isSubmitting ? 'Issuing...' : 'Issue Purchase Order'}
                 </button>
               </div>
             </div>
@@ -2370,20 +2634,25 @@ export const PurchaseOrdersPage: React.FC = () => {
       )}
 
       {/* ========================================================= */}
-      {/* MODAL 8: VIEW PURCHASE ORDER DETAILS                      */}
+      {/* MODAL 9: VIEW PURCHASE ORDER DETAILS                      */}
       {/* ========================================================= */}
       {showViewPoModal && selectedPo && (
-        <div className="modal-overlay" style={{ zIndex: 9999 }}>
-          <div className="modal-container" style={{ maxWidth: 740, width: '92%', backgroundColor: '#ffffff', borderRadius: 12, padding: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', paddingBottom: 14, marginBottom: 16 }}>
+        <div
+          className="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowViewPoModal(false);
+          }}
+        >
+          <div className="procurement-modal" style={{ maxWidth: 800 }}>
+            <div className="procurement-modal-header">
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#0f172a' }}>
                     Purchase Order {selectedPo.po_number}
                   </h3>
                   <span style={{
-                    padding: '2px 8px',
-                    borderRadius: 4,
+                    padding: '3px 8px',
+                    borderRadius: 6,
                     fontSize: 10,
                     fontWeight: 700,
                     textTransform: 'uppercase',
@@ -2402,44 +2671,69 @@ export const PurchaseOrdersPage: React.FC = () => {
               </button>
             </div>
 
-            {/* Items */}
-            <div className="table-responsive-wrapper" style={{ maxHeight: 220, overflowY: 'auto', marginBottom: 16 }}>
-              <table className="enterprise-data-table">
-                <thead>
-                  <tr>
-                    <th>SKU &amp; Description</th>
-                    <th>Ordered Qty</th>
-                    <th>Received Qty</th>
-                    <th>Outstanding</th>
-                    <th style={{ textAlign: 'right' }}>Unit Cost</th>
-                    <th style={{ textAlign: 'right' }}>Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(selectedPo.items || []).map((item: any) => (
-                    <tr key={item.id}>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{item.sku}</div>
-                        <div style={{ fontSize: 10, color: '#64748b' }}>{item.product_name}</div>
-                      </td>
-                      <td>{item.ordered_quantity}</td>
-                      <td><strong style={{ color: '#16a34a' }}>{item.received_quantity || 0}</strong></td>
-                      <td>
-                        <span style={{ color: '#2563eb', fontWeight: 600 }}>
-                          {Math.max(0, item.ordered_quantity - (item.received_quantity || 0))}
-                        </span>
-                      </td>
-                      <td style={{ textAlign: 'right' }}>${Number(item.unit_cost || 0).toFixed(2)}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                        ${Number(item.total_cost || (item.ordered_quantity * item.unit_cost)).toFixed(2)}
-                      </td>
+            <div className="procurement-modal-body">
+              <div className="procurement-meta-box">
+                <div className="procurement-meta-item">
+                  <strong>Warehouse</strong>
+                  <span>{selectedPo.warehouse?.name}</span>
+                </div>
+                <div className="procurement-meta-item">
+                  <strong>Payment Terms</strong>
+                  <span>{selectedPo.payment_terms || 'Net 30'}</span>
+                </div>
+                <div className="procurement-meta-item">
+                  <strong>Total Value</strong>
+                  <span>${Number(selectedPo.total_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="procurement-meta-item">
+                  <strong>Created By</strong>
+                  <span>{selectedPo.creator?.name || 'Authorized Buyer'}</span>
+                </div>
+              </div>
+
+              {/* Items Table */}
+              <div className="procurement-section-header">
+                <Layers size={14} color="#1e56ff" />
+                <span>PO Line Items &amp; Inbound Fulfillment</span>
+              </div>
+              <div className="table-responsive-wrapper" style={{ maxHeight: 220, overflowY: 'auto' }}>
+                <table className="enterprise-data-table">
+                  <thead>
+                    <tr>
+                      <th>SKU &amp; Description</th>
+                      <th>Ordered</th>
+                      <th>Received</th>
+                      <th>Outstanding</th>
+                      <th style={{ textAlign: 'right' }}>Unit Cost</th>
+                      <th style={{ textAlign: 'right' }}>Total</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {(selectedPo.items || []).map((item: any) => (
+                      <tr key={item.id}>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{item.sku}</div>
+                          <div style={{ fontSize: 11, color: '#64748b' }}>{item.product_name}</div>
+                        </td>
+                        <td>{item.ordered_quantity}</td>
+                        <td><strong style={{ color: '#16a34a' }}>{item.received_quantity || 0}</strong></td>
+                        <td>
+                          <span style={{ color: '#2563eb', fontWeight: 600 }}>
+                            {Math.max(0, item.ordered_quantity - (item.received_quantity || 0))}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>${Number(item.unit_cost || 0).toFixed(2)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                          ${Number(item.total_cost || (item.ordered_quantity * item.unit_cost)).toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, borderTop: '1px solid #e2e8f0', paddingTop: 14 }}>
+            <div className="procurement-modal-footer">
               <button onClick={() => setShowViewPoModal(false)} className="btn-outline">
                 Close
               </button>
@@ -2456,6 +2750,124 @@ export const PurchaseOrdersPage: React.FC = () => {
                   <span>Receive Goods (GRN)</span>
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSelectPoForGrnModal && (
+        <div
+          className="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowSelectPoForGrnModal(false);
+          }}
+        >
+          <div className="procurement-modal" style={{ maxWidth: 640 }}>
+            <div className="procurement-modal-header">
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#0f172a' }}>
+                  Select Purchase Order to Receive
+                </h3>
+                <p style={{ margin: '3px 0 0 0', fontSize: 12, color: '#64748b' }}>
+                  Choose an active purchase order that has arrived at your warehouse receiving dock.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowSelectPoForGrnModal(false)}
+                className="topbar-icon-button"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="procurement-modal-body">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {purchaseOrders
+                  .filter((po) => po.status !== 'received' && po.status !== 'cancelled')
+                  .map((po) => {
+                    const totalQty = (po.items || []).reduce(
+                      (acc: number, x: any) => acc + (x.ordered_quantity || 0),
+                      0
+                    );
+                    const recQty = (po.items || []).reduce(
+                      (acc: number, x: any) => acc + (x.received_quantity || 0),
+                      0
+                    );
+                    const outstanding = Math.max(0, totalQty - recQty);
+
+                    return (
+                      <div
+                        key={po.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '12px 16px',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 12,
+                          backgroundColor: '#f8fafc',
+                          transition: 'all 0.15s ease',
+                          cursor: 'pointer',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.borderColor = '#1e56ff';
+                          e.currentTarget.style.backgroundColor = '#eff6ff';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.borderColor = '#e2e8f0';
+                          e.currentTarget.style.backgroundColor = '#f8fafc';
+                        }}
+                        onClick={() => {
+                          setShowSelectPoForGrnModal(false);
+                          openCreateGrnFromPo(po);
+                        }}
+                      >
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontWeight: 700, color: '#1e56ff', fontSize: 14 }}>
+                              {po.po_number}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                textTransform: 'uppercase',
+                                padding: '2px 6px',
+                                borderRadius: 4,
+                                backgroundColor: po.status === 'partially_received' ? '#ffedd5' : '#dbeafe',
+                                color: po.status === 'partially_received' ? '#9a3412' : '#1e40af',
+                              }}
+                            >
+                              {po.status?.replace('_', ' ')}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>
+                            <strong>Supplier:</strong> {po.supplier_name} &bull;{' '}
+                            <strong>Warehouse:</strong> {po.warehouse?.name}
+                          </div>
+                        </div>
+
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
+                            {outstanding} pending units
+                          </div>
+                          <div style={{ fontSize: 11, color: '#64748b' }}>
+                            {recQty} / {totalQty} received
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+
+            <div className="procurement-modal-footer">
+              <button
+                onClick={() => setShowSelectPoForGrnModal(false)}
+                className="btn-outline"
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </div>

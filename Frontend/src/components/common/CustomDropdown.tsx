@@ -197,8 +197,26 @@ export const CustomDropdown = <T extends any = any>({
     }
     const rect = containerRef.current.getBoundingClientRect();
     const dropdownHeight = typeof maxHeight === 'number' ? maxHeight : 260;
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const spaceAbove = rect.top;
+    let spaceBelow = window.innerHeight - rect.bottom;
+    let spaceAbove = rect.top;
+
+    // Check if within a scrollable or constrained parent container (such as a modal body)
+    let parent = containerRef.current.parentElement;
+    while (parent && parent !== document.body && parent !== document.documentElement) {
+      const style = window.getComputedStyle(parent);
+      const isScrollable =
+        ['auto', 'scroll', 'hidden'].includes(style.overflowY) ||
+        ['auto', 'scroll', 'hidden'].includes(style.overflow);
+      if (isScrollable) {
+        const parentRect = parent.getBoundingClientRect();
+        const parentSpaceBelow = parentRect.bottom - rect.bottom;
+        const parentSpaceAbove = rect.top - parentRect.top;
+        if (parentSpaceBelow < spaceBelow) spaceBelow = parentSpaceBelow;
+        if (parentSpaceAbove < spaceAbove) spaceAbove = parentSpaceAbove;
+        break;
+      }
+      parent = parent.parentElement;
+    }
 
     // Smart placement: if space below is too small and top has more room, flip upward
     if (spaceBelow < dropdownHeight && spaceAbove > spaceBelow) {
