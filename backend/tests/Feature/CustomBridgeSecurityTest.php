@@ -58,7 +58,7 @@ class CustomBridgeSecurityTest extends TestCase
 
         $rawBody = json_encode($payload);
         $timestamp = time();
-        $nonce = 'nonce_' . bin2hex(random_bytes(16));
+        $nonce = 'nonce_'.bin2hex(random_bytes(16));
         $canonical = "{$timestamp}\n{$nonce}\n{$rawBody}";
         $signature = hash_hmac('sha256', $canonical, $this->apiSecret);
 

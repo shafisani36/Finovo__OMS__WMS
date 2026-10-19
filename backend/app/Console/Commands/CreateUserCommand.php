@@ -18,7 +18,8 @@ class CreateUserCommand extends Command
     protected $signature = 'user:create
                             {email? : The user email address}
                             {--role=operator : The user role (admin or operator)}
-                            {--name= : The user full name}';
+                            {--name= : The user full name}
+                            {--password= : The user password (minimum 12 characters)}';
 
     /**
      * The console command description.
@@ -40,14 +41,16 @@ class CreateUserCommand extends Command
 
         $role = $roleInput === 'admin' ? UserRole::ADMIN : UserRole::OPERATOR;
 
-        // Prompt for password securely
-        $password = $this->secret('Enter account password (minimum 12 characters)');
-        $passwordConfirmation = $this->secret('Confirm account password');
+        // Prompt for password securely or use provided option
+        $password = (string) ($this->option('password') ?: $this->secret('Enter account password (minimum 12 characters)'));
+        if (! $this->option('password')) {
+            $passwordConfirmation = (string) $this->secret('Confirm account password');
 
-        if ($password !== $passwordConfirmation) {
-            $this->error('Password confirmation does not match.');
+            if ($password !== $passwordConfirmation) {
+                $this->error('Password confirmation does not match.');
 
-            return self::FAILURE;
+                return self::FAILURE;
+            }
         }
 
         $validator = Validator::make([

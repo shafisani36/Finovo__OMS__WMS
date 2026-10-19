@@ -55,6 +55,7 @@ export const LoginPage: React.FC = () => {
             destination: response.data.destination,
             expires_in_seconds: response.data.expires_in_seconds,
             resend_cooldown_seconds: response.data.resend_cooldown_seconds,
+            dev_code: response.data.dev_code,
           },
         });
       }

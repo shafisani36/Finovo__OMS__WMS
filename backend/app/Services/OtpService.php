@@ -85,6 +85,8 @@ class OtpService
             'user_agent' => substr((string) ($request?->userAgent() ?? request()->userAgent()), 0, 500),
         ]);
 
+        $challenge->raw_code = $code;
+
         // 4. Deliver OTP securely via notification
         try {
             $user->notify(new OtpCodeNotification($code, $purpose, $expiryMinutes));

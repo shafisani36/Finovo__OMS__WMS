@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Order;
 use App\Models\Organization;
 use App\Models\PickTask;
 use App\Models\Product;
@@ -121,7 +122,7 @@ class OrderAllocationAndPickingTest extends TestCase
 
     public function test_quick_complete_advances_pick_task(): void
     {
-        $order = \App\Models\Order::create([
+        $order = Order::create([
             'organization_id' => $this->org->id,
             'store_id' => $this->store->id,
             'order_number' => 'ORD-TEST-1',
