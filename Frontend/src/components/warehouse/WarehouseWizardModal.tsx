@@ -352,7 +352,7 @@ export const WarehouseWizardModal: React.FC<WarehouseWizardModalProps> = ({
         </div>
 
         {/* Body Content */}
-        <div style={{ padding: '24px', overflowY: 'auto', flex: 1 }}>
+        <div className="custom-scrollbar" style={{ padding: '24px', overflowY: 'auto', flex: 1 }}>
           {errorMessage && (
             <div
               style={{

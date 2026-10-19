@@ -718,6 +718,11 @@ body {
   flex-direction: column;
 }
 
+.modal-dialog form {
+  overflow-y: auto;
+  max-height: calc(90vh - 75px);
+}
+
 /* Mobile Sidebar Drawer */
 @media (max-width: 1024px) {
   .app-sidebar {
@@ -857,3 +862,20 @@ body {
     padding: 12px;
   }
 }
+
+/* ==========================================================================
+   Custom Dropdown Immunity & Stacking Elevation
+   Ensures dropdowns consistently float above cards, tables, inputs, and modals
+   ========================================================================== */
+.custom-dropdown-container {
+  position: relative;
+  transition: z-index 0.05s ease;
+}
+
+.custom-dropdown-container.is-open {
+  z-index: 99999 !important;
+}
+
+.custom-dropdown-menu {
+  z-index: 100000 !important;
+}

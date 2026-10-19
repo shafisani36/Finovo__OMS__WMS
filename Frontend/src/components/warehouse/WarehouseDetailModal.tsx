@@ -398,7 +398,7 @@ export const WarehouseDetailModal: React.FC<WarehouseDetailModalProps> = ({
         </div>
 
         {/* Modal Body */}
-        <div style={{ padding: '24px', overflowY: 'auto', flex: 1, backgroundColor: '#ffffff' }}>
+        <div className="custom-scrollbar" style={{ padding: '24px', overflowY: 'auto', flex: 1, backgroundColor: '#ffffff' }}>
           {message && (
             <div
               style={{

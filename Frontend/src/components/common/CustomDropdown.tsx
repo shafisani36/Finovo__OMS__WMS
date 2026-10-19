@@ -57,6 +57,9 @@ export interface CustomDropdownProps<T = any> {
   required?: boolean;
   emptyText?: string;
   renderOption?: (option: DropdownOption<T>, isSelected: boolean) => React.ReactNode;
+  zIndex?: number;
+  menuZIndex?: number;
+  menuStyle?: React.CSSProperties;
 }
 
 /**
@@ -129,6 +132,9 @@ export const CustomDropdown = <T extends any = any>({
   required = false,
   emptyText = 'No options available',
   renderOption,
+  zIndex = 99999,
+  menuZIndex = 100000,
+  menuStyle,
 }: CustomDropdownProps<T>) => {
   const generatedId = useId();
   const dropdownId = propId || `custom-dropdown-${generatedId}`;
@@ -194,12 +200,27 @@ export const CustomDropdown = <T extends any = any>({
     const spaceBelow = window.innerHeight - rect.bottom;
     const spaceAbove = rect.top;
 
-    if (spaceBelow < dropdownHeight && spaceAbove > dropdownHeight) {
+    // Smart placement: if space below is too small and top has more room, flip upward
+    if (spaceBelow < dropdownHeight && spaceAbove > spaceBelow) {
       setComputedPlacement('top');
     } else {
       setComputedPlacement('bottom');
     }
   }, [placement, maxHeight]);
+
+  // Dynamic reposition on scroll or resize when open
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleReposition = () => {
+      calculatePosition();
+    };
+    window.addEventListener('resize', handleReposition, { passive: true });
+    window.addEventListener('scroll', handleReposition, { passive: true, capture: true });
+    return () => {
+      window.removeEventListener('resize', handleReposition);
+      window.removeEventListener('scroll', handleReposition, { capture: true });
+    };
+  }, [isOpen, calculatePosition]);
 
   // Toggle open
   const toggleDropdown = () => {
@@ -377,14 +398,16 @@ export const CustomDropdown = <T extends any = any>({
   return (
     <div
       ref={containerRef}
-      className={`custom-dropdown-container ${className}`}
+      className={`custom-dropdown-container ${isOpen ? 'is-open' : ''} ${className}`}
       style={{
         position: 'relative',
         display: fullWidth ? 'flex' : 'inline-flex',
         flexDirection: 'column',
         width: fullWidth ? '100%' : 'auto',
         boxSizing: 'border-box',
+        zIndex: isOpen ? zIndex : (style?.zIndex ?? undefined),
         ...style,
+        ...(isOpen ? { zIndex } : {}),
       }}
       onKeyDown={handleKeyDown}
     >
@@ -580,6 +603,7 @@ export const CustomDropdown = <T extends any = any>({
           ref={menuRef}
           role="listbox"
           aria-multiselectable={multiple}
+          className="custom-dropdown-menu"
           style={{
             position: 'absolute',
             left: 0,
@@ -588,13 +612,14 @@ export const CustomDropdown = <T extends any = any>({
             backgroundColor: '#ffffff',
             border: '1px solid #cbd5e1',
             borderRadius: 12,
-            boxShadow: '0 12px 24px -4px rgba(15, 23, 42, 0.12), 0 4px 6px -2px rgba(15, 23, 42, 0.04)',
-            zIndex: 9999,
+            boxShadow: '0 16px 36px -4px rgba(15, 23, 42, 0.16), 0 6px 14px -2px rgba(15, 23, 42, 0.08)',
+            zIndex: menuZIndex,
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
             maxHeight,
             boxSizing: 'border-box',
+            ...menuStyle,
           }}
         >
           {/* Search Box Header */}
@@ -700,10 +725,13 @@ export const CustomDropdown = <T extends any = any>({
 
           {/* Options List */}
           <div
+            className="custom-scrollbar"
             style={{
               overflowY: 'auto',
               flex: 1,
               padding: '4px',
+              scrollbarWidth: 'thin',
+              scrollbarColor: '#cbd5e1 transparent',
             }}
           >
             {filteredOptions.length === 0 ? (
