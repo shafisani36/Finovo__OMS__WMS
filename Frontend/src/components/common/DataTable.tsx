@@ -28,6 +28,7 @@ export interface DataTableProps<T> {
   selectedIds?: Set<string | number>;
   onSelectRow?: (id: string | number) => void;
   onSelectAll?: (allIds: (string | number)[]) => void;
+  onRowClick?: (row: T) => void;
 }
 
 export function DataTable<T extends Record<string, any>>({
@@ -41,6 +42,7 @@ export function DataTable<T extends Record<string, any>>({
   selectedIds = new Set(),
   onSelectRow,
   onSelectAll,
+  onRowClick,
 }: DataTableProps<T>) {
   const getRowKey = (row: T): string | number => {
     return typeof keyField === 'function' ? keyField(row) : row[keyField];
@@ -105,7 +107,14 @@ export function DataTable<T extends Record<string, any>>({
               const isSelected = selectedIds.has(rowKey);
 
               return (
-                <tr key={String(rowKey)} style={{ backgroundColor: isSelected ? '#f8fafc' : undefined }}>
+                <tr
+                  key={String(rowKey)}
+                  onClick={() => onRowClick?.(row)}
+                  style={{
+                    backgroundColor: isSelected ? '#f8fafc' : undefined,
+                    cursor: onRowClick ? 'pointer' : undefined,
+                  }}
+                >
                   {selectable && (
                     <td style={{ width: 44, padding: '16px' }}>
                       <input

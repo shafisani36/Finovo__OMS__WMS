@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Warehouse as WarehouseIcon,
   Plus,
@@ -20,20 +21,16 @@ import type { Column } from '../components/common/DataTable';
 import omsService from '../services/omsService';
 import type { WarehouseModel } from '../services/omsService';
 import WarehouseStatusBadge from '../components/warehouse/WarehouseStatusBadge';
-import WarehouseWizardModal from '../components/warehouse/WarehouseWizardModal';
-import WarehouseDetailModal from '../components/warehouse/WarehouseDetailModal';
 import CustomDropdown from '../components/common/CustomDropdown';
 
 export const WarehousesPage: React.FC = () => {
+  const navigate = useNavigate();
+
   const [warehouses, setWarehouses] = useState<WarehouseModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
-
-  // Modals state
-  const [wizardOpen, setWizardOpen] = useState(false);
-  const [selectedWarehouseId, setSelectedWarehouseId] = useState<number | null>(null);
 
   const fetchWarehouses = async () => {
     try {
@@ -93,7 +90,7 @@ export const WarehousesPage: React.FC = () => {
       fetchWarehouses();
     } catch (err: any) {
       alert(err.message || 'Cannot activate warehouse: check readiness issues.');
-      setSelectedWarehouseId(warehouseId);
+      navigate(`/warehouses/${warehouseId}`);
     }
   };
 
@@ -249,7 +246,7 @@ export const WarehousesPage: React.FC = () => {
           )}
 
           <button
-            onClick={() => setSelectedWarehouseId(row.id)}
+            onClick={() => navigate(`/warehouses/${row.id}`)}
             className="btn-finovo-secondary"
             style={{ padding: '4px 10px', fontSize: 11 }}
           >
@@ -291,7 +288,7 @@ export const WarehousesPage: React.FC = () => {
             icon={<ShieldCheck size={18} />}
           />
           <button
-            onClick={() => setWizardOpen(true)}
+            onClick={() => navigate('/warehouses/create')}
             className="btn-finovo-primary"
             style={{ padding: '10px 18px', fontSize: 13 }}
           >
@@ -452,30 +449,13 @@ export const WarehousesPage: React.FC = () => {
           data={filteredWarehouses}
           keyField="id"
           isLoading={loading}
+          onRowClick={(row) => navigate(`/warehouses/${row.id}`)}
           emptyMessage="No warehouses match your filter criteria."
         />
       </div>
-
-      {/* Warehouse Creation Wizard Modal */}
-      <WarehouseWizardModal
-        isOpen={wizardOpen}
-        onClose={() => setWizardOpen(false)}
-        onSuccess={() => {
-          fetchWarehouses();
-        }}
-      />
-
-      {/* Warehouse Detail & Configuration Modal */}
-      {selectedWarehouseId !== null && (
-        <WarehouseDetailModal
-          warehouseId={selectedWarehouseId}
-          isOpen={true}
-          onClose={() => setSelectedWarehouseId(null)}
-          onRefreshList={fetchWarehouses}
-        />
-      )}
     </div>
   );
 };
 
 export default WarehousesPage;
+
