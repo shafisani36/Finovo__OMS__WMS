@@ -1787,10 +1787,10 @@ export const InventoryPage: React.FC = () => {
       {/* MODAL: SKU STOCK INSPECTOR */}
       {/* ------------------------------------------------------------- */}
       {detailVariantId && (
-        <div className="modal-overlay" style={{ zIndex: 100 }} onClick={() => setDetailVariantId(null)}>
+        <div className="modal-overlay" style={{ zIndex: 9999 }} onClick={() => setDetailVariantId(null)}>
           <div
             className="modal-container"
-            style={{ maxWidth: 840, maxHeight: '90vh', overflowY: 'auto' }}
+            style={{ maxWidth: 840, maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#ffffff', padding: 24, borderRadius: 18, border: '1px solid #e2e8f0', boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)' }}
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -1896,8 +1896,12 @@ export const InventoryPage: React.FC = () => {
       {/* MODAL 1: CREATE INBOUND DOCK RECEIPT */}
       {/* ------------------------------------------------------------- */}
       {showNewReceiptModal && (
-        <div className="modal-overlay" style={{ zIndex: 100 }} onClick={() => setShowNewReceiptModal(false)}>
-          <div className="modal-container" style={{ maxWidth: 720, maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" style={{ zIndex: 9999 }} onClick={() => setShowNewReceiptModal(false)}>
+          <div
+            className="modal-container"
+            style={{ maxWidth: 720, maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#ffffff', padding: 24, borderRadius: 18, border: '1px solid #e2e8f0', boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Create Inbound Dock Receipt</h3>
@@ -2080,8 +2084,12 @@ export const InventoryPage: React.FC = () => {
       {/* MODAL 2: CONFIRM DOCK RECEIPT */}
       {/* ------------------------------------------------------------- */}
       {showConfirmReceiptModal && (
-        <div className="modal-overlay" style={{ zIndex: 100 }} onClick={() => setShowConfirmReceiptModal(null)}>
-          <div className="modal-container" style={{ maxWidth: 740, maxHeight: '90vh', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" style={{ zIndex: 9999 }} onClick={() => setShowConfirmReceiptModal(null)}>
+          <div
+            className="modal-container"
+            style={{ maxWidth: 740, maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#ffffff', padding: 24, borderRadius: 18, border: '1px solid #e2e8f0', boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
@@ -2211,8 +2219,12 @@ export const InventoryPage: React.FC = () => {
       {/* MODAL 3: PUTAWAY TO STORAGE BINS */}
       {/* ------------------------------------------------------------- */}
       {showPutawayModal && (
-        <div className="modal-overlay" style={{ zIndex: 100 }} onClick={() => setShowPutawayModal(null)}>
-          <div className="modal-container" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" style={{ zIndex: 9999 }} onClick={() => setShowPutawayModal(null)}>
+          <div
+            className="modal-container"
+            style={{ maxWidth: 480, maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#ffffff', padding: 24, borderRadius: 18, border: '1px solid #e2e8f0', boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Putaway to Storage Bin</h3>
@@ -2275,8 +2287,12 @@ export const InventoryPage: React.FC = () => {
       {/* MODAL 4: INTER-WAREHOUSE TRANSFER */}
       {/* ------------------------------------------------------------- */}
       {showNewTransferModal && (
-        <div className="modal-overlay" style={{ zIndex: 100 }} onClick={() => setShowNewTransferModal(false)}>
-          <div className="modal-container" style={{ maxWidth: 540 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" style={{ zIndex: 9999 }} onClick={() => setShowNewTransferModal(false)}>
+          <div
+            className="modal-container"
+            style={{ maxWidth: 540, maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#ffffff', padding: 24, borderRadius: 18, border: '1px solid #e2e8f0', boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Dispatch Inter-Warehouse Transfer</h3>
@@ -2383,8 +2399,12 @@ export const InventoryPage: React.FC = () => {
       {/* MODAL 5: RECEIVE TRANSFER AT DESTINATION */}
       {/* ------------------------------------------------------------- */}
       {showReceiveTransferModal && (
-        <div className="modal-overlay" style={{ zIndex: 100 }} onClick={() => setShowReceiveTransferModal(null)}>
-          <div className="modal-container" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" style={{ zIndex: 9999 }} onClick={() => setShowReceiveTransferModal(null)}>
+          <div
+            className="modal-container"
+            style={{ maxWidth: 480, maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#ffffff', padding: 24, borderRadius: 18, border: '1px solid #e2e8f0', boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>
@@ -2457,8 +2477,12 @@ export const InventoryPage: React.FC = () => {
       {/* MODAL 6: STOCK ADJUSTMENT REQUEST */}
       {/* ------------------------------------------------------------- */}
       {showNewAdjustmentModal && (
-        <div className="modal-overlay" style={{ zIndex: 100 }} onClick={() => setShowNewAdjustmentModal(false)}>
-          <div className="modal-container" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" style={{ zIndex: 9999 }} onClick={() => setShowNewAdjustmentModal(false)}>
+          <div
+            className="modal-container"
+            style={{ maxWidth: 520, maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#ffffff', padding: 24, borderRadius: 18, border: '1px solid #e2e8f0', boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Request Stock Adjustment</h3>
@@ -2575,8 +2599,12 @@ export const InventoryPage: React.FC = () => {
       {/* MODAL 7: START CYCLE COUNT SESSION */}
       {/* ------------------------------------------------------------- */}
       {showNewCycleCountModal && (
-        <div className="modal-overlay" style={{ zIndex: 100 }} onClick={() => setShowNewCycleCountModal(false)}>
-          <div className="modal-container" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" style={{ zIndex: 9999 }} onClick={() => setShowNewCycleCountModal(false)}>
+          <div
+            className="modal-container"
+            style={{ maxWidth: 520, maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#ffffff', padding: 24, borderRadius: 18, border: '1px solid #e2e8f0', boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Initialize Cycle Count Session</h3>
@@ -2675,8 +2703,12 @@ export const InventoryPage: React.FC = () => {
       {/* MODAL 8: CONFIGURE REPLENISHMENT RULE */}
       {/* ------------------------------------------------------------- */}
       {showNewRuleModal && (
-        <div className="modal-overlay" style={{ zIndex: 100 }} onClick={() => setShowNewRuleModal(false)}>
-          <div className="modal-container" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" style={{ zIndex: 9999 }} onClick={() => setShowNewRuleModal(false)}>
+          <div
+            className="modal-container"
+            style={{ maxWidth: 520, maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#ffffff', padding: 24, borderRadius: 18, border: '1px solid #e2e8f0', boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Configure Reorder Rule</h3>

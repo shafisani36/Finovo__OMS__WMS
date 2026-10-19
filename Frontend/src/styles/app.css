@@ -697,9 +697,9 @@ body {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background-color: rgba(15, 23, 42, 0.4);
-  backdrop-filter: blur(2px);
-  z-index: 50;
+  background-color: rgba(15, 23, 42, 0.6) !important;
+  backdrop-filter: blur(4px);
+  z-index: 9999;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -716,9 +716,28 @@ body {
   max-height: 90vh;
   display: flex;
   flex-direction: column;
+  position: relative;
+  z-index: 10000;
 }
 
-.modal-dialog form {
+.modal-container {
+  background-color: #ffffff !important;
+  border-radius: 18px;
+  width: 100%;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(15, 23, 42, 0.08);
+  border: 1px solid #e2e8f0;
+  overflow-y: auto;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  position: relative;
+  z-index: 10000;
+  box-sizing: border-box;
+}
+
+.modal-dialog form,
+.modal-container form {
   overflow-y: auto;
   max-height: calc(90vh - 75px);
 }
