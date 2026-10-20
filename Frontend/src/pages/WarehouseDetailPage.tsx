@@ -30,6 +30,7 @@ import type {
 } from '../services/omsService';
 import WarehouseStatusBadge from '../components/warehouse/WarehouseStatusBadge';
 import CustomDropdown from '../components/common/CustomDropdown';
+import ConfirmDialog from '../components/common/ConfirmDialog';
 
 type TabType = 'overview' | 'layout' | 'staff' | 'opening_stock' | 'audit_logs';
 
@@ -46,6 +47,7 @@ export const WarehouseDetailPage: React.FC = () => {
   const [auditLogs, setAuditLogs] = useState<WarehouseAuditLogModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Layout Sub-Form State
@@ -140,6 +142,19 @@ export const WarehouseDetailPage: React.FC = () => {
       setMessage({ type: 'error', text: err.message || 'Failed to deactivate warehouse.' });
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleDeleteWarehouse = async () => {
+    try {
+      setActionLoading(true);
+      setMessage(null);
+      await omsService.deleteWarehouse(warehouseId);
+      navigate('/warehouses');
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to delete warehouse.' });
+      setActionLoading(false);
+      setDeleteDialogOpen(false);
     }
   };
 
@@ -387,6 +402,18 @@ export const WarehouseDetailPage: React.FC = () => {
               <span>Deactivate</span>
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => setDeleteDialogOpen(true)}
+            disabled={actionLoading}
+            className="btn-finovo-secondary"
+            style={{ padding: '9px 16px', fontSize: 13, color: '#dc2626' }}
+            title="Delete an unused warehouse permanently"
+          >
+            <Trash2 size={15} />
+            <span>Delete</span>
+          </button>
 
           <button
             type="button"
@@ -1273,6 +1300,17 @@ export const WarehouseDetailPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        title="Delete warehouse?"
+        message={<>Delete <strong>{warehouse?.name}</strong> permanently, with its locations and staff assignments?</>}
+        note="Only warehouses without stores, stock or purchase documents can be deleted. Use Deactivate for a warehouse that has been in use."
+        confirmLabel="Delete Warehouse"
+        loading={actionLoading}
+        onConfirm={handleDeleteWarehouse}
+        onCancel={() => setDeleteDialogOpen(false)}
+      />
     </div>
   );
 };

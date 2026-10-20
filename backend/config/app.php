@@ -54,6 +54,13 @@ return [
 
     'url' => env('APP_URL', 'http://localhost'),
 
+    // React app address; platform authorization callbacks send the merchant back here
+    'frontend_url' => rtrim((string) env('FRONTEND_URL', 'http://localhost:3000'), '/'),
+    
+    // Load balancer / reverse proxy addresses ("*" for any) whose X-Forwarded-* headers are trusted,
+    // so HTTPS is detected correctly behind them (platform callbacks and signed download links need it)
+    'trusted_proxies' => env('TRUSTED_PROXIES'),
+
     /*
     |--------------------------------------------------------------------------
     | Application Timezone

@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Warehouse;
 use App\Models\WarehouseLocation;
+use App\Services\EmailService;
 use App\Services\WarehouseLayoutService;
 use App\Services\WarehouseOpeningStockService;
 use App\Services\WarehouseReadinessService;
@@ -22,7 +23,8 @@ class WarehouseController extends Controller
         protected WarehouseService $warehouseService,
         protected WarehouseReadinessService $readinessService,
         protected WarehouseLayoutService $layoutService,
-        protected WarehouseOpeningStockService $openingStockService
+        protected WarehouseOpeningStockService $openingStockService,
+        protected EmailService $emails
     ) {}
 
     /**
@@ -118,6 +120,17 @@ class WarehouseController extends Controller
         ]);
 
         $warehouse = $this->warehouseService->createWarehouse($org, $request->user()->id, $validated);
+
+        $this->emails->sendActivityEmail(EmailService::WAREHOUSE_CREATED, $org, [
+            'name' => $warehouse->name,
+            'actor' => $request->user(),
+            'details' => [
+                'Code' => $warehouse->code,
+                'Type' => $warehouse->warehouse_type,
+                'Location' => collect([$warehouse->city, $warehouse->country])->filter()->implode(', '),
+                'Status' => ucwords(str_replace('_', ' ', (string) $warehouse->status)),
+            ],
+        ]);
 
         return response()->json([
             'status' => 'success',
@@ -261,6 +274,30 @@ class WarehouseController extends Controller
             'message' => $result['message'],
             'data' => $result['warehouse'],
             'outstanding_stock_lines' => $result['outstanding_stock_lines'],
+        ]);
+    }
+
+    /**
+     * Permanently delete an unused warehouse (no stores, stock or documents) and email the admins.
+     */
+    public function destroy(Request $request, Warehouse $warehouse): JsonResponse
+    {
+        $this->authorizeWarehouse($request, $warehouse);
+
+        $this->warehouseService->deleteWarehouse($warehouse, $request->user()->id);
+
+        $this->emails->sendActivityEmail(EmailService::WAREHOUSE_DELETED, $request->user()->currentOrganization(), [
+            'name' => $warehouse->name,
+            'actor' => $request->user(),
+            'details' => [
+                'Code' => $warehouse->code,
+                'Location' => collect([$warehouse->city, $warehouse->country])->filter()->implode(', '),
+            ],
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Warehouse '{$warehouse->name}' deleted.",
         ]);
     }
 

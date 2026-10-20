@@ -22,10 +22,13 @@ import {
   LogOut
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+import { useActiveStore } from '../../hooks/useActiveStore';
 import Logo from '../common/Logo';
+import { platformLabel } from '../stores/storePlatforms';
 
 export const AppLayout: React.FC = () => {
   const { user, logout } = useAuth();
+  const { activeStore } = useActiveStore();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
@@ -80,7 +83,11 @@ export const AppLayout: React.FC = () => {
         </div>
 
         {/* Active Store Switcher Pill */}
-        <div className="store-switcher-pill" onClick={() => navigate('/stores')}>
+        <div
+          className="store-switcher-pill"
+          onClick={() => navigate('/stores')}
+          title={activeStore ? `${activeStore.name} (${platformLabel(activeStore.platform)})` : 'Choose a store to manage'}
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{
               width: 30,
@@ -94,12 +101,12 @@ export const AppLayout: React.FC = () => {
             }}>
               <StoreIcon size={16} />
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
               <span style={{ fontSize: 10, fontWeight: 600, color: '#1e56ff', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                 Managing
               </span>
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
-                My Store
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {activeStore?.name ?? 'No store selected'}
               </span>
             </div>
           </div>

@@ -46,8 +46,9 @@ class OrderController extends Controller
             $query->where('order_status', $status);
         }
 
-        // Store filter
-        if ($storeId = $request->query('store_id')) {
+        // Store filter (the store being managed); metrics follow the same store
+        $storeId = $request->query('store_id');
+        if ($storeId) {
             $query->where('store_id', $storeId);
         }
 
@@ -55,10 +56,11 @@ class OrderController extends Controller
         $orders = $query->latest('placed_at')->paginate($perPage);
 
         // Metrics
-        $totalOrders = Order::where('organization_id', $org->id)->count();
-        $pending = Order::where('organization_id', $org->id)->whereIn('order_status', ['imported', 'pending'])->count();
-        $allocated = Order::where('organization_id', $org->id)->where('order_status', 'allocated')->count();
-        $shipped = Order::where('organization_id', $org->id)->where('order_status', 'shipped')->count();
+        $metrics = fn () => Order::where('organization_id', $org->id)->when($storeId, fn ($q) => $q->where('store_id', $storeId));
+        $totalOrders = $metrics()->count();
+        $pending = $metrics()->whereIn('order_status', ['imported', 'pending'])->count();
+        $allocated = $metrics()->where('order_status', 'allocated')->count();
+        $shipped = $metrics()->where('order_status', 'shipped')->count();
 
         return response()->json([
             'status' => 'success',

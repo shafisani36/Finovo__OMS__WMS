@@ -34,6 +34,11 @@ class ProductController extends Controller
             $query->where('category', $category);
         }
 
+        // Store filter: products sold in the store being managed (linked through SKU mappings)
+        if ($storeId = $request->query('store_id')) {
+            $query->whereHas('variants.skuMappings', fn ($q) => $q->where('store_id', $storeId));
+        }
+
         $perPage = (int) $request->query('per_page', 15);
         $products = $query->latest()->paginate($perPage);
 

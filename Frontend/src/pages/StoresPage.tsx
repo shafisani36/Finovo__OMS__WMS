@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Store as StoreIcon,
   Link as LinkIcon,
@@ -7,20 +8,31 @@ import {
   Plus,
   Filter,
   Settings,
-  MoreVertical,
   Building2,
-  X,
+  FileCode,
+  PlugZap,
+  ShieldCheck,
   Loader2,
-  FileCode
+  Trash2
 } from 'lucide-react';
 import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import AlertBanner from '../components/common/AlertBanner';
 import DataTable from '../components/common/DataTable';
 import type { Column } from '../components/common/DataTable';
-import CustomDropdown from '../components/common/CustomDropdown';
+import { Alert } from '../components/common/Alert';
+import ConfirmDialog from '../components/common/ConfirmDialog';
+import ConnectStoreModal from '../components/stores/ConnectStoreModal';
+import { platformLabel } from '../components/stores/storePlatforms';
 import omsService from '../services/omsService';
 import type { StoreModel, WarehouseModel } from '../services/omsService';
+import { useActiveStore } from '../hooks/useActiveStore';
+
+/** Platforms whose products and orders Finovo can import. */
+const SYNC_SUPPORTED = ['shopify', 'woocommerce', 'bigcommerce', 'prestashop', 'wix', 'ebay', 'magento', 'opencart', 'oscommerce'];
+const AUTHORIZED_ON_PLATFORM = ['shopify', 'woocommerce', 'bigcommerce', 'wix', 'ebay', 'prestashop', 'opencart'];
+
+type Notice = { type: 'success' | 'error' | 'info'; message: string } | null;
 
 export const StoresPage: React.FC = () => {
   const [stores, setStores] = useState<StoreModel[]>([]);
@@ -39,16 +51,12 @@ export const StoresPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [showAlert, setShowAlert] = useState(true);
 
-  // Modal State
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalLoading, setModalLoading] = useState(false);
-  const [modalError, setModalError] = useState('');
-  const [formData, setFormData] = useState({
-    name: '',
-    platform: 'shopify',
-    bridge_url: '',
-    selectedWarehouses: [] as number[],
-  });
+  const [storeToDelete, setStoreToDelete] = useState<StoreModel | null>(null);
+  const [notice, setNotice] = useState<Notice>(null);
+  const [busyStoreId, setBusyStoreId] = useState<number | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { activeStore, setActiveStore, refreshActiveStore } = useActiveStore();
 
   const fetchStores = async () => {
     try {
@@ -83,44 +91,98 @@ export const StoresPage: React.FC = () => {
     fetchWarehouses();
   }, [page, perPage]);
 
+  // Shopify, BigCommerce and eBay send the merchant back here after the approval step.
+  useEffect(() => {
+    const connected = searchParams.get('connected');
+    const error = searchParams.get('connection_error');
+    if (!connected && !error) return;
+
+    setNotice(
+      error
+        ? { type: 'error', message: error }
+        : { type: 'success', message: `${platformLabel(connected as string)} store connected.` }
+    );
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setPage(1);
     fetchStores();
   };
 
-  const handleCreateStore = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setModalError('');
-    if (!formData.name.trim()) {
-      setModalError('Store name is required');
-      return;
-    }
+  const handleStoreConnected = (message: string) => {
+    setModalOpen(false);
+    setNotice({ type: 'success', message });
+    fetchStores();
+    refreshActiveStore();
+  };
 
+  const handleManage = (store: StoreModel) => {
+    setActiveStore(store);
+    setNotice({ type: 'info', message: `Now managing ${store.name}.` });
+  };
+
+  const handleAuthorize = async (store: StoreModel) => {
     try {
-      setModalLoading(true);
-      await omsService.createStore({
-        name: formData.name,
-        platform: formData.platform,
-        bridge_url: formData.bridge_url || undefined,
-        warehouse_ids: formData.selectedWarehouses,
-      });
-      setModalOpen(false);
-      setFormData({ name: '', platform: 'shopify', bridge_url: '', selectedWarehouses: [] });
-      fetchStores();
-    } catch (err: any) {
-      setModalError(err.response?.data?.message || 'Failed to create store connection.');
+      setBusyStoreId(store.id);
+      const { next_action } = await omsService.getStoreAuthorization(store.id);
+      if (next_action.type === 'redirect') {
+        window.location.assign(next_action.url);
+        return;
+      }
+      if (next_action.type === 'install_module') {
+        // Starts the module download; the page stays open.
+        window.location.assign(next_action.url);
+      }
+      setNotice({ type: 'info', message: next_action.message });
+    } catch (err) {
+      setNotice({ type: 'error', message: err instanceof Error ? err.message : 'Could not start the authorization.' });
     } finally {
-      setModalLoading(false);
+      setBusyStoreId(null);
     }
   };
 
-  const handleSyncStore = async (storeId: number) => {
+  const handleTestConnection = async (store: StoreModel) => {
     try {
-      await omsService.syncStore(storeId);
-      fetchStores();
+      setBusyStoreId(store.id);
+      const res = await omsService.testStoreConnection(store.id);
+      setNotice({ type: 'success', message: res.message });
     } catch (err) {
-      console.error(err);
+      setNotice({ type: 'error', message: err instanceof Error ? err.message : 'Connection test failed.' });
+    } finally {
+      setBusyStoreId(null);
+      fetchStores();
+    }
+  };
+
+  const handleSync = async (store: StoreModel) => {
+    try {
+      setBusyStoreId(store.id);
+      setNotice({ type: 'info', message: `Syncing ${store.name}... this can take a minute for a large catalog.` });
+      const res = await omsService.syncStore(store.id);
+      setNotice({ type: 'success', message: res.message });
+    } catch (err) {
+      setNotice({ type: 'error', message: err instanceof Error ? err.message : 'Sync failed.' });
+    } finally {
+      setBusyStoreId(null);
+      fetchStores();
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!storeToDelete) return;
+    try {
+      setBusyStoreId(storeToDelete.id);
+      const res = await omsService.deleteStore(storeToDelete.id);
+      setNotice({ type: 'success', message: res.message });
+      fetchStores();
+      refreshActiveStore();
+    } catch (err) {
+      setNotice({ type: 'error', message: err instanceof Error ? err.message : 'Could not delete the store.' });
+    } finally {
+      setBusyStoreId(null);
+      setStoreToDelete(null);
     }
   };
 
@@ -146,7 +208,9 @@ export const StoresPage: React.FC = () => {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <span style={{ fontSize: 14, fontWeight: 700, color: '#0f172a' }}>{row.name}</span>
-            <span style={{ fontSize: 11, fontWeight: 600, color: '#059669' }}>Managing</span>
+            {activeStore?.id === row.id && (
+              <span style={{ fontSize: 11, fontWeight: 600, color: '#059669' }}>Managing</span>
+            )}
           </div>
         </div>
       ),
@@ -175,8 +239,8 @@ export const StoresPage: React.FC = () => {
             >
               {isBridge ? <FileCode size={14} /> : isShopify ? <StoreIcon size={14} /> : <ShoppingCart size={14} />}
             </div>
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#334155', textTransform: 'capitalize' }}>
-              {row.platform.replace('_', ' ')}
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#334155' }}>
+              {platformLabel(row.platform)}
             </span>
           </div>
         );
@@ -204,10 +268,22 @@ export const StoresPage: React.FC = () => {
       header: 'Status',
       render: (row) => {
         const isActive = row.status === 'active';
+        const label = isActive
+          ? 'Connected'
+          : row.status === 'disconnected'
+            ? 'Disconnected'
+            : AUTHORIZED_ON_PLATFORM.includes(row.platform) && !row.connection_error
+              ? 'Awaiting Authorization'
+              : 'Setup Incomplete';
         return (
-          <div className={`status-dot-badge ${isActive ? 'status-active' : 'status-warning'}`}>
-            <span className="status-dot" />
-            <span>{isActive ? 'Active' : 'Setup Incomplete'}</span>
+          <div>
+            <div className={`status-dot-badge ${isActive ? 'status-active' : 'status-warning'}`}>
+              <span className="status-dot" />
+              <span>{label}</span>
+            </div>
+            {!isActive && row.connection_error && (
+              <span className="store-connection-error" title={row.connection_error}>{row.connection_error}</span>
+            )}
           </div>
         );
       },
@@ -233,26 +309,69 @@ export const StoresPage: React.FC = () => {
     {
       key: 'actions',
       header: 'Actions',
-      render: (row) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <button
-            onClick={() => handleSyncStore(row.id)}
-            className="btn-finovo-secondary"
-            style={{ padding: '6px 12px', fontSize: 12 }}
-            title="Sync Store"
-          >
-            <Settings size={14} color="#1e56ff" />
-            <span>Manage</span>
-          </button>
-          <button
-            className="topbar-icon-button"
-            style={{ padding: 6 }}
-            title="Options"
-          >
-            <MoreVertical size={16} />
-          </button>
-        </div>
-      ),
+      render: (row) => {
+        const busy = busyStoreId === row.id;
+        const needsAuthorization = row.status !== 'active' && AUTHORIZED_ON_PLATFORM.includes(row.platform);
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {needsAuthorization ? (
+              <button
+                onClick={() => handleAuthorize(row)}
+                className="btn-finovo-primary"
+                style={{ padding: '6px 12px', fontSize: 12 }}
+                disabled={busy}
+                title={`Approve access on ${platformLabel(row.platform)}`}
+              >
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}
+                <span>Connect</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => handleTestConnection(row)}
+                className="btn-finovo-secondary"
+                style={{ padding: '6px 12px', fontSize: 12 }}
+                disabled={busy}
+                title="Check the connection with the platform"
+              >
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} color="#1e56ff" />}
+                <span>Test</span>
+              </button>
+            )}
+            {row.status === 'active' && SYNC_SUPPORTED.includes(row.platform) && (
+              <button
+                onClick={() => handleSync(row)}
+                className="btn-finovo-secondary"
+                style={{ padding: '6px 12px', fontSize: 12 }}
+                disabled={busy}
+                title="Import products, variants, stock and orders from this store"
+              >
+                <RefreshCw size={14} color="#1e56ff" className={busy ? 'animate-spin' : undefined} />
+                <span>Sync</span>
+              </button>
+            )}
+            <button
+              onClick={() => handleManage(row)}
+              className="btn-finovo-secondary"
+              style={{ padding: '6px 12px', fontSize: 12 }}
+              disabled={activeStore?.id === row.id}
+              title="Make this the store you are managing"
+            >
+              <Settings size={14} color="#1e56ff" />
+              <span>{activeStore?.id === row.id ? 'Managing' : 'Manage'}</span>
+            </button>
+            <button
+              onClick={() => setStoreToDelete(row)}
+              className="btn-finovo-secondary"
+              style={{ padding: '6px 10px', fontSize: 12, color: '#dc2626' }}
+              disabled={busy}
+              title="Delete this store"
+              aria-label={`Delete ${row.name}`}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        );
+      },
     },
   ];
 
@@ -292,6 +411,8 @@ export const StoresPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {notice && <Alert type={notice.type} message={notice.message} className="store-notice" />}
 
       {/* Attention Alert Banner matching Screenshot 2 */}
       {showAlert && (
@@ -399,145 +520,24 @@ export const StoresPage: React.FC = () => {
         />
       </div>
 
-      {/* Add Store Modal */}
       {modalOpen && (
-        <div className="modal-overlay" onClick={() => setModalOpen(false)}>
-          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#eff6ff', color: '#1e56ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <StoreIcon size={18} />
-                </div>
-                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#0f172a' }}>Connect New Store</h3>
-              </div>
-              <button onClick={() => setModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}>
-                <X size={20} />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateStore} style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {modalError && (
-                <div style={{ padding: '10px 14px', borderRadius: 10, backgroundColor: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: 13 }}>
-                  {modalError}
-                </div>
-              )}
-
-              <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
-                  Store Name *
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. My Shopify Store"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', fontSize: 14, boxSizing: 'border-box' }}
-                  required
-                />
-              </div>
-
-              <div>
-                <CustomDropdown
-                  label="Commerce Platform"
-                  required
-                  value={formData.platform}
-                  onChange={(val) => setFormData({ ...formData, platform: val })}
-                  options={[
-                    { value: 'shopify', label: 'Shopify' },
-                    { value: 'woocommerce', label: 'WooCommerce' },
-                    { value: 'custom_bridge', label: 'Finovo Custom Bridge (PHP / Custom)' },
-                    { value: 'bigcommerce', label: 'BigCommerce' },
-                    { value: 'magento', label: 'Magento 2 / Adobe Commerce' },
-                    { value: 'prestashop', label: 'PrestaShop' },
-                    { value: 'wix', label: 'Wix' },
-                    { value: 'ebay', label: 'eBay' },
-                    { value: 'manual', label: 'Manual Store' },
-                  ]}
-                />
-              </div>
-
-              {formData.platform === 'custom_bridge' && (
-                <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
-                    Custom Website API URL
-                  </label>
-                  <input
-                    type="url"
-                    placeholder="https://mystore.com/api"
-                    value={formData.bridge_url}
-                    onChange={(e) => setFormData({ ...formData, bridge_url: e.target.value })}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', fontSize: 14, boxSizing: 'border-box' }}
-                  />
-                  <span style={{ fontSize: 12, color: '#64748b', marginTop: 4, display: 'block' }}>
-                    Finovo will generate an HMAC secret and API key for this custom store.
-                  </span>
-                </div>
-              )}
-
-              {warehouses.length > 0 && (
-                <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
-                    Link Initial Warehouses
-                  </label>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {warehouses.map((wh) => {
-                      const isChecked = formData.selectedWarehouses.includes(wh.id);
-                      return (
-                        <label
-                          key={wh.id}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 6,
-                            padding: '6px 12px',
-                            borderRadius: 8,
-                            border: `1px solid ${isChecked ? '#1e56ff' : '#cbd5e1'}`,
-                            backgroundColor: isChecked ? '#eff6ff' : '#ffffff',
-                            cursor: 'pointer',
-                            fontSize: 13,
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setFormData({ ...formData, selectedWarehouses: [...formData.selectedWarehouses, wh.id] });
-                              } else {
-                                setFormData({ ...formData, selectedWarehouses: formData.selectedWarehouses.filter((id) => id !== wh.id) });
-                              }
-                            }}
-                          />
-                          <span>{wh.name}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, marginTop: 12 }}>
-                <button
-                  type="button"
-                  onClick={() => setModalOpen(false)}
-                  className="btn-finovo-secondary"
-                  disabled={modalLoading}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="btn-finovo-primary"
-                  disabled={modalLoading}
-                >
-                  {modalLoading && <Loader2 size={16} className="animate-spin" />}
-                  <span>Connect Store</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <ConnectStoreModal
+          warehouses={warehouses}
+          onClose={() => setModalOpen(false)}
+          onConnected={handleStoreConnected}
+        />
       )}
+
+      <ConfirmDialog
+        open={storeToDelete !== null}
+        title="Delete store?"
+        message={<>Delete <strong>{storeToDelete?.name}</strong>? Finovo will stop syncing its orders and stock.</>}
+        note="This cannot be undone. Admins will receive an email about the deletion."
+        confirmLabel="Delete Store"
+        loading={busyStoreId !== null && busyStoreId === storeToDelete?.id}
+        onConfirm={handleDelete}
+        onCancel={() => setStoreToDelete(null)}
+      />
     </div>
   );
 };

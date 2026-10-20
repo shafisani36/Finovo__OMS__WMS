@@ -1,15 +1,51 @@
 import apiClient, { getAuthToken } from './apiClient';
 
+export type StorePlatform =
+  | 'shopify'
+  | 'woocommerce'
+  | 'bigcommerce'
+  | 'prestashop'
+  | 'wix'
+  | 'ebay'
+  | 'magento'
+  | 'opencart'
+  | 'oscommerce'
+  | 'custom_bridge'
+  | 'manual';
+
 export interface StoreModel {
   id: number;
   name: string;
   code: string;
-  platform: string;
+  platform: StorePlatform;
   status: 'active' | 'setup_incomplete' | 'disconnected';
   sync_status: 'healthy' | 'sync_issues';
   orders_awaiting_sync: number;
+  external_reference: string | null;
+  connection_error: string | null;
+  connected_at: string | null;
   last_sync_at: string | null;
   warehouses: WarehouseModel[];
+}
+
+export interface ConnectStorePayload {
+  name: string;
+  platform: StorePlatform;
+  warehouse_id: number;
+  credentials: Record<string, string | number>;
+}
+
+export type StoreNextAction =
+  | { type: 'redirect'; url: string }
+  | { type: 'install_app'; message: string }
+  | { type: 'install_module'; url: string; message: string };
+
+export interface ConnectStoreResponse {
+  status: string;
+  message: string;
+  data: StoreModel;
+  next_action: StoreNextAction | null;
+  credentials: { api_key: string; api_secret: string } | null;
 }
 
 export type WarehouseStatus = 'draft' | 'setup_incomplete' | 'ready_for_activation' | 'active' | 'inactive' | 'closing' | 'closed';
@@ -438,8 +474,23 @@ export const omsService = {
     return data;
   },
 
-  async createStore(payload: { name: string; platform: string; bridge_url?: string; warehouse_ids?: number[] }) {
+  async createStore(payload: ConnectStorePayload): Promise<ConnectStoreResponse> {
     const { data } = await apiClient.post('/stores', payload);
+    return data;
+  },
+
+  async getStoreAuthorization(storeId: number): Promise<{ next_action: StoreNextAction }> {
+    const { data } = await apiClient.get(`/stores/${storeId}/authorization`);
+    return data;
+  },
+
+  async testStoreConnection(storeId: number): Promise<{ status: string; message: string; data: StoreModel }> {
+    const { data } = await apiClient.post(`/stores/${storeId}/test-connection`);
+    return data;
+  },
+
+  async deleteStore(storeId: number): Promise<{ status: string; message: string }> {
+    const { data } = await apiClient.delete(`/stores/${storeId}`);
     return data;
   },
 
@@ -486,6 +537,11 @@ export const omsService = {
 
   async deactivateWarehouse(id: number) {
     const { data } = await apiClient.post(`/warehouses/${id}/deactivate`);
+    return data;
+  },
+
+  async deleteWarehouse(id: number): Promise<{ status: string; message: string }> {
+    const { data } = await apiClient.delete(`/warehouses/${id}`);
     return data;
   },
 
@@ -597,7 +653,7 @@ export const omsService = {
   },
 
   // Enterprise Inventory Engine
-  async getInventory(params?: { search?: string; warehouse_id?: number; status?: string; page?: number; per_page?: number }) {
+  async getInventory(params?: { search?: string; warehouse_id?: number; store_id?: number; status?: string; page?: number; per_page?: number }) {
     const { data } = await apiClient.get('/inventory', { params });
     return data;
   },
@@ -800,7 +856,7 @@ export const omsService = {
   },
 
   // Orders
-  async getOrders(params?: { search?: string; status?: string; page?: number; per_page?: number }) {
+  async getOrders(params?: { search?: string; status?: string; store_id?: number; page?: number; per_page?: number }) {
     const { data } = await apiClient.get('/orders', { params });
     return data;
   },
@@ -821,7 +877,7 @@ export const omsService = {
   },
 
   // Products
-  async getProducts(params?: { search?: string; category?: string; page?: number; per_page?: number }) {
+  async getProducts(params?: { search?: string; category?: string; store_id?: number; page?: number; per_page?: number }) {
     const { data } = await apiClient.get('/products', { params });
     return data;
   },

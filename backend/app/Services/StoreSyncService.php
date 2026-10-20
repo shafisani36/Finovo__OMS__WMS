@@ -1,0 +1,349 @@
+<?php
+
+namespace App\Services;
+
+use App\Integrations\Sync\Data\OrderData;
+use App\Integrations\Sync\Data\OrderLineData;
+use App\Integrations\Sync\Data\ProductData;
+use App\Integrations\Sync\Data\VariantData;
+use App\Integrations\Sync\StoreDataSourceFactory;
+use App\Integrations\Sync\SyncResult;
+use App\Models\IntegrationJob;
+use App\Models\InventoryBalance;
+use App\Models\Order;
+use App\Models\Product;
+use App\Models\ProductVariant;
+use App\Models\SkuMapping;
+use App\Models\Store;
+use App\Models\Warehouse;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Throwable;
+
+/**
+ * Imports a store's catalog (products, images, variants, prices) and orders (with customer details) into Finovo.
+ *
+ * Store products are matched to Finovo variants through SKU mappings, or by SKU, so a product sold in several
+ * stores shares one Finovo variant and one stock balance. Stock is imported once, as opening stock in the
+ * store's default warehouse; after that Finovo's warehouse is the source of truth for inventory.
+ */
+class StoreSyncService
+{
+    /** Orders changed shortly before the previous sync are read again, so none are missed between runs. */
+    private const ORDER_OVERLAP_MINUTES = 10;
+
+    /** Order statuses after which an order is no longer cancelled from the store. */
+    private const SHIPPED_STATUSES = ['shipped', 'partially_shipped', 'delivered', 'returned'];
+
+    public function __construct(
+        protected StoreDataSourceFactory $sources,
+        protected InventoryEngine $inventory,
+    ) {}
+
+    public function canSync(Store $store): bool
+    {
+        return $store->isConnected() && $this->sources->supports($store->platform);
+    }
+
+    /**
+     * Run a full sync for one store and record the outcome on the store and as an integration job.
+     *
+     * @throws Throwable when the store cannot be read; the failure is recorded first
+     */
+    public function sync(Store $store): SyncResult
+    {
+        $startedAt = now();
+        $result = new SyncResult;
+        $source = $this->sources->for($store->platform);
+        $job = IntegrationJob::create([
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->id,
+            'job_type' => 'store_sync',
+            'status' => 'processing',
+            'attempts' => 1,
+            'last_attempt_at' => $startedAt,
+        ]);
+
+        try {
+            $warehouse = $this->defaultWarehouse($store);
+
+            foreach ($source->products($store) as $product) {
+                $this->saveProduct($store, $product, $warehouse, $result);
+            }
+
+            $since = $store->last_sync_at?->copy()->subMinutes(self::ORDER_OVERLAP_MINUTES);
+
+            foreach ($source->orders($store, $since) as $order) {
+                $this->saveOrder($store, $order, $result);
+            }
+
+            $result->warnings = $source->warnings();
+
+            if (! $warehouse) {
+                $result->warnings[] = 'No warehouse is linked to this store, so stock was not imported.';
+            }
+        } catch (Throwable $e) {
+            $job->update(['status' => 'failed', 'error_message' => $e->getMessage(), 'payload' => $result->toArray()]);
+            $store->update(['sync_status' => 'sync_issues', 'connection_error' => 'Sync failed: '.$e->getMessage()]);
+
+            throw $e;
+        }
+
+        $job->update(['status' => 'succeeded', 'payload' => $result->toArray()]);
+        $store->update([
+            'last_sync_at' => $startedAt,
+            'sync_status' => 'healthy',
+            'connection_error' => $result->warnings ? implode(' ', $result->warnings) : null,
+            'orders_awaiting_sync' => 0,
+        ]);
+
+        return $result;
+    }
+
+    private function defaultWarehouse(Store $store): ?Warehouse
+    {
+        return $store->warehouses()
+            ->orderByDesc('store_warehouse_assignments.is_default')
+            ->orderBy('store_warehouse_assignments.priority')
+            ->first();
+    }
+
+    private function saveProduct(Store $store, ProductData $data, ?Warehouse $warehouse, SyncResult $result): void
+    {
+        DB::transaction(function () use ($store, $data, $warehouse, $result) {
+            $mapped = SkuMapping::where('store_id', $store->id)
+                ->whereIn('external_id', array_map(fn (VariantData $variant) => $variant->externalId, $data->variants))
+                ->with('variant.product')
+                ->get()
+                ->keyBy('external_id');
+
+            $product = $mapped->first()?->variant?->product
+                ?? $this->variantBySku($store, $data->variants)?->product;
+
+            $attributes = [
+                'name' => $data->name,
+                'description' => $data->description,
+                'category' => $data->category,
+                'image_url' => $data->imageUrl,
+                'is_active' => $data->isActive,
+            ];
+
+            if ($product) {
+                $product->update($attributes);
+                $result->productsUpdated++;
+            } else {
+                $product = Product::create($attributes + [
+                    'organization_id' => $store->organization_id,
+                    'sku' => $this->uniqueProductSku($store, $data),
+                ]);
+                $result->productsCreated++;
+            }
+
+            foreach ($data->variants as $variantData) {
+                $variant = $mapped->get($variantData->externalId)?->variant
+                    ?? $this->unmappedVariantWithSku($store, $variantData->sku);
+
+                $variantAttributes = array_filter([
+                    'product_id' => $product->id,
+                    'barcode' => $variantData->barcode,
+                    'option_name' => $variantData->optionName,
+                    'option_value' => $variantData->optionValue,
+                    'price' => $variantData->price,
+                    'cost_price' => $variantData->costPrice,
+                    'is_active' => $data->isActive,
+                ], fn ($value) => $value !== null);
+
+                if ($variant) {
+                    $variant->update($variantAttributes);
+                } else {
+                    $variant = ProductVariant::create($variantAttributes + [
+                        'organization_id' => $store->organization_id,
+                        'sku' => $this->uniqueVariantSku($store, $product, $variantData),
+                    ]);
+                }
+
+                SkuMapping::updateOrCreate(
+                    ['store_id' => $store->id, 'external_id' => $variantData->externalId],
+                    [
+                        'organization_id' => $store->organization_id,
+                        'product_variant_id' => $variant->id,
+                        'external_sku' => $variantData->sku ?? $variant->sku,
+                        'external_name' => trim($data->name.' '.($variantData->optionValue ?? '')),
+                    ],
+                );
+
+                $result->variantsSynced++;
+
+                if ($warehouse && $this->importOpeningStock($store, $warehouse, $variant, $variantData)) {
+                    $result->openingStockLines++;
+                }
+            }
+        });
+    }
+
+    /**
+     * Stock comes from the store only once, for variants the warehouse has never held.
+     */
+    private function importOpeningStock(Store $store, Warehouse $warehouse, ProductVariant $variant, VariantData $data): bool
+    {
+        if (($data->stockQuantity ?? 0) <= 0) {
+            return false;
+        }
+
+        $alreadyStocked = InventoryBalance::where('warehouse_id', $warehouse->id)
+            ->where('product_variant_id', $variant->id)
+            ->exists();
+
+        if ($alreadyStocked) {
+            return false;
+        }
+
+        $this->inventory->adjustStock(
+            organizationId: $store->organization_id,
+            warehouseId: $warehouse->id,
+            productVariantId: $variant->id,
+            adjustmentType: 'add',
+            quantity: $data->stockQuantity,
+            reason: 'opening_stock',
+            notes: "Opening stock imported from {$store->platform->label()} store {$store->name}",
+            idempotencyKey: "store-{$store->id}-opening-{$variant->id}",
+        );
+
+        return true;
+    }
+
+    /**
+     * A Finovo variant with the same SKU (e.g. the product is also sold in another store), if any.
+     *
+     * @param  list<VariantData>  $variants
+     */
+    private function variantBySku(Store $store, array $variants): ?ProductVariant
+    {
+        $skus = array_values(array_filter(array_map(fn (VariantData $variant) => $variant->sku, $variants)));
+
+        return $skus === [] ? null : ProductVariant::where('organization_id', $store->organization_id)
+            ->whereIn('sku', $skus)
+            ->with('product')
+            ->first();
+    }
+
+    /**
+     * Same-SKU variant not yet linked to another variant of this store (two store variants can't share one mapping).
+     */
+    private function unmappedVariantWithSku(Store $store, ?string $sku): ?ProductVariant
+    {
+        if ($sku === null) {
+            return null;
+        }
+
+        return ProductVariant::where('organization_id', $store->organization_id)
+            ->where('sku', $sku)
+            ->whereDoesntHave('skuMappings', fn ($query) => $query->where('store_id', $store->id))
+            ->first();
+    }
+
+    private function uniqueProductSku(Store $store, ProductData $data): string
+    {
+        $base = count($data->variants) === 1 && $data->variants[0]->sku
+            ? $data->variants[0]->sku
+            : Str::upper(Str::slug($data->handle ?: $data->name));
+
+        return $this->firstFreeSku(Product::class, $store, $base ?: 'PRODUCT', $data->externalId);
+    }
+
+    private function uniqueVariantSku(Store $store, Product $product, VariantData $data): string
+    {
+        return $this->firstFreeSku(ProductVariant::class, $store, $data->sku ?? $product->sku.'-'.$data->externalId, $data->externalId);
+    }
+
+    /**
+     * SKUs are unique per organization; a taken SKU gets the store's ID for the item appended.
+     *
+     * @param  class-string<Product|ProductVariant>  $model
+     */
+    private function firstFreeSku(string $model, Store $store, string $sku, string $externalId): string
+    {
+        $taken = fn (string $candidate) => $model::where('organization_id', $store->organization_id)->where('sku', $candidate)->exists();
+
+        return $taken($sku) ? Str::limit($sku, 180, '').'-'.$externalId : $sku;
+    }
+
+    private function saveOrder(Store $store, OrderData $data, SyncResult $result): void
+    {
+        DB::transaction(function () use ($store, $data, $result) {
+            $order = Order::where('organization_id', $store->organization_id)
+                ->where('store_id', $store->id)
+                ->where('external_order_id', $data->externalId)
+                ->first();
+
+            $attributes = [
+                'customer_email' => $data->customerEmail,
+                'customer_phone' => $data->customerPhone,
+                'shipping_address' => $data->shippingAddress,
+                'payment_status' => $data->paymentStatus,
+                'fulfillment_status' => $data->fulfillmentStatus,
+                'total_amount' => $data->total,
+                'currency' => $data->currency,
+                'notes' => $data->note,
+            ];
+
+            if ($order) {
+                // Finovo owns the order workflow; the store can only add details or cancel an unshipped order.
+                $order->fill(array_filter($attributes, fn ($value) => $value !== null));
+
+                if ($data->customerName) {
+                    $order->customer_name = $data->customerName;
+                }
+
+                if ($data->cancelled && ! in_array($order->order_status, self::SHIPPED_STATUSES, true)) {
+                    $order->order_status = 'cancelled';
+                }
+
+                $order->save();
+                $result->ordersUpdated++;
+
+                return;
+            }
+
+            $order = Order::create($attributes + [
+                'organization_id' => $store->organization_id,
+                'store_id' => $store->id,
+                'order_number' => $data->number,
+                'external_order_id' => $data->externalId,
+                'customer_name' => $data->customerName ?? 'Guest customer',
+                'order_status' => $data->cancelled ? 'cancelled' : 'imported',
+                'placed_at' => $data->placedAt,
+            ]);
+
+            foreach ($data->lines as $line) {
+                $order->items()->create([
+                    'product_variant_id' => $this->variantForLine($store, $line)?->id,
+                    'external_sku' => $line->sku ?? '',
+                    'product_name' => $line->name,
+                    'quantity' => $line->quantity,
+                    'unit_price' => $line->unitPrice,
+                    'tax_amount' => $line->taxAmount,
+                    'total_amount' => $line->totalAmount,
+                    'status' => $data->cancelled ? 'cancelled' : 'pending',
+                ]);
+            }
+
+            $result->ordersCreated++;
+        });
+    }
+
+    private function variantForLine(Store $store, OrderLineData $line): ?ProductVariant
+    {
+        if ($line->externalVariantId) {
+            $mapping = SkuMapping::where('store_id', $store->id)->where('external_id', $line->externalVariantId)->first();
+
+            if ($mapping) {
+                return $mapping->variant;
+            }
+        }
+
+        return $line->sku
+            ? ProductVariant::where('organization_id', $store->organization_id)->where('sku', $line->sku)->first()
+            : null;
+    }
+}

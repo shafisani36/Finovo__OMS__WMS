@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\V1\PurchaseRequisitionController;
 use App\Http\Controllers\Api\V1\ReplenishmentController;
 use App\Http\Controllers\Api\V1\StockAdjustmentController;
 use App\Http\Controllers\Api\V1\StockMovementController;
+use App\Http\Controllers\Api\V1\StoreAuthorizationController;
 use App\Http\Controllers\Api\V1\StoreController;
 use App\Http\Controllers\Api\V1\WarehouseController;
 use Illuminate\Support\Facades\Route;
@@ -52,14 +53,31 @@ Route::prefix('v1')->group(function () {
         Route::get('health', [CustomBridgeWebhookController::class, 'health']);
     });
 
+    // Store Platform Authorization Callbacks (called by Shopify, WooCommerce, BigCommerce and eBay; verified by signed state / platform signature)
+    Route::prefix('integrations')->name('integrations.')->middleware('throttle:60,1')->group(function () {
+        Route::get('shopify/callback', [StoreAuthorizationController::class, 'shopifyCallback'])->name('shopify.callback');
+        Route::post('woocommerce/callback', [StoreAuthorizationController::class, 'wooCommerceCallback'])->name('woocommerce.callback');
+        Route::get('bigcommerce/install', [StoreAuthorizationController::class, 'bigCommerceInstall'])->name('bigcommerce.install');
+        Route::get('bigcommerce/callback', [StoreAuthorizationController::class, 'bigCommerceCallback'])->name('bigcommerce.callback');
+        Route::get('bigcommerce/load', [StoreAuthorizationController::class, 'bigCommerceLoad'])->name('bigcommerce.load');
+        Route::get('bigcommerce/uninstall', [StoreAuthorizationController::class, 'bigCommerceUninstall'])->name('bigcommerce.uninstall');
+        Route::get('modules/{store}', [StoreAuthorizationController::class, 'moduleDownload'])->middleware('signed')->name('module.download');
+        Route::post('prestashop/callback', [StoreAuthorizationController::class, 'prestaShopCallback'])->name('prestashop.callback');
+        Route::post('opencart/callback', [StoreAuthorizationController::class, 'openCartCallback'])->name('opencart.callback');
+        Route::get('wix/callback', [StoreAuthorizationController::class, 'wixCallback'])->name('wix.callback');
+        Route::get('ebay/callback', [StoreAuthorizationController::class, 'ebayCallback'])->name('ebay.callback');
+    });
+
     // Authenticated OMS / WMS Enterprise Core Routes
     Route::middleware('auth:sanctum')->group(function () {
         // Stores & Channels
         Route::get('stores', [StoreController::class, 'index']);
-        Route::post('stores', [StoreController::class, 'store']);
+        Route::post('stores', [StoreController::class, 'store'])->middleware('role:admin');
         Route::get('stores/{store}', [StoreController::class, 'show']);
+        Route::get('stores/{store}/authorization', [StoreController::class, 'authorization'])->middleware('role:admin');
+        Route::post('stores/{store}/test-connection', [StoreController::class, 'testConnection'])->middleware('role:admin');
         Route::post('stores/{store}/sync', [StoreController::class, 'sync']);
-        Route::delete('stores/{store}', [StoreController::class, 'destroy']);
+        Route::delete('stores/{store}', [StoreController::class, 'destroy'])->middleware('role:admin');
 
         // Warehouses & Configuration Lifecycle
         Route::get('warehouses/metadata', [WarehouseController::class, 'metadata']);
@@ -67,6 +85,7 @@ Route::prefix('v1')->group(function () {
         Route::post('warehouses', [WarehouseController::class, 'store']);
         Route::get('warehouses/{warehouse}', [WarehouseController::class, 'show']);
         Route::put('warehouses/{warehouse}', [WarehouseController::class, 'update']);
+        Route::delete('warehouses/{warehouse}', [WarehouseController::class, 'destroy'])->middleware('role:admin');
         Route::get('warehouses/{warehouse}/readiness', [WarehouseController::class, 'readiness']);
         Route::post('warehouses/{warehouse}/activate', [WarehouseController::class, 'activate']);
         Route::post('warehouses/{warehouse}/deactivate', [WarehouseController::class, 'deactivate']);

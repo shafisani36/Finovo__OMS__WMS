@@ -5,9 +5,11 @@ import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import DataTable from '../components/common/DataTable';
 import type { Column } from '../components/common/DataTable';
 import omsService from '../services/omsService';
+import { useActiveStore } from '../hooks/useActiveStore';
 import type { ProductModel } from '../services/omsService';
 
 export const ProductsPage: React.FC = () => {
+  const { activeStore } = useActiveStore();
   const [products, setProducts] = useState<ProductModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -29,6 +31,7 @@ export const ProductsPage: React.FC = () => {
       setLoading(true);
       const res = await omsService.getProducts({
         search: search || undefined,
+        store_id: activeStore?.id,
         page,
         per_page: perPage,
       });
@@ -44,7 +47,7 @@ export const ProductsPage: React.FC = () => {
 
   useEffect(() => {
     fetchProducts();
-  }, [page, perPage]);
+  }, [page, perPage, activeStore?.id]);
 
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -142,7 +145,9 @@ export const ProductsPage: React.FC = () => {
             <h1 className="page-title">Products Catalog</h1>
             <span className="page-count-pill">{total}</span>
           </div>
-          <p className="page-subtitle">Unified product variants, barcodes, and multichannel inventory mappings.</p>
+          <p className="page-subtitle">
+            {activeStore ? `Products sold in ${activeStore.name}.` : 'Unified product variants, barcodes, and multichannel inventory mappings.'}
+          </p>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>

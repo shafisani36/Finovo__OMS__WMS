@@ -1,0 +1,121 @@
+.confirm-dialog {
+  position: relative;
+  z-index: 10000;
+  width: 100%;
+  max-width: 420px;
+  background-color: var(--finovo-card-bg);
+  border-radius: var(--finovo-radius-xl);
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(15, 23, 42, 0.06);
+  padding: 28px 24px 24px;
+  text-align: center;
+  animation: modalSlideUp 0.18s ease-out;
+}
+
+.confirm-dialog:focus {
+  outline: none;
+}
+
+.confirm-dialog button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(30, 86, 255, 0.25);
+}
+
+.confirm-dialog-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: inline-flex;
+  padding: 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--finovo-text-light);
+  cursor: pointer;
+}
+
+.confirm-dialog-close:hover:not(:disabled) {
+  background-color: var(--finovo-border-subtle);
+  color: var(--finovo-text-main);
+}
+
+.confirm-dialog-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 16px;
+  border-radius: 50%;
+}
+
+.confirm-dialog-icon-danger {
+  background-color: #fef2f2;
+  color: #dc2626;
+  box-shadow: 0 0 0 6px #fff5f5;
+}
+
+.confirm-dialog-icon-primary {
+  background-color: var(--finovo-primary-light);
+  color: var(--finovo-primary);
+  box-shadow: 0 0 0 6px #f5f8ff;
+}
+
+.confirm-dialog-title {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--finovo-text-main);
+}
+
+.confirm-dialog-message {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--finovo-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.confirm-dialog-message strong {
+  color: var(--finovo-text-main);
+  font-weight: 600;
+}
+
+.confirm-dialog-note {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background-color: var(--finovo-bg);
+  border: 1px solid var(--finovo-border-subtle);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--finovo-text-muted);
+}
+
+.confirm-dialog-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.confirm-dialog-actions > button {
+  flex: 1;
+  justify-content: center;
+  padding: 10px 16px;
+}
+
+.btn-finovo-primary.confirm-dialog-danger {
+  background-color: #dc2626;
+}
+
+.btn-finovo-primary.confirm-dialog-danger:hover:not(:disabled) {
+  background-color: #b91c1c;
+}
+
+@media (max-width: 480px) {
+  .confirm-dialog {
+    padding: 24px 16px 16px;
+  }
+
+  .confirm-dialog-actions {
+    flex-direction: column-reverse;
+  }
+}

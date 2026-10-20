@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { ActiveStoreProvider } from './context/ActiveStoreContext';
 import { useAuth } from './hooks/useAuth';
 import { LoginPage } from './pages/LoginPage';
 import { VerifyOtpPage } from './pages/VerifyOtpPage';
@@ -106,7 +107,9 @@ export const App: React.FC = () => {
           <Route
             element={
               <ProtectedRoute>
-                <AppLayout />
+                <ActiveStoreProvider>
+                  <AppLayout />
+                </ActiveStoreProvider>
               </ProtectedRoute>
             }
           >

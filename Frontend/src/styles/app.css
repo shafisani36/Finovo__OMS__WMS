@@ -308,7 +308,8 @@ html, body {
 .page-title-badge-wrap {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
 }
 
 .page-title {
@@ -320,6 +321,7 @@ html, body {
 }
 
 .page-count-pill {
+  white-space: nowrap;
   background-color: #eff6ff;
   color: #1e56ff;
   font-size: 13px;
@@ -392,6 +394,74 @@ html, body {
   margin-bottom: 24px;
 }
 
+.kpi-card {
+  background-color: #ffffff;
+  border: 1px solid var(--finovo-border);
+  border-radius: 16px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.kpi-card-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background-color: #eff6ff;
+  color: #1e56ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.kpi-card-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.kpi-card-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748b;
+  margin: 0;
+}
+
+.kpi-card-value-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kpi-card-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.kpi-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+
+.kpi-pill-blue {
+  background-color: #eff6ff;
+  color: #1e56ff;
+}
+
+.kpi-pill-green {
+  background-color: #ecfdf5;
+  color: #059669;
+}
+
 @media (max-width: 1200px) {
   .kpi-grid {
     grid-template-columns: repeat(3, 1fr);
@@ -439,6 +509,11 @@ html, body {
     font-size: 16px;
   }
 
+  .kpi-card-value-wrap {
+    flex-wrap: wrap;
+    gap: 4px 6px;
+  }
+
   .kpi-pill {
     font-size: 10px;
     padding: 1px 6px;
@@ -458,72 +533,6 @@ html, body {
   .kpi-grid > *:last-child {
     grid-column: auto;
   }
-}
-
-.kpi-card {
-  background-color: #ffffff;
-  border: 1px solid var(--finovo-border);
-  border-radius: 16px;
-  padding: 16px 20px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
-}
-
-.kpi-card-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background-color: #eff6ff;
-  color: #1e56ff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.kpi-card-content {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-}
-
-.kpi-card-title {
-  font-size: 12px;
-  font-weight: 500;
-  color: #64748b;
-  margin: 0;
-}
-
-.kpi-card-value-wrap {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.kpi-card-value {
-  font-size: 22px;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.kpi-pill {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 9999px;
-}
-
-.kpi-pill-blue {
-  background-color: #eff6ff;
-  color: #1e56ff;
-}
-
-.kpi-pill-green {
-  background-color: #ecfdf5;
-  color: #059669;
 }
 
 /* Main Content Cards & Tables */
@@ -571,14 +580,16 @@ html, body {
   width: 100%;
 }
 
-.finovo-table {
+.finovo-table,
+.enterprise-data-table {
   width: 100%;
   border-collapse: collapse;
   text-align: left;
   font-size: 13px;
 }
 
-.finovo-table th {
+.finovo-table th,
+.enterprise-data-table th {
   background-color: #f8fafc;
   color: #64748b;
   font-size: 11px;
@@ -590,14 +601,16 @@ html, body {
   white-space: nowrap;
 }
 
-.finovo-table td {
+.finovo-table td,
+.enterprise-data-table td {
   padding: 16px 20px;
   border-bottom: 1px solid var(--finovo-border-subtle);
   color: #1e293b;
   vertical-align: middle;
 }
 
-.finovo-table tr:hover td {
+.finovo-table tr:hover td,
+.enterprise-data-table tr:hover td {
   background-color: #f8fafc;
 }
 
@@ -718,6 +731,7 @@ html, body {
 }
 
 .btn-finovo-secondary {
+  white-space: nowrap;
   background-color: #ffffff;
   color: #334155;
   border: 1px solid var(--finovo-border);
@@ -1235,9 +1249,15 @@ html, body {
     width: 100%;
   }
 
+  .content-card-header > div {
+    flex-wrap: wrap;
+  }
+
   /* Tables keep their columns and scroll sideways inside the card */
   .finovo-table th,
-  .finovo-table td {
+  .finovo-table td,
+  .enterprise-data-table th,
+  .enterprise-data-table td {
     padding: 12px 14px;
     white-space: nowrap;
   }
@@ -1467,4 +1487,208 @@ html, body {
     gap: 8px;
   }
 }
-
+
+/* =========================================================
+   Connect Store dialog (Stores page)
+   ========================================================= */
+.store-connect-dialog {
+  max-width: 620px;
+}
+
+.store-connect-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--finovo-border);
+}
+
+.store-connect-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.store-connect-title h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.store-connect-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background-color: #eff6ff;
+  color: var(--finovo-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.store-connect-close {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  display: flex;
+}
+
+.store-connect-body {
+  padding: 20px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+
+.store-connect-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.store-connect-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.store-connect-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.store-connect-input {
+  width: 100%;
+  height: 42px;
+  padding: 0 14px;
+  font-size: 14px;
+  font-family: inherit;
+  color: #0f172a;
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.store-connect-input:focus {
+  border-color: var(--finovo-primary);
+  box-shadow: 0 0 0 3px rgba(30, 86, 255, 0.12);
+}
+
+.store-connect-input.has-error {
+  border-color: #dc2626;
+}
+
+.store-connect-help {
+  margin: 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.store-connect-field-error {
+  font-size: 12px;
+  color: #dc2626;
+}
+
+.store-connect-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background-color: #f8fafc;
+  border: 1px solid var(--finovo-border);
+  font-size: 13px;
+  line-height: 1.5;
+  color: #334155;
+}
+
+.store-connect-note svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--finovo-primary);
+}
+
+.store-connect-note-success {
+  background-color: #ecfdf5;
+  border-color: #a7f3d0;
+}
+
+.store-connect-error-banner {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  font-size: 13px;
+}
+
+.store-connect-secret {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.store-connect-secret code {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background-color: #f1f5f9;
+  font-size: 12px;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.store-connect-download {
+  align-self: flex-start;
+  text-decoration: none;
+}
+
+.store-connect-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.store-connection-error {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-width: 220px;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #b91c1c;
+  white-space: normal;
+}
+
+@media (max-width: 640px) {
+  .store-connect-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .store-connect-header,
+  .store-connect-body {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .store-connect-actions > button {
+    flex: 1;
+  }
+
+  .store-connect-secret {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

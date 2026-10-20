@@ -6,9 +6,11 @@ import DataTable from '../components/common/DataTable';
 import type { Column } from '../components/common/DataTable';
 import CustomDropdown from '../components/common/CustomDropdown';
 import omsService from '../services/omsService';
+import { useActiveStore } from '../hooks/useActiveStore';
 import type { OrderModel, ProductModel, StoreModel } from '../services/omsService';
 
 export const OrdersPage: React.FC = () => {
+  const { activeStore } = useActiveStore();
   const [orders, setOrders] = useState<OrderModel[]>([]);
   const [products, setProducts] = useState<ProductModel[]>([]);
   const [stores, setStores] = useState<StoreModel[]>([]);
@@ -42,6 +44,7 @@ export const OrdersPage: React.FC = () => {
       const res = await omsService.getOrders({
         search: search || undefined,
         status: statusFilter || undefined,
+        store_id: activeStore?.id,
         page,
         per_page: perPage,
       });
@@ -73,7 +76,7 @@ export const OrdersPage: React.FC = () => {
 
   useEffect(() => {
     fetchOrders();
-  }, [page, perPage, statusFilter]);
+  }, [page, perPage, statusFilter, activeStore?.id]);
 
   useEffect(() => {
     fetchDependencies();
@@ -224,7 +227,9 @@ export const OrdersPage: React.FC = () => {
             <h1 className="page-title">Orders</h1>
             <span className="page-count-pill">{kpis.total_orders}</span>
           </div>
-          <p className="page-subtitle">Track, allocate, and fulfill multichannel customer orders.</p>
+          <p className="page-subtitle">
+            {activeStore ? `Orders from ${activeStore.name}.` : 'Track, allocate, and fulfill multichannel customer orders.'}
+          </p>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>

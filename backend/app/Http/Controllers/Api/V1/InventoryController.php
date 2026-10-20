@@ -47,6 +47,11 @@ class InventoryController extends Controller
             $query->where('warehouse_id', $warehouseId);
         }
 
+        // Store filter: stock of products sold in the store being managed
+        if ($storeId = $request->query('store_id')) {
+            $query->whereHas('variant.skuMappings', fn ($q) => $q->where('store_id', $storeId));
+        }
+
         // Stock Status Filter (in_stock, low_stock, out_of_stock)
         if ($status = $request->query('status')) {
             if ($status === 'in_stock') {

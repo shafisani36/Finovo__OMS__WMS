@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\UserRole;
 use App\Models\Organization;
 use App\Models\User;
 use App\Models\Warehouse;
@@ -20,7 +21,7 @@ class StoreAndWarehouseTest extends TestCase
     {
         parent::setUp();
 
-        $this->user = User::factory()->create(['status' => 'active']);
+        $this->user = User::factory()->create(['status' => 'active', 'role' => UserRole::ADMIN]);
         $this->org = $this->user->currentOrganization();
     }
 
@@ -54,16 +55,16 @@ class StoreAndWarehouseTest extends TestCase
         ]);
 
         $response = $this->actingAs($this->user)->postJson('/api/v1/stores', [
-            'name' => 'Shopify Retail Store',
-            'platform' => 'shopify',
-            'warehouse_ids' => [$warehouse->id],
+            'name' => 'Retail Counter',
+            'platform' => 'manual',
+            'warehouse_id' => $warehouse->id,
         ]);
 
         $response->assertCreated();
         $this->assertDatabaseHas('stores', [
             'organization_id' => $this->org->id,
-            'name' => 'Shopify Retail Store',
-            'platform' => 'shopify',
+            'name' => 'Retail Counter',
+            'platform' => 'manual',
         ]);
 
         $list = $this->actingAs($this->user)->getJson('/api/v1/stores');
@@ -75,10 +76,17 @@ class StoreAndWarehouseTest extends TestCase
 
     public function test_custom_bridge_store_generates_secure_api_credentials(): void
     {
+        $warehouse = Warehouse::create([
+            'organization_id' => $this->org->id,
+            'name' => 'Bridge Warehouse',
+            'code' => 'BW-01',
+        ]);
+
         $response = $this->actingAs($this->user)->postJson('/api/v1/stores', [
             'name' => 'Custom PHP Ecommerce',
             'platform' => 'custom_bridge',
-            'bridge_url' => 'https://example.com/api',
+            'warehouse_id' => $warehouse->id,
+            'credentials' => ['bridge_url' => 'https://example.com/api'],
         ]);
 
         $response->assertCreated()

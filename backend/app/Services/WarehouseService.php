@@ -15,7 +15,8 @@ class WarehouseService
 {
     public function __construct(
         protected WarehouseReadinessService $readinessService,
-        protected WarehouseLayoutService $layoutService
+        protected WarehouseLayoutService $layoutService,
+        protected AuditService $auditService
     ) {}
 
     /**
@@ -327,6 +328,61 @@ class WarehouseService
     /**
      * Initiate controlled warehouse closure review.
      */
+    /**
+     * Permanently delete a warehouse that was never used for business.
+     * Its locations, staff assignments and audit trail go with it; anything with stock, stores or
+     * documents must be deactivated instead, so no inventory or purchasing history is lost.
+     *
+     * @throws ValidationException when the warehouse is still in use
+     */
+    public function deleteWarehouse(Warehouse $warehouse, int $userId): void
+    {
+        $usedBy = $this->recordsUsingWarehouse($warehouse);
+
+        if ($usedBy !== []) {
+            throw ValidationException::withMessages([
+                'warehouse' => ["Warehouse '{$warehouse->name}' cannot be deleted because it has ".implode(', ', $usedBy).'. Deactivate it instead.'],
+            ]);
+        }
+
+        DB::transaction(fn () => $warehouse->delete());
+
+        // The warehouse audit log is deleted with the warehouse, so the deletion is kept in the system audit log.
+        $this->auditService->record('warehouse.deleted', $userId, [
+            'warehouse_id' => $warehouse->id,
+            'organization_id' => $warehouse->organization_id,
+            'name' => $warehouse->name,
+            'code' => $warehouse->code,
+        ]);
+    }
+
+    /**
+     * Business records that would be deleted or orphaned together with the warehouse.
+     *
+     * @return list<string> descriptions of what still uses the warehouse
+     */
+    private function recordsUsingWarehouse(Warehouse $warehouse): array
+    {
+        $id = $warehouse->id;
+        $checks = [
+            'linked stores' => DB::table('store_warehouse_assignments')->where('warehouse_id', $id),
+            'sub-warehouses' => DB::table('warehouses')->where('parent_warehouse_id', $id),
+            'stock history' => DB::table('inventory_ledger_entries')->where('warehouse_id', $id),
+            'stock receipts' => DB::table('inventory_receipts')->where('warehouse_id', $id),
+            'stock transfers' => DB::table('inventory_transfers')->where(fn ($q) => $q->where('from_warehouse_id', $id)->orWhere('to_warehouse_id', $id)),
+            'stock adjustments' => DB::table('stock_adjustments')->where('warehouse_id', $id),
+            'cycle counts' => DB::table('cycle_counts')->where('warehouse_id', $id),
+            'purchase requisitions' => DB::table('purchase_requisitions')->where('warehouse_id', $id),
+            'purchase orders' => DB::table('purchase_orders')->where('warehouse_id', $id),
+            'goods received notes' => DB::table('goods_received_notes')->where('warehouse_id', $id),
+            'order allocations' => DB::table('order_items')->where('allocated_warehouse_id', $id),
+            'pick tasks' => DB::table('pick_tasks')->where('warehouse_id', $id),
+            'shipments' => DB::table('shipments')->where('warehouse_id', $id),
+        ];
+
+        return array_keys(array_filter($checks, fn ($query) => $query->exists()));
+    }
+
     public function beginClosure(Warehouse $warehouse, int $userId, ?string $reason = null): array
     {
         $before = $warehouse->toArray();

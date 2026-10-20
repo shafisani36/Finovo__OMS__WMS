@@ -3,14 +3,24 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\ConnectStoreRequest;
+use App\Jobs\SyncStoreJob;
 use App\Models\Store;
-use App\Models\Warehouse;
+use App\Services\EmailService;
+use App\Services\StoreConnectionService;
+use App\Services\StoreSyncService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
+use RuntimeException;
 
 class StoreController extends Controller
 {
+    public function __construct(
+        protected StoreConnectionService $connections,
+        protected EmailService $emails,
+        protected StoreSyncService $syncService,
+    ) {}
+
     /**
      * List all stores for the user's organization with metrics and filters.
      */
@@ -67,64 +77,68 @@ class StoreController extends Controller
     }
 
     /**
-     * Create a new store connection.
+     * Connect a new store and link it to a warehouse.
      */
-    public function store(Request $request): JsonResponse
+    public function store(ConnectStoreRequest $request): JsonResponse
     {
-        $org = $request->user()->currentOrganization();
+        $result = $this->connections->connect($request->validated(), $request->user());
+        $store = $result['store'];
 
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'platform' => ['required', 'string', 'in:shopify,woocommerce,bigcommerce,prestashop,wix,ebay,magento,opencart,oscommerce,manual,custom_bridge'],
-            'bridge_url' => ['nullable', 'url', 'max:255'],
-            'warehouse_ids' => ['nullable', 'array'],
-            'warehouse_ids.*' => ['exists:warehouses,id'],
+        $this->emails->sendActivityEmail(EmailService::STORE_CREATED, $store->organization, [
+            'name' => $store->name,
+            'actor' => $request->user(),
+            'details' => [
+                'Platform' => $store->platform->label(),
+                'Fulfilling warehouse' => $store->warehouses->first()?->name,
+                'Connection status' => $store->isConnected() ? 'Connected' : 'Waiting for authorization on '.$store->platform->label(),
+            ],
         ]);
-
-        $code = Str::slug($validated['name']).'-'.strtolower(Str::random(4));
-
-        $apiKey = null;
-        $apiSecret = null;
-        if ($validated['platform'] === 'custom_bridge') {
-            $apiKey = 'finovo_'.Str::random(32);
-            $apiSecret = Str::random(64);
-        }
-
-        $store = Store::create([
-            'organization_id' => $org->id,
-            'name' => $validated['name'],
-            'code' => $code,
-            'platform' => $validated['platform'],
-            'status' => 'active',
-            'sync_status' => 'healthy',
-            'orders_awaiting_sync' => 0,
-            'api_key' => $apiKey,
-            'api_secret' => $apiSecret,
-            'bridge_url' => $validated['bridge_url'] ?? null,
-            'last_sync_at' => now(),
-        ]);
-
-        if (! empty($validated['warehouse_ids'])) {
-            $store->warehouses()->sync($validated['warehouse_ids']);
-        } else {
-            // Assign default active warehouse if exists
-            $defaultWh = Warehouse::where('organization_id', $org->id)->where('is_active', true)->first();
-            if ($defaultWh) {
-                $store->warehouses()->sync([$defaultWh->id => ['is_default' => true]]);
-            }
-        }
-
-        $store->load('warehouses');
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Store connected successfully.',
-            'data' => $store,
-            'credentials' => $apiKey ? [
-                'api_key' => $apiKey,
-                'api_secret' => $apiSecret,
-            ] : null,
+            'message' => $result['next_action']
+                ? 'Store created. Finish authorizing it on '.$result['store']->platform->label().'.'
+                : ($result['connection']?->message ?? 'Store created.'),
+            'data' => $result['store'],
+            'next_action' => $result['next_action'],
+            'credentials' => $result['credentials'],
         ], 201);
+    }
+
+    /**
+     * Next authorization step for a store that is not connected yet (approval page, app or module install).
+     */
+    public function authorization(Request $request, Store $store): JsonResponse
+    {
+        $this->ensureSameOrganization($request, $store);
+
+        if (! $store->platform->authorizesOnPlatform()) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $store->platform->label().' stores connect with keys, not an authorization step.',
+            ], 422);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'next_action' => $this->connections->authorizationAction($store),
+        ]);
+    }
+
+    /**
+     * Check the store's saved credentials against its platform.
+     */
+    public function testConnection(Request $request, Store $store): JsonResponse
+    {
+        $this->ensureSameOrganization($request, $store);
+
+        $result = $this->connections->test($store);
+
+        return response()->json([
+            'status' => $result->successful ? 'success' : 'error',
+            'message' => $result->message,
+            'data' => $store->load('warehouses'),
+        ], $result->successful ? 200 : 422);
     }
 
     /**
@@ -132,10 +146,7 @@ class StoreController extends Controller
      */
     public function show(Request $request, Store $store): JsonResponse
     {
-        $org = $request->user()->currentOrganization();
-        if ($store->organization_id !== $org->id) {
-            abort(403, 'Unauthorized access to this store.');
-        }
+        $this->ensureSameOrganization($request, $store);
 
         $store->load('warehouses');
 
@@ -146,25 +157,42 @@ class StoreController extends Controller
     }
 
     /**
-     * Trigger manual store sync.
+     * Import the store's products, variants, stock and orders.
+     * Runs in a background job; without a queue worker (QUEUE_CONNECTION=sync) it runs right away.
      */
     public function sync(Request $request, Store $store): JsonResponse
     {
-        $org = $request->user()->currentOrganization();
-        if ($store->organization_id !== $org->id) {
-            abort(403, 'Unauthorized access to this store.');
+        $this->ensureSameOrganization($request, $store);
+
+        if (! $store->isConnected()) {
+            return response()->json(['status' => 'error', 'message' => 'Connect the store before syncing it.'], 422);
         }
 
-        $store->update([
-            'last_sync_at' => now(),
-            'sync_status' => 'healthy',
-            'orders_awaiting_sync' => 0,
-        ]);
+        if (! $this->syncService->canSync($store)) {
+            return response()->json(['status' => 'error', 'message' => "Finovo cannot import products and orders for {$store->platform->label()}."], 422);
+        }
+
+        if (config('queue.default') !== 'sync') {
+            SyncStoreJob::dispatch($store);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Sync started. Products and orders will appear in a few minutes.',
+                'data' => $store,
+            ], 202);
+        }
+
+        try {
+            $result = $this->syncService->sync($store);
+        } catch (RuntimeException $e) {
+            return response()->json(['status' => 'error', 'message' => 'Sync failed: '.$e->getMessage()], 422);
+        }
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Store synchronization initiated successfully.',
-            'data' => $store,
+            'message' => 'Sync complete: '.$result->summary().($result->warnings ? ' '.implode(' ', $result->warnings) : ''),
+            'data' => $store->fresh(),
+            'result' => $result->toArray(),
         ]);
     }
 
@@ -173,16 +201,31 @@ class StoreController extends Controller
      */
     public function destroy(Request $request, Store $store): JsonResponse
     {
-        $org = $request->user()->currentOrganization();
-        if ($store->organization_id !== $org->id) {
-            abort(403, 'Unauthorized access to this store.');
-        }
+        $this->ensureSameOrganization($request, $store);
+
+        $details = [
+            'Platform' => $store->platform->label(),
+            'Linked warehouses' => $store->warehouses()->pluck('name')->implode(', '),
+        ];
 
         $store->delete();
+
+        $this->emails->sendActivityEmail(EmailService::STORE_DELETED, $request->user()->currentOrganization(), [
+            'name' => $store->name,
+            'actor' => $request->user(),
+            'details' => $details,
+        ]);
 
         return response()->json([
             'status' => 'success',
             'message' => 'Store disconnected successfully.',
         ]);
+    }
+
+    private function ensureSameOrganization(Request $request, Store $store): void
+    {
+        if ($store->organization_id !== $request->user()->currentOrganization()->id) {
+            abort(403, 'Unauthorized access to this store.');
+        }
     }
 }

@@ -29,6 +29,7 @@ import {
 import MetricCard from '../components/common/MetricCard';
 import CustomDropdown from '../components/common/CustomDropdown';
 import omsService from '../services/omsService';
+import { useActiveStore } from '../hooks/useActiveStore';
 import type {
   InventoryItemModel,
   InventoryKpiModel,
@@ -45,6 +46,7 @@ import type {
 type TabKey = 'balances' | 'receipts' | 'transfers' | 'adjustments' | 'counts' | 'ledger' | 'replenishment';
 
 export const InventoryPage: React.FC = () => {
+  const { activeStore } = useActiveStore();
   const [activeTab, setActiveTab] = useState<TabKey>('balances');
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -147,6 +149,7 @@ export const InventoryPage: React.FC = () => {
       const res = await omsService.getInventory({
         search: balanceSearch || undefined,
         warehouse_id: whId,
+        store_id: activeStore?.id,
         status: statusFilter !== 'all' ? statusFilter : undefined,
         per_page: 50,
       });
@@ -248,7 +251,7 @@ export const InventoryPage: React.FC = () => {
     else if (activeTab === 'counts') fetchCycleCounts();
     else if (activeTab === 'ledger') fetchMovements();
     else if (activeTab === 'replenishment') fetchReplenishment();
-  }, [activeTab, selectedWarehouseId]);
+  }, [activeTab, selectedWarehouseId, activeStore?.id]);
 
   // SKU Detail Inspector
   const openSkuDetail = async (variantId: number) => {

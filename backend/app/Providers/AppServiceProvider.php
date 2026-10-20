@@ -5,6 +5,8 @@ namespace App\Providers;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Http\Middleware\TrustProxies;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -22,6 +24,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        $this->configureUrls();
         // Rate Limiter for Login Attempts
         RateLimiter::for('login', function (Request $request) {
             $email = (string) $request->input('email');
@@ -91,5 +94,22 @@ class AppServiceProvider extends ServiceProvider
                 ], 429);
             });
         });
+    }
+    
+    /**
+     * Callback and download links sent to store platforms must use the public HTTPS address,
+     * also when TLS ends at a load balancer or reverse proxy in front of the app.
+     */
+    private function configureUrls(): void
+    {
+        $proxies = (string) config('app.trusted_proxies');
+
+        if ($proxies !== '') {
+            TrustProxies::at($proxies === '*' ? '*' : array_map('trim', explode(',', $proxies)));
+        }
+
+        if (str_starts_with((string) config('app.url'), 'https://')) {
+            URL::forceScheme('https');
+        }
     }
 }
