@@ -190,7 +190,7 @@ export const PurchaseOrdersPage: React.FC = () => {
           list.push({
             id: v.id,
             sku: v.sku,
-            name: `${p.name} (${v.sku})`,
+            name: v.option_value ? `${p.name} - ${v.option_value}` : p.name,
             price: Number(v.cost_price || v.cost || v.price || 50),
             uom: p.base_uom || 'pcs',
           });
@@ -207,6 +207,12 @@ export const PurchaseOrdersPage: React.FC = () => {
     });
     return list;
   }, [products]);
+
+  // Product name on top and SKU underneath, so long catalog names stay readable in the picker.
+  const variantOptions = useMemo(
+    () => allVariants.map((v) => ({ value: String(v.id), label: v.name, description: v.sku })),
+    [allVariants],
+  );
 
   // -------------------------------------------------------------
   // Form State: Create Requisition
@@ -975,7 +981,7 @@ export const PurchaseOrdersPage: React.FC = () => {
                             </div>
                           </td>
                           <td>
-                            <span style={{ fontSize: 12 }}>{po.order_date || po.created_at?.slice(0, 10)}</span>
+                            <span style={{ fontSize: 12 }}>{(po.order_date || po.created_at)?.slice(0, 10)}</span>
                           </td>
                           <td>
                             <div style={{ fontSize: 12, fontWeight: 700 }}>{recQty} / {totalQty} units</div>
@@ -1013,8 +1019,7 @@ export const PurchaseOrdersPage: React.FC = () => {
                               {po.status !== 'received' && po.status !== 'cancelled' && (
                                 <button
                                   onClick={() => openCreateGrnFromPo(po)}
-                                  className="btn-primary"
-                                  style={{ padding: '4px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                  className="table-action-primary"
                                   title="Receive Inbound Goods (GRN)"
                                 >
                                   <Truck size={13} />
@@ -1206,8 +1211,7 @@ export const PurchaseOrdersPage: React.FC = () => {
                               {pr.status === 'draft' && (
                                 <button
                                   onClick={() => handleSubmitPr(pr.id)}
-                                  className="btn-primary"
-                                  style={{ padding: '4px 10px', fontSize: 11 }}
+                                  className="table-action-primary"
                                 >
                                   Submit
                                 </button>
@@ -1216,8 +1220,7 @@ export const PurchaseOrdersPage: React.FC = () => {
                               {pr.status === 'submitted' && (
                                 <button
                                   onClick={() => handleApprovePr(pr)}
-                                  className="btn-primary"
-                                  style={{ padding: '4px 10px', fontSize: 11, backgroundColor: '#16a34a', borderColor: '#16a34a' }}
+                                  className="table-action-primary is-success"
                                 >
                                   Approve
                                 </button>
@@ -1226,8 +1229,7 @@ export const PurchaseOrdersPage: React.FC = () => {
                               {(pr.status === 'approved' || pr.status === 'partially_ordered') && (
                                 <button
                                   onClick={() => openConvertPoModal(pr)}
-                                  className="btn-primary"
-                                  style={{ padding: '4px 10px', fontSize: 11 }}
+                                  className="table-action-primary"
                                 >
                                   Convert PO
                                 </button>
@@ -1413,8 +1415,7 @@ export const PurchaseOrdersPage: React.FC = () => {
                                   </button>
                                   <button
                                     onClick={() => handlePostGrnToInventory(grn)}
-                                    className="btn-primary"
-                                    style={{ padding: '4px 10px', fontSize: 11, backgroundColor: '#059669', borderColor: '#059669', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                                    className="table-action-primary is-success"
                                     title="Post quantities to authoritative inventory engine"
                                   >
                                     <Boxes size={13} />
@@ -1543,10 +1544,9 @@ export const PurchaseOrdersPage: React.FC = () => {
                       searchable={true}
                       onChange={(val) => addPrItem(Number(val))}
                       placeholder="+ Add Product Variant..."
-                      options={allVariants.map((v) => ({
-                        value: String(v.id),
-                        label: `${v.sku} - ${v.name}`,
-                      }))}
+                      options={variantOptions}
+                      searchPlaceholder="Search product or SKU..."
+                      menuMinWidth={420}
                     />
                   </div>
                 </div>
@@ -1991,7 +1991,7 @@ export const PurchaseOrdersPage: React.FC = () => {
               <button onClick={() => setShowRejectPrModal(false)} className="btn-outline">
                 Cancel
               </button>
-              <button onClick={handleRejectPrConfirm} className="btn-primary" style={{ backgroundColor: '#dc2626', borderColor: '#dc2626' }}>
+              <button onClick={handleRejectPrConfirm} className="btn-primary is-danger">
                 Confirm Rejection
               </button>
             </div>
@@ -2540,10 +2540,9 @@ export const PurchaseOrdersPage: React.FC = () => {
                         }
                       }}
                       placeholder="+ Add Product Variant..."
-                      options={allVariants.map((v) => ({
-                        value: String(v.id),
-                        label: `${v.sku} - ${v.name}`,
-                      }))}
+                      options={variantOptions}
+                      searchPlaceholder="Search product or SKU..."
+                      menuMinWidth={420}
                     />
                   </div>
                 </div>
@@ -2663,7 +2662,7 @@ export const PurchaseOrdersPage: React.FC = () => {
                   </span>
                 </div>
                 <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
-                  Supplier: {selectedPo.supplier_name} &bull; Ordered {selectedPo.order_date || selectedPo.created_at?.slice(0, 10)}
+                  Supplier: {selectedPo.supplier_name} &bull; Ordered {(selectedPo.order_date || selectedPo.created_at)?.slice(0, 10)}
                 </div>
               </div>
               <button onClick={() => setShowViewPoModal(false)} className="topbar-icon-button">

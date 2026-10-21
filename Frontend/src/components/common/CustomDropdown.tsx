@@ -6,6 +6,7 @@ import React, {
   useMemo,
   useId,
 } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ChevronDown,
   Check,
@@ -60,6 +61,8 @@ export interface CustomDropdownProps<T = any> {
   zIndex?: number;
   menuZIndex?: number;
   menuStyle?: React.CSSProperties;
+  /** The open list can be wider than the field, e.g. for long product names. */
+  menuMinWidth?: number;
 }
 
 /**
@@ -135,6 +138,7 @@ export const CustomDropdown = <T extends any = any>({
   zIndex = 99999,
   menuZIndex = 100000,
   menuStyle,
+  menuMinWidth = 0,
 }: CustomDropdownProps<T>) => {
   const generatedId = useId();
   const dropdownId = propId || `custom-dropdown-${generatedId}`;
@@ -142,7 +146,8 @@ export const CustomDropdown = <T extends any = any>({
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
-  const [computedPlacement, setComputedPlacement] = useState<'bottom' | 'top'>('bottom');
+  // Where the open list is drawn on screen (it floats above everything, so modals cannot cut it off).
+  const [menuBox, setMenuBox] = useState<React.CSSProperties>({});
 
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -188,43 +193,26 @@ export const CustomDropdown = <T extends any = any>({
     return options.filter((opt) => value !== undefined && value !== null && String(value) === String(opt.value));
   }, [options, value, multiple]);
 
-  // Calculate viewport boundaries and collision detection
+  // Place the list below the field, or above it when there is more room there, inside the visible window.
   const calculatePosition = useCallback(() => {
     if (!containerRef.current) return;
-    if (placement !== 'auto') {
-      setComputedPlacement(placement);
-      return;
-    }
     const rect = containerRef.current.getBoundingClientRect();
-    const dropdownHeight = typeof maxHeight === 'number' ? maxHeight : 260;
-    let spaceBelow = window.innerHeight - rect.bottom;
-    let spaceAbove = rect.top;
+    const gap = 4;
+    const margin = 8;
+    const wanted = typeof maxHeight === 'number' ? maxHeight : 260;
+    const spaceBelow = window.innerHeight - rect.bottom - gap - margin;
+    const spaceAbove = rect.top - gap - margin;
+    const openUp = placement === 'top' || (placement === 'auto' && spaceBelow < Math.min(wanted, 220) && spaceAbove > spaceBelow);
+    const width = Math.min(Math.max(rect.width, menuMinWidth), window.innerWidth - margin * 2);
+    const left = Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin));
 
-    // Check if within a scrollable or constrained parent container (such as a modal body)
-    let parent = containerRef.current.parentElement;
-    while (parent && parent !== document.body && parent !== document.documentElement) {
-      const style = window.getComputedStyle(parent);
-      const isScrollable =
-        ['auto', 'scroll', 'hidden'].includes(style.overflowY) ||
-        ['auto', 'scroll', 'hidden'].includes(style.overflow);
-      if (isScrollable) {
-        const parentRect = parent.getBoundingClientRect();
-        const parentSpaceBelow = parentRect.bottom - rect.bottom;
-        const parentSpaceAbove = rect.top - parentRect.top;
-        if (parentSpaceBelow < spaceBelow) spaceBelow = parentSpaceBelow;
-        if (parentSpaceAbove < spaceAbove) spaceAbove = parentSpaceAbove;
-        break;
-      }
-      parent = parent.parentElement;
-    }
-
-    // Smart placement: if space below is too small and top has more room, flip upward
-    if (spaceBelow < dropdownHeight && spaceAbove > spaceBelow) {
-      setComputedPlacement('top');
-    } else {
-      setComputedPlacement('bottom');
-    }
-  }, [placement, maxHeight]);
+    setMenuBox({
+      left,
+      width,
+      maxHeight: Math.max(120, Math.min(wanted, openUp ? spaceAbove : spaceBelow)),
+      ...(openUp ? { bottom: window.innerHeight - rect.top + gap } : { top: rect.bottom + gap }),
+    });
+  }, [placement, maxHeight, menuMinWidth]);
 
   // Dynamic reposition on scroll or resize when open
   useEffect(() => {
@@ -256,7 +244,8 @@ export const CustomDropdown = <T extends any = any>({
   // Close on outside click
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (containerRef.current && !containerRef.current.contains(target) && !menuRef.current?.contains(target)) {
         setIsOpen(false);
       }
     };
@@ -615,7 +604,7 @@ export const CustomDropdown = <T extends any = any>({
       </button>
 
       {/* Floating Menu Popover */}
-      {isOpen && (
+      {isOpen && createPortal(
         <div
           id={`${dropdownId}-menu`}
           ref={menuRef}
@@ -623,10 +612,8 @@ export const CustomDropdown = <T extends any = any>({
           aria-multiselectable={multiple}
           className="custom-dropdown-menu"
           style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            [computedPlacement === 'top' ? 'bottom' : 'top']: 'calc(100% + 4px)',
+            position: 'fixed',
+            ...menuBox,
             backgroundColor: '#ffffff',
             border: '1px solid #cbd5e1',
             borderRadius: 12,
@@ -635,7 +622,6 @@ export const CustomDropdown = <T extends any = any>({
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
-            maxHeight,
             boxSizing: 'border-box',
             ...menuStyle,
           }}
@@ -893,7 +879,8 @@ export const CustomDropdown = <T extends any = any>({
               ))
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {/* Helper / Error Text */}
