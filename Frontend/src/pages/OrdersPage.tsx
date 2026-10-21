@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { FileText, Plus, CheckCircle, XCircle, Loader2, AlertCircle } from 'lucide-react';
+import { FileText, Plus, CheckCircle, XCircle, Loader2, AlertCircle, Eye } from 'lucide-react';
 import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import DataTable from '../components/common/DataTable';
@@ -8,6 +8,11 @@ import CustomDropdown from '../components/common/CustomDropdown';
 import omsService from '../services/omsService';
 import { useActiveStore } from '../hooks/useActiveStore';
 import type { OrderModel, ProductModel, StoreModel } from '../services/omsService';
+import ProductThumb from '../components/catalog/ProductThumb';
+import StatusPill from '../components/common/StatusPill';
+import { formatMoney, variantNote } from '../utils/format';
+import OrderDetailModal from '../components/catalog/OrderDetailModal';
+import '../components/catalog/DetailModal.css';
 
 export const OrdersPage: React.FC = () => {
   const { activeStore } = useActiveStore();
@@ -27,6 +32,7 @@ export const OrdersPage: React.FC = () => {
   const [lastPage, setLastPage] = useState(1);
   const [search, setSearch] = useState('');
   const [statusFilter] = useState('');
+  const [viewOrder, setViewOrder] = useState<OrderModel | null>(null);
 
   // Manual Order Modal
   const [modalOpen, setModalOpen] = useState(false);
@@ -151,45 +157,64 @@ export const OrdersPage: React.FC = () => {
       ),
     },
     {
+      key: 'items',
+      header: 'Items',
+      render: (row) => {
+        const items = row.items ?? [];
+        if (items.length === 0) return <span style={{ fontSize: 12, color: '#94a3b8' }}>No items</span>;
+        const first = items[0];
+        const units = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+        const variant = variantNote(first.product_name, first.variant);
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, maxWidth: 300 }}>
+            <div className="thumb-stack">
+              {items.slice(0, 3).map((item) => (
+                <ProductThumb key={item.id} src={item.variant?.product?.image_url} size={34} />
+              ))}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {first.product_name}
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {variant ? `${variant} · ` : ''}
+                {units} unit{units === 1 ? '' : 's'}
+                {items.length > 1 ? ` · +${items.length - 1} more` : ''}
+              </div>
+            </div>
+          </div>
+        );
+      },
+    },
+    {
       key: 'total',
       header: 'Total',
       align: 'right',
       render: (row) => (
         <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
-          ${Number(row.total_amount).toFixed(2)}
+          {formatMoney(row.total_amount, row.currency)}
         </span>
       ),
     },
     {
       key: 'status',
       header: 'Order Status',
-      render: (row) => {
-        const isAllocated = row.order_status === 'allocated';
-        const isShipped = row.order_status === 'shipped';
-        const isCancelled = row.order_status === 'cancelled';
-        return (
-          <span
-            className={`kpi-pill ${
-              isAllocated
-                ? 'kpi-pill-blue'
-                : isShipped
-                ? 'kpi-pill-green'
-                : isCancelled
-                ? 'bg-rose-50 text-rose-700'
-                : 'bg-amber-50 text-amber-700'
-            }`}
-          >
-            {row.order_status}
-          </span>
-        );
-      },
+      render: (row) => <StatusPill status={row.order_status} />,
     },
     {
       key: 'actions',
       header: 'Actions',
       align: 'center',
       render: (row) => (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }} onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => setViewOrder(row)}
+            className="btn-finovo-secondary"
+            style={{ padding: '4px 8px', fontSize: 11 }}
+          >
+            <Eye size={13} />
+            <span>View</span>
+          </button>
           {row.order_status === 'pending' || row.order_status === 'imported' ? (
             <button
               onClick={() => handleAllocate(row.id)}
@@ -273,6 +298,7 @@ export const OrdersPage: React.FC = () => {
           keyField="id"
           isLoading={loading}
           emptyMessage="No orders found."
+          onRowClick={(row) => setViewOrder(row)}
           pagination={{
             currentPage: page,
             lastPage,
@@ -382,6 +408,7 @@ export const OrdersPage: React.FC = () => {
           </div>
         </div>
       )}
+      {viewOrder && <OrderDetailModal order={viewOrder} onClose={() => setViewOrder(null)} />}
     </div>
   );
 };

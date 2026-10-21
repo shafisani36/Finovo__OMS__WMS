@@ -59,8 +59,8 @@ class OpenCartDataSource extends HttpDataSource
             }
         }
 
-        if ($rows instanceof OpenCartDatabaseRows) {
-            $this->warnings[] = 'Product images are imported only for OpenCart stores connected with the Finovo module.';
+        if ($rows->imageBaseUrl() === null) {
+            $this->warnings[] = "Product images were not imported because the shop's website address is not set. Run: php artisan stores:set-website {$store->id} https://your-shop-address";
         }
     }
 
@@ -89,7 +89,7 @@ class OpenCartDataSource extends HttpDataSource
     {
         return $this->rows ??= filled($store->credential('api_secret'))
             ? new OpenCartModuleRows($store, fn ($request) => $this->send($request))
-            : new OpenCartDatabaseRows($this->database->connection($store), $store->credential('table_prefix') ?? 'oc_');
+            : new OpenCartDatabaseRows($this->database->connection($store), $store->credential('table_prefix') ?? 'oc_', $store->credential('site_url'));
     }
 
     /**
@@ -151,7 +151,7 @@ class OpenCartDataSource extends HttpDataSource
             handle: $sku,
             description: self::plainText(html_entity_decode((string) ($product['description'] ?? ''), ENT_QUOTES | ENT_HTML5)),
             category: filled($product['category'] ?? null) ? html_entity_decode($product['category'], ENT_QUOTES | ENT_HTML5) : null,
-            imageUrl: $imageBaseUrl && filled($product['image'] ?? null) ? rtrim($imageBaseUrl, '/').'/'.$product['image'] : null,
+            imageUrl: $imageBaseUrl && filled($product['image'] ?? null) ? rtrim($imageBaseUrl, '/').'/'.self::encodePath((string) $product['image']) : null,
             isActive: (bool) (int) $product['status'],
             variants: $variants,
         );
@@ -203,5 +203,11 @@ class OpenCartDataSource extends HttpDataSource
                 totalAmount: round(((float) $line['total'] + (float) $line['tax'] * (int) $line['quantity']) * $rate, 2),
             ), $lines),
         );
+    }
+
+    /** "catalog/demo/my photo.jpg" → "catalog/demo/my%20photo.jpg" */
+    private static function encodePath(string $path): string
+    {
+        return implode('/', array_map('rawurlencode', explode('/', ltrim($path, '/'))));
     }
 }

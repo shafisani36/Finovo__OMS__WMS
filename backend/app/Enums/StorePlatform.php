@@ -65,6 +65,8 @@ enum StorePlatform: string
             'credentials.db_username' => ['nullable', 'string', 'max:255'],
             'credentials.db_password' => ['nullable', 'string', 'max:255'],
             'credentials.table_prefix' => ['nullable', 'string', 'max:20', 'regex:/^[A-Za-z0-9_]*$/'],
+            // The shop's public address, used to build product image links (it is not stored in the shop database).
+            'credentials.site_url' => ['nullable', 'url', 'max:255'],
         ];
 
         return match ($this) {

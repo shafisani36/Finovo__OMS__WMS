@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CustomBridgeWebhookController;
+use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\CycleCountController;
 use App\Http\Controllers\Api\V1\InventoryController;
 use App\Http\Controllers\Api\V1\InventoryReceiptController;
@@ -15,6 +16,7 @@ use App\Http\Controllers\Api\V1\PickingController;
 use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\PurchaseOrderController;
 use App\Http\Controllers\Api\V1\PurchaseRequisitionController;
+use App\Http\Controllers\Api\V1\QuotationController;
 use App\Http\Controllers\Api\V1\ReplenishmentController;
 use App\Http\Controllers\Api\V1\StockAdjustmentController;
 use App\Http\Controllers\Api\V1\StockMovementController;
@@ -149,6 +151,19 @@ Route::prefix('v1')->group(function () {
         });
 
         // Orders & Lifecycle
+        Route::get('customers', [CustomerController::class, 'index']);
+        Route::get('customers/{customer}', [CustomerController::class, 'show']);
+
+        // Quotations (price offers to customers, downloadable as PDF, convertible into orders)
+        Route::get('quotations', [QuotationController::class, 'index']);
+        Route::post('quotations', [QuotationController::class, 'store']);
+        Route::get('quotations/{quotation}', [QuotationController::class, 'show']);
+        Route::put('quotations/{quotation}', [QuotationController::class, 'update']);
+        Route::delete('quotations/{quotation}', [QuotationController::class, 'destroy']);
+        Route::post('quotations/{quotation}/status', [QuotationController::class, 'updateStatus']);
+        Route::post('quotations/{quotation}/convert', [QuotationController::class, 'convert']);
+        Route::get('quotations/{quotation}/pdf', [QuotationController::class, 'pdf']);
+
         Route::get('orders', [OrderController::class, 'index']);
         Route::post('orders', [OrderController::class, 'store']);
         Route::get('orders/{order}', [OrderController::class, 'show']);

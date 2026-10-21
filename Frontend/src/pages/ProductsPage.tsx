@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Package, Plus, Tag, CheckCircle2, X, Loader2 } from 'lucide-react';
+import { Package, Plus, Tag, CheckCircle2, X, Loader2, Eye, Layers } from 'lucide-react';
 import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import DataTable from '../components/common/DataTable';
@@ -7,6 +7,10 @@ import type { Column } from '../components/common/DataTable';
 import omsService from '../services/omsService';
 import { useActiveStore } from '../hooks/useActiveStore';
 import type { ProductModel } from '../services/omsService';
+import ProductThumb from '../components/catalog/ProductThumb';
+import { variantLabel } from '../utils/format';
+import ProductDetailModal from '../components/catalog/ProductDetailModal';
+import '../components/catalog/DetailModal.css';
 
 export const ProductsPage: React.FC = () => {
   const { activeStore } = useActiveStore();
@@ -17,6 +21,8 @@ export const ProductsPage: React.FC = () => {
   const [total, setTotal] = useState(0);
   const [lastPage, setLastPage] = useState(1);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [viewProduct, setViewProduct] = useState<ProductModel | null>(null);
 
   // Modal
   const [modalOpen, setModalOpen] = useState(false);
@@ -30,7 +36,7 @@ export const ProductsPage: React.FC = () => {
     try {
       setLoading(true);
       const res = await omsService.getProducts({
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         store_id: activeStore?.id,
         page,
         per_page: perPage,
@@ -45,9 +51,22 @@ export const ProductsPage: React.FC = () => {
     }
   };
 
+  // Search 300 ms after the user stops typing, from the first page.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [activeStore?.id]);
+
   useEffect(() => {
     fetchProducts();
-  }, [page, perPage, activeStore?.id]);
+  }, [page, perPage, debouncedSearch, activeStore?.id]);
 
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,15 +97,33 @@ export const ProductsPage: React.FC = () => {
       header: 'Product Name',
       render: (row) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 8, backgroundColor: '#eff6ff', color: '#1e56ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Package size={16} />
-          </div>
+          <ProductThumb src={row.image_url} size={40} alt={row.name} />
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{row.name}</div>
             <div style={{ fontSize: 11, color: '#94a3b8' }}>SKU: {row.sku}</div>
           </div>
         </div>
       ),
+    },
+    {
+      key: 'variants',
+      header: 'Variants',
+      render: (row) => {
+        const labels = (row.variants ?? []).map((v) => v.option_value).filter((v): v is string => Boolean(v));
+        if (labels.length === 0) return <span style={{ fontSize: 12, color: '#94a3b8' }}>Single</span>;
+        return (
+          <div style={{ maxWidth: 220 }} title={(row.variants ?? []).map((v) => variantLabel(v) ?? v.sku).join('\n')}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, color: '#0f172a' }}>
+              <Layers size={13} color="#64748b" />
+              {row.variants_count ?? labels.length} variants
+            </div>
+            <div style={{ fontSize: 11, color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {labels.slice(0, 3).join(', ')}
+              {labels.length > 3 ? ` +${labels.length - 3}` : ''}
+            </div>
+          </div>
+        );
+      },
     },
     {
       key: 'category',
@@ -127,6 +164,24 @@ export const ProductsPage: React.FC = () => {
           <span className="status-dot" />
           <span>{row.is_active ? 'Active' : 'Archived'}</span>
         </div>
+      ),
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      align: 'center',
+      render: (row) => (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setViewProduct(row);
+          }}
+          className="btn-finovo-secondary"
+          style={{ padding: '4px 10px', fontSize: 11 }}
+        >
+          <Eye size={13} />
+          <span>View</span>
+        </button>
       ),
     },
   ];
@@ -187,6 +242,7 @@ export const ProductsPage: React.FC = () => {
           keyField="id"
           isLoading={loading}
           emptyMessage="No products created yet."
+          onRowClick={(row) => setViewProduct(row)}
           pagination={{
             currentPage: page,
             lastPage,
@@ -273,6 +329,7 @@ export const ProductsPage: React.FC = () => {
           </div>
         </div>
       )}
+      {viewProduct && <ProductDetailModal product={viewProduct} onClose={() => setViewProduct(null)} />}
     </div>
   );
 };

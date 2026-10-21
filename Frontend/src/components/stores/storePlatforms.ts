@@ -29,6 +29,15 @@ const databaseFields: PlatformField[] = [
   { key: 'db_password', label: 'Database Password', type: 'password', placeholder: 'Default from server settings' },
 ];
 
+/** Product image links are built from the shop's address, which its database does not contain. */
+const shopWebsiteField: PlatformField = {
+  key: 'site_url',
+  label: 'Shop Website',
+  type: 'url',
+  placeholder: 'https://yourstore.com',
+  help: 'Used to import product images.',
+};
+
 export const STORE_PLATFORMS: PlatformDefinition[] = [
   {
     value: 'shopify',
@@ -116,13 +125,18 @@ export const STORE_PLATFORMS: PlatformDefinition[] = [
       { ...databaseFields[0], required: false, help: 'Only needed without the Finovo module.' },
       ...databaseFields.slice(1),
       { key: 'table_prefix', label: 'Table Prefix', type: 'text', placeholder: 'oc_' },
+      { ...shopWebsiteField, help: 'Only needed without the Finovo module; used to import product images.' },
     ],
   },
   {
     value: 'oscommerce',
     label: 'osCommerce',
     instructions: 'osCommerce has no usable API, so Finovo reads orders and products from the shop database.',
-    fields: [...databaseFields, { key: 'table_prefix', label: 'Table Prefix', type: 'text', placeholder: 'Leave empty if none' }],
+    fields: [
+      ...databaseFields,
+      { key: 'table_prefix', label: 'Table Prefix', type: 'text', placeholder: 'Leave empty if none' },
+      { ...shopWebsiteField, help: 'Used to import product images. osCommerce 4 shops can leave it empty.' },
+    ],
   },
   {
     value: 'custom_bridge',

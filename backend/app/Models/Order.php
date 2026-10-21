@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Observers\OrderObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+#[ObservedBy(OrderObserver::class)]
 class Order extends Model
 {
     use HasFactory;
@@ -14,6 +17,7 @@ class Order extends Model
     protected $fillable = [
         'organization_id',
         'store_id',
+        'customer_id',
         'order_number',
         'external_order_id',
         'customer_name',
@@ -46,6 +50,11 @@ class Order extends Model
     public function store(): BelongsTo
     {
         return $this->belongsTo(Store::class);
+    }
+
+    public function customer(): BelongsTo
+    {
+        return $this->belongsTo(Customer::class);
     }
 
     public function items(): HasMany

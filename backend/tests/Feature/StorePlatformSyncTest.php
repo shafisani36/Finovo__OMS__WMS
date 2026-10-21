@@ -7,7 +7,9 @@ use App\Enums\UserRole;
 use App\Integrations\Connectors\ExternalDatabaseConnector;
 use App\Models\InventoryBalance;
 use App\Models\Order;
+use App\Models\Product;
 use App\Models\ProductVariant;
+use App\Models\SkuMapping;
 use App\Models\Store;
 use App\Models\User;
 use App\Models\Warehouse;
@@ -76,6 +78,62 @@ class StorePlatformSyncTest extends TestCase
         $this->assertSame('Karachi', $order->shipping_address['city']);
         $this->assertSame('paid', $order->payment_status);
         $this->assertSame(ProductVariant::where('sku', 'HOOD-M')->value('id'), $order->items->sole()->product_variant_id);
+    }
+
+    public function test_a_shop_connected_again_as_a_new_store_reuses_its_products(): void
+    {
+        $fakeShop = fn () => Http::fake([
+            'https://shop.test/wp-json/wc/v3/products/10/variations*' => Http::response([
+                ['id' => 11, 'sku' => '', 'price' => '40', 'manage_stock' => true, 'stock_quantity' => 3, 'attributes' => [['name' => 'Size', 'option' => 'S']]],
+            ], 200, ['X-WP-TotalPages' => '1']),
+            'https://shop.test/wp-json/wc/v3/products*' => Http::response([
+                // No SKUs in the shop, so Finovo generates them
+                ['id' => 10, 'name' => 'Shoes', 'slug' => 'shoes', 'type' => 'variable', 'status' => 'publish', 'short_description' => '', 'categories' => [], 'images' => []],
+                ['id' => 13, 'name' => 'Shoes', 'slug' => 'shoes', 'type' => 'simple', 'status' => 'publish', 'sku' => '', 'price' => '25', 'manage_stock' => true, 'stock_quantity' => 2, 'short_description' => '', 'categories' => [], 'images' => []],
+            ], 200, ['X-WP-TotalPages' => '1']),
+            'https://shop.test/wp-json/wc/v3/orders*' => Http::response([], 200, ['X-WP-TotalPages' => '1']),
+        ]);
+
+        $fakeShop();
+        $first = $this->store(StorePlatform::WOOCOMMERCE, 'https://shop.test', ['consumer_key' => 'ck', 'consumer_secret' => 'cs']);
+        app(StoreSyncService::class)->sync($first);
+        $products = Product::orderBy('id')->pluck('sku')->all();
+        $this->assertSame(['SHOES', 'SHOES-13'], $products);
+
+        // The store is deleted and the same shop is connected again
+        $first->delete();
+        $again = $this->store(StorePlatform::WOOCOMMERCE, 'https://shop.test', ['consumer_key' => 'ck2', 'consumer_secret' => 'cs2']);
+        $fakeShop();
+        $result = app(StoreSyncService::class)->sync($again);
+
+        $this->assertSame(0, $result->productsCreated);
+        $this->assertSame($products, Product::orderBy('id')->pluck('sku')->all());
+        $this->assertSame(2, ProductVariant::count());
+        $simpleVariant = Product::where('sku', 'SHOES-13')->sole()->variants()->sole();
+        $this->assertSame(2, $this->stockOf($simpleVariant->sku), 'opening stock is not added twice');
+    }
+
+    public function test_a_free_sku_is_found_even_when_the_suffixed_one_is_taken(): void
+    {
+        $orgId = $this->admin->currentOrganization()->id;
+        foreach (['CAP', 'CAP-20'] as $sku) {
+            $taken = Product::create(['organization_id' => $orgId, 'name' => 'Other', 'sku' => $sku]);
+            $taken->variants()->create(['organization_id' => $orgId, 'sku' => $sku, 'price' => 1]);
+            // Linked to another store, so it is not a leftover to reuse
+            SkuMapping::create(['organization_id' => $orgId, 'store_id' => $this->otherStore()->id, 'product_variant_id' => $taken->variants()->value('id'), 'external_id' => $sku, 'external_sku' => $sku]);
+        }
+
+        $store = $this->store(StorePlatform::WOOCOMMERCE, 'https://shop.test', ['consumer_key' => 'ck', 'consumer_secret' => 'cs']);
+        Http::fake([
+            'https://shop.test/wp-json/wc/v3/products*' => Http::response([
+                ['id' => 20, 'name' => 'Cap', 'slug' => 'cap', 'type' => 'simple', 'status' => 'publish', 'sku' => '', 'price' => '15', 'short_description' => '', 'categories' => [], 'images' => []],
+            ], 200, ['X-WP-TotalPages' => '1']),
+            'https://shop.test/wp-json/wc/v3/orders*' => Http::response([], 200, ['X-WP-TotalPages' => '1']),
+        ]);
+
+        app(StoreSyncService::class)->sync($store);
+
+        $this->assertTrue(Product::where('sku', 'CAP-20-2')->exists());
     }
 
     public function test_bigcommerce_catalog_and_orders(): void
@@ -270,6 +328,7 @@ class StorePlatformSyncTest extends TestCase
         $variant = ProductVariant::where('sku', 'LAMP-1')->sole();
         $this->assertEquals(25.00, $variant->price);
         $this->assertSame(5, $this->stockOf('LAMP-1'));
+        $this->assertSame('https://i.ebayimg.com/lamp.jpg', $variant->product->image_url);
 
         $order = Order::with('items')->sole();
         $this->assertSame('John Doe', $order->customer_name);
@@ -321,7 +380,7 @@ class StorePlatformSyncTest extends TestCase
     {
         $shop = $this->fakeShopDatabase();
 
-        $openCart = $this->store(StorePlatform::OPENCART, 'opencart_db', ['db_name' => 'opencart_db', 'table_prefix' => 'oc_']);
+        $openCart = $this->store(StorePlatform::OPENCART, 'opencart_db', ['db_name' => 'opencart_db', 'table_prefix' => 'oc_', 'site_url' => 'http://localhost/opencart/']);
         $osCommerce = $this->store(StorePlatform::OSCOMMERCE, 'oscommerce_db', ['db_name' => 'oscommerce_db', 'table_prefix' => '']);
 
         app(StoreSyncService::class)->sync($openCart);
@@ -329,6 +388,9 @@ class StorePlatformSyncTest extends TestCase
 
         $this->assertSame(3, $this->stockOf('MOUSE-1'));
         $this->assertSame('Mouse', ProductVariant::where('sku', 'MOUSE-1')->sole()->product->name);
+        $this->assertSame('http://localhost/opencart/image/catalog/demo/my%20mouse.jpg', ProductVariant::where('sku', 'MOUSE-1')->sole()->product->image_url);
+        // osCommerce 4: address from the default sales channel, photo from products_images
+        $this->assertSame('http://localhost/oscommerce/images/products/5/31/a1b2c3.jpg', ProductVariant::where('sku', 'KB-9')->sole()->product->image_url);
         $openCartOrder = Order::where('store_id', $openCart->id)->with('items')->sole();
         $this->assertSame('Ahmed Ali', $openCartOrder->customer_name);
         $this->assertTrue($openCartOrder->order_status === 'cancelled');
@@ -341,6 +403,41 @@ class StorePlatformSyncTest extends TestCase
         $this->assertSame(ProductVariant::where('sku', 'KB-9')->value('id'), $osOrder->items->sole()->product_variant_id);
 
         $shop->disconnect();
+    }
+
+    public function test_oscommerce_2_images_use_the_website_set_on_the_store(): void
+    {
+        config(['database.connections.shop' => ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']]);
+        $db = DB::connection('shop');
+        $schema = Schema::connection('shop');
+        $schema->create('languages', fn (Blueprint $t) => [$t->integer('languages_id'), $t->string('code')]);
+        $schema->create('configuration', fn (Blueprint $t) => [$t->string('configuration_key'), $t->string('configuration_value')]);
+        $schema->create('products', fn (Blueprint $t) => [$t->integer('products_id'), $t->string('products_model'), $t->integer('products_quantity'), $t->decimal('products_price'), $t->integer('products_status'), $t->string('products_image')]);
+        $schema->create('products_description', fn (Blueprint $t) => [$t->integer('products_id'), $t->integer('language_id'), $t->string('products_name'), $t->text('products_description')]);
+        $schema->create('orders', fn (Blueprint $t) => [$t->integer('orders_id'), $t->dateTime('date_purchased'), $t->dateTime('last_modified')->nullable()]);
+        $db->table('languages')->insert(['languages_id' => 1, 'code' => 'en']);
+        $db->table('products')->insert(['products_id' => 8, 'products_model' => 'LAMP-1', 'products_quantity' => 1, 'products_price' => 20, 'products_status' => 1, 'products_image' => 'lamp.jpg']);
+        $db->table('products_description')->insert(['products_id' => 8, 'language_id' => 1, 'products_name' => 'Lamp', 'products_description' => '']);
+        $this->app->instance(ExternalDatabaseConnector::class, new class($db) extends ExternalDatabaseConnector
+        {
+            public function __construct(private readonly Connection $shop) {}
+
+            public function connection(Store $store): Connection
+            {
+                return $this->shop;
+            }
+        });
+
+        $store = $this->store(StorePlatform::OSCOMMERCE, 'osc2', ['db_name' => 'osc2']);
+        $result = app(StoreSyncService::class)->sync($store);
+        $this->assertNull(ProductVariant::where('sku', 'LAMP-1')->sole()->product->image_url);
+        $this->assertStringContainsString("stores:set-website {$store->id}", implode(' ', $result->warnings));
+
+        $this->artisan('stores:set-website', ['store' => $store->id, 'url' => 'http://localhost/catalog/'])->assertSuccessful();
+        app(StoreSyncService::class)->sync($store->fresh());
+
+        $this->assertSame('http://localhost/catalog/images/lamp.jpg', ProductVariant::where('sku', 'LAMP-1')->sole()->product->image_url);
+        $this->artisan('stores:set-website', ['store' => $store->id, 'url' => 'not a url'])->assertFailed();
     }
 
     private function store(StorePlatform $platform, ?string $reference, array $credentials): Store
@@ -359,6 +456,17 @@ class StorePlatformSyncTest extends TestCase
         $store->warehouses()->sync([$this->warehouse->id => ['is_default' => true, 'priority' => 1]]);
 
         return $store;
+    }
+
+    private function otherStore(): Store
+    {
+        static $count = 0;
+        $count++;
+
+        return Store::create([
+            'organization_id' => $this->admin->currentOrganization()->id, 'name' => "Counter {$count}", 'code' => "counter-{$count}",
+            'platform' => StorePlatform::MANUAL, 'status' => Store::STATUS_ACTIVE, 'sync_status' => 'healthy', 'orders_awaiting_sync' => 0,
+        ]);
     }
 
     private function stockOf(string $sku): ?int
@@ -399,6 +507,9 @@ class StorePlatformSyncTest extends TestCase
             'orders_status' => fn (Blueprint $t) => [$t->integer('orders_status_id'), $t->integer('language_id'), $t->string('orders_status_name')],
             'orders_products' => fn (Blueprint $t) => [$t->integer('orders_products_id'), $t->integer('orders_id'), $t->string('products_id'), $t->string('products_model'), $t->string('products_name'), $t->decimal('products_price'), $t->decimal('final_price'), $t->decimal('products_tax'), $t->integer('products_quantity')],
             'orders_total' => fn (Blueprint $t) => [$t->integer('orders_id'), $t->string('class'), $t->decimal('value')],
+            'platforms' => fn (Blueprint $t) => [$t->integer('platform_id'), $t->string('platform_url'), $t->string('platform_url_secure'), $t->integer('ssl_enabled'), $t->integer('is_default')],
+            'products_images' => fn (Blueprint $t) => [$t->integer('products_images_id'), $t->integer('products_id'), $t->integer('default_image'), $t->integer('image_status'), $t->integer('sort_order')],
+            'products_images_description' => fn (Blueprint $t) => [$t->integer('products_images_id'), $t->integer('language_id'), $t->string('hash_file_name')],
         ];
 
         foreach ($tables as $name => $columns) {
@@ -409,7 +520,7 @@ class StorePlatformSyncTest extends TestCase
 
         $db->table('oc_language')->insert(['language_id' => 1, 'code' => 'en-gb']);
         $db->table('oc_setting')->insert(['store_id' => 0, 'key' => 'config_language', 'value' => 'en-gb']);
-        $db->table('oc_product')->insert(['product_id' => 1, 'model' => 'MOUSE-1', 'sku' => '', 'upc' => '', 'ean' => '', 'quantity' => 3, 'price' => 9.5, 'image' => null, 'status' => 1]);
+        $db->table('oc_product')->insert(['product_id' => 1, 'model' => 'MOUSE-1', 'sku' => '', 'upc' => '', 'ean' => '', 'quantity' => 3, 'price' => 9.5, 'image' => 'catalog/demo/my mouse.jpg', 'status' => 1]);
         $db->table('oc_product_description')->insert(['product_id' => 1, 'language_id' => 1, 'name' => 'Mouse', 'description' => '']);
         $db->table('oc_order')->insert(['order_id' => 1, 'invoice_prefix' => 'INV-', 'firstname' => 'Ahmed', 'lastname' => 'Ali', 'email' => 'ahmed@example.com', 'telephone' => '0300', 'shipping_firstname' => 'Ahmed', 'shipping_lastname' => 'Ali', 'shipping_company' => '', 'shipping_address_1' => '3 Mall Rd', 'shipping_address_2' => '', 'shipping_city' => 'Lahore', 'shipping_postcode' => '54000', 'shipping_zone' => 'Punjab', 'shipping_country' => 'Pakistan', 'comment' => '', 'total' => 9.5, 'currency_code' => 'PKR', 'currency_value' => 1, 'order_status_id' => 7, 'date_added' => '2026-10-19 10:00:00', 'date_modified' => '2026-10-19 10:00:00']);
         $db->table('oc_order_status')->insert(['order_status_id' => 7, 'language_id' => 1, 'name' => 'Canceled']);
@@ -418,6 +529,15 @@ class StorePlatformSyncTest extends TestCase
         $db->table('languages')->insert(['languages_id' => 1, 'code' => 'en']);
         $db->table('configuration')->insert(['configuration_key' => 'DEFAULT_LANGUAGE', 'configuration_value' => 'en']);
         $db->table('products')->insert(['products_id' => 5, 'products_model' => 'KB-9', 'products_quantity' => 4, 'products_price' => 50, 'products_status' => 1]);
+        $db->table('platforms')->insert(['platform_id' => 1, 'platform_url' => 'localhost/oscommerce', 'platform_url_secure' => '', 'ssl_enabled' => 0, 'is_default' => 1]);
+        $db->table('products_images')->insert([
+            ['products_images_id' => 30, 'products_id' => 5, 'default_image' => 0, 'image_status' => 1, 'sort_order' => 2],
+            ['products_images_id' => 31, 'products_id' => 5, 'default_image' => 1, 'image_status' => 1, 'sort_order' => 1],
+        ]);
+        $db->table('products_images_description')->insert([
+            ['products_images_id' => 30, 'language_id' => 0, 'hash_file_name' => 'other.jpg'],
+            ['products_images_id' => 31, 'language_id' => 0, 'hash_file_name' => 'a1b2c3.jpg'],
+        ]);
         $db->table('products_description')->insert(['products_id' => 5, 'language_id' => 1, 'products_name' => 'Keyboard', 'products_description' => '']);
         $db->table('orders')->insert(['orders_id' => 1, 'customers_name' => 'Nida Iqbal', 'customers_email_address' => 'nida@example.com', 'customers_telephone' => '0311', 'delivery_name' => 'Nida Iqbal', 'delivery_street_address' => '8 Park Ln', 'delivery_city' => 'Karachi', 'delivery_postcode' => '75000', 'delivery_country' => 'Pakistan', 'currency' => 'PKR', 'currency_value' => 1, 'orders_status' => 2, 'date_purchased' => '2026-10-19 10:00:00']);
         $db->table('orders_status')->insert(['orders_status_id' => 2, 'language_id' => 1, 'orders_status_name' => 'Processing']);

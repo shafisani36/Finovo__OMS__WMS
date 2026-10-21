@@ -257,7 +257,7 @@ class StoreConnectionService
             StorePlatform::PRESTASHOP => ['webservice_key'],
             StorePlatform::WIX => ['api_key'],
             StorePlatform::MAGENTO => ['access_token'],
-            StorePlatform::OPENCART, StorePlatform::OSCOMMERCE => ['db_host', 'db_port', 'db_name', 'db_username', 'db_password', 'table_prefix'],
+            StorePlatform::OPENCART, StorePlatform::OSCOMMERCE => ['db_host', 'db_port', 'db_name', 'db_username', 'db_password', 'table_prefix', 'site_url'],
             default => [],
         };
 

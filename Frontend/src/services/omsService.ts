@@ -182,20 +182,32 @@ export interface PickingItem {
   priority: string;
 }
 
+export interface ProductVariantModel {
+  id: number;
+  sku: string;
+  name?: string;
+  option_name?: string | null;
+  option_value?: string | null;
+  barcode?: string | null;
+  price: number;
+  cost_price?: number | null;
+  is_active?: boolean;
+  stock?: { on_hand: number; reserved: number; available: number };
+}
+
 export interface ProductModel {
   id: number;
   name: string;
   sku: string;
   barcode?: string;
   category?: string;
+  description?: string | null;
+  image_url?: string | null;
   is_active: boolean;
   default_variant_id?: number;
-  variants?: Array<{
-    id: number;
-    sku: string;
-    name?: string;
-    price: number;
-  }>;
+  variants?: ProductVariantModel[];
+  variants_count?: number;
+  stores?: Array<{ id: number; name: string; platform: StorePlatform }>;
   stock: {
     on_hand: number;
     reserved: number;
@@ -445,26 +457,180 @@ export interface ReplenishmentRecommendationModel {
   urgency: 'critical' | 'high' | 'medium';
 }
 
+export interface OrderItemModel {
+  id: number;
+  product_name: string;
+  external_sku: string;
+  quantity: number;
+  unit_price: string;
+  tax_amount?: string;
+  total_amount?: string;
+  status: string;
+  variant?: {
+    id: number;
+    sku: string;
+    option_name?: string | null;
+    option_value?: string | null;
+    product?: { id: number; name: string; image_url?: string | null } | null;
+  } | null;
+}
+
 export interface OrderModel {
   id: number;
   order_number: string;
   external_order_id: string;
   customer_name: string;
   customer_email?: string;
+  customer_phone?: string | null;
+  shipping_address?: Record<string, string> | null;
   order_status: string;
   payment_status: string;
   fulfillment_status: string;
   total_amount: string;
   currency: string;
+  notes?: string | null;
   placed_at: string;
-  items?: Array<{
+  store?: { id: number; name: string; platform: StorePlatform } | null;
+  items?: OrderItemModel[];
+}
+
+export interface CustomerAddress {
+  name?: string;
+  company?: string;
+  address1?: string;
+  address2?: string;
+  city?: string;
+  province?: string;
+  zip?: string;
+  country?: string;
+  country_code?: string;
+  phone?: string;
+}
+
+export interface CustomerStoreRef {
+  id: number;
+  name: string;
+  platform: StorePlatform;
+}
+
+/** Money spent in one currency (amounts in different currencies are never added together). */
+export interface CurrencySpend {
+  currency: string;
+  amount: number;
+  orders: number;
+  average: number;
+}
+
+export interface CustomerModel {
+  id: number;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  default_address: CustomerAddress | null;
+  created_at: string;
+  orders_count: number;
+  spent: CurrencySpend[];
+  first_order_at: string | null;
+  latest_order_at: string | null;
+  stores: CustomerStoreRef[];
+}
+
+export interface CustomerOrderModel {
+  id: number;
+  order_number: string;
+  external_order_id: string;
+  store: CustomerStoreRef | null;
+  order_status: string;
+  payment_status: string;
+  fulfillment_status: string;
+  total_amount: string;
+  currency: string;
+  notes: string | null;
+  placed_at: string | null;
+  shipping_address: CustomerAddress | null;
+  items: Array<{
     id: number;
     product_name: string;
     external_sku: string;
+    image_url: string | null;
     quantity: number;
     unit_price: string;
+    total_amount: string;
     status: string;
   }>;
+}
+
+export interface CustomerDetailModel {
+  id: number;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  default_address: CustomerAddress | null;
+  created_at: string;
+  stats: {
+    orders_count: number;
+    cancelled_orders: number;
+    spent: CurrencySpend[];
+    items_purchased: number;
+    first_order_at: string | null;
+    last_order_at: string | null;
+  };
+  stores: Array<CustomerStoreRef & { orders_count: number; last_order_at: string | null }>;
+  orders: CustomerOrderModel[];
+}
+
+export type QuotationStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'converted';
+
+export interface QuotationItemInput {
+  product_variant_id?: number | null;
+  sku?: string | null;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  discount_percent?: number;
+  tax_percent?: number;
+}
+
+export interface QuotationItemModel extends QuotationItemInput {
+  id: number;
+  line_total: string;
+  variant?: { id: number; sku: string; product?: { id: number; name: string; image_url?: string | null } | null } | null;
+}
+
+export interface QuotationPayload {
+  store_id: number;
+  customer_id?: number | null;
+  customer_name: string;
+  customer_email?: string | null;
+  customer_phone?: string | null;
+  billing_address?: CustomerAddress | null;
+  currency: string;
+  issue_date?: string;
+  valid_until?: string;
+  notes?: string | null;
+  terms?: string | null;
+  items: QuotationItemInput[];
+}
+
+export interface QuotationModel extends Omit<QuotationPayload, 'items'> {
+  id: number;
+  quotation_number: string;
+  status: QuotationStatus;
+  is_expired: boolean;
+  issue_date: string;
+  valid_until: string;
+  subtotal: string;
+  discount_total: string;
+  tax_total: string;
+  total_amount: string;
+  sent_at: string | null;
+  responded_at: string | null;
+  created_at: string;
+  items_count?: number;
+  items?: QuotationItemModel[];
+  store?: { id: number; name: string; platform: StorePlatform } | null;
+  creator?: { id: number; name: string } | null;
+  order?: { id: number; order_number: string; order_status: string } | null;
 }
 
 export const omsService = {
@@ -853,6 +1019,70 @@ export const omsService = {
   async bulkUpdatePickTasks(taskIds: number[], status: string) {
     const { data } = await apiClient.post('/picking/bulk-update', { task_ids: taskIds, status });
     return data;
+  },
+
+  // Customers
+  async getCustomers(params?: { search?: string; store_id?: number; page?: number; per_page?: number }) {
+    const { data } = await apiClient.get('/customers', { params });
+    return data;
+  },
+
+  async getCustomer(customerId: number): Promise<{ status: string; data: CustomerDetailModel }> {
+    const { data } = await apiClient.get(`/customers/${customerId}`);
+    return data;
+  },
+
+  // Quotations
+  async getQuotations(params?: { search?: string; status?: string; store_id?: number; page?: number; per_page?: number }) {
+    const { data } = await apiClient.get('/quotations', { params });
+    return data;
+  },
+
+  async getQuotation(id: number): Promise<{ status: string; data: QuotationModel }> {
+    const { data } = await apiClient.get(`/quotations/${id}`);
+    return data;
+  },
+
+  async createQuotation(payload: QuotationPayload): Promise<{ status: string; message: string; data: QuotationModel }> {
+    const { data } = await apiClient.post('/quotations', payload);
+    return data;
+  },
+
+  async updateQuotation(id: number, payload: QuotationPayload): Promise<{ status: string; message: string; data: QuotationModel }> {
+    const { data } = await apiClient.put(`/quotations/${id}`, payload);
+    return data;
+  },
+
+  async deleteQuotation(id: number): Promise<{ status: string; message: string }> {
+    const { data } = await apiClient.delete(`/quotations/${id}`);
+    return data;
+  },
+
+  async setQuotationStatus(id: number, status: 'sent' | 'accepted' | 'rejected'): Promise<{ status: string; message: string; data: QuotationModel }> {
+    const { data } = await apiClient.post(`/quotations/${id}/status`, { status });
+    return data;
+  },
+
+  async convertQuotation(id: number): Promise<{ status: string; message: string; data: OrderModel }> {
+    const { data } = await apiClient.post(`/quotations/${id}/convert`);
+    return data;
+  },
+
+  async downloadQuotationPdf(id: number, filename: string) {
+    const token = getAuthToken();
+    const response = await fetch(`/api/v1/quotations/${id}/pdf`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: 'include',
+    });
+    if (!response.ok) throw new Error('Could not download the quotation PDF.');
+    const url = window.URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${filename}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
   },
 
   // Orders

@@ -15,6 +15,8 @@ class OpenCartDatabaseRows implements OpenCartRows
     public function __construct(
         private readonly Connection $db,
         private readonly string $prefix,
+        /** The shop's website, e.g. https://shop.example.com (it is not stored in the OpenCart database). */
+        private readonly ?string $siteUrl = null,
     ) {}
 
     public function products(int $offset, int $limit): array
@@ -89,7 +91,8 @@ class OpenCartDatabaseRows implements OpenCartRows
 
     public function imageBaseUrl(): ?string
     {
-        return null; // The shop's address is not stored in its database.
+        // OpenCart keeps product photos in the shop's image/ folder, e.g. image/catalog/demo/canon.jpg
+        return filled($this->siteUrl) ? rtrim($this->siteUrl, '/').'/image/' : null;
     }
 
     /**

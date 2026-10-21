@@ -17,7 +17,7 @@ class ProductController extends Controller
         $org = $request->user()->currentOrganization();
 
         $query = Product::where('organization_id', $org->id)
-            ->with(['variants.balances.warehouse']);
+            ->with(['variants.balances.warehouse', 'variants.skuMappings.store:id,name,platform']);
 
         // Search
         if ($search = $request->query('search')) {
@@ -43,17 +43,12 @@ class ProductController extends Controller
         $products = $query->latest()->paginate($perPage);
 
         $items = collect($products->items())->map(function ($p) {
-            $totalOnHand = 0;
-            $totalReserved = 0;
-            $totalAvailable = 0;
-
-            foreach ($p->variants as $v) {
-                foreach ($v->balances as $b) {
-                    $totalOnHand += $b->on_hand;
-                    $totalReserved += $b->reserved;
-                    $totalAvailable += $b->available;
-                }
-            }
+            $stockOf = fn ($balances) => [
+                'on_hand' => (int) $balances->sum('on_hand'),
+                'reserved' => (int) $balances->sum('reserved'),
+                'available' => (int) $balances->sum('available'),
+            ];
+            $mappings = $p->variants->flatMap->skuMappings;
 
             return [
                 'id' => $p->id,
@@ -61,22 +56,26 @@ class ProductController extends Controller
                 'sku' => $p->sku,
                 'barcode' => $p->barcode,
                 'category' => $p->category,
+                'description' => $p->description,
+                'image_url' => $p->image_url,
                 'is_active' => $p->is_active,
                 'default_variant_id' => $p->variants->first()?->id,
-                'variants' => $p->variants->map(function ($v) {
-                    return [
-                        'id' => $v->id,
-                        'sku' => $v->sku,
-                        'name' => $v->name,
-                        'price' => (float) $v->price,
-                    ];
-                }),
+                'variants' => $p->variants->map(fn ($v) => [
+                    'id' => $v->id,
+                    'sku' => $v->sku,
+                    'name' => $v->option_value ?: $p->name,
+                    'option_name' => $v->option_name,
+                    'option_value' => $v->option_value,
+                    'barcode' => $v->barcode,
+                    'price' => (float) $v->price,
+                    'cost_price' => $v->cost_price !== null ? (float) $v->cost_price : null,
+                    'is_active' => $v->is_active,
+                    'stock' => $stockOf($v->balances),
+                ]),
                 'variants_count' => $p->variants->count(),
-                'stock' => [
-                    'on_hand' => $totalOnHand,
-                    'reserved' => $totalReserved,
-                    'available' => $totalAvailable,
-                ],
+                'stores' => $mappings->pluck('store')->filter()->unique('id')->values()
+                    ->map(fn ($store) => ['id' => $store->id, 'name' => $store->name, 'platform' => $store->platform]),
+                'stock' => $stockOf($p->variants->flatMap->balances),
                 'created_at' => $p->created_at->format('Y-m-d H:i'),
             ];
         });

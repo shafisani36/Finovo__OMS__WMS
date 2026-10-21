@@ -1,0 +1,200 @@
+.qt-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px 18px;
+}
+
+.qt-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 6px;
+}
+
+.qt-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font-size: 13px;
+  color: #0f172a;
+  background: #ffffff;
+  outline: none;
+  font-family: inherit;
+}
+
+.qt-input:focus {
+  border-color: #1e56ff;
+  box-shadow: 0 0 0 3px rgba(30, 86, 255, 0.12);
+}
+
+.qt-input.is-number {
+  text-align: right;
+}
+
+textarea.qt-input {
+  resize: vertical;
+  min-height: 72px;
+}
+
+.qt-span-2 {
+  grid-column: span 2;
+}
+
+.qt-span-4 {
+  grid-column: span 4;
+}
+
+.qt-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.qt-card-title {
+  margin: 0 0 14px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.qt-items {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.qt-items th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  padding: 8px 6px;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
+}
+
+.qt-items td {
+  padding: 8px 6px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: top;
+}
+
+.qt-totals {
+  margin-left: auto;
+  width: 300px;
+  max-width: 100%;
+  font-size: 13px;
+  margin-top: 16px;
+}
+
+.qt-totals div {
+  display: flex;
+  justify-content: space-between;
+  padding: 5px 0;
+  color: #475569;
+}
+
+.qt-totals .qt-grand {
+  border-top: 2px solid #0f172a;
+  margin-top: 4px;
+  padding-top: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.qt-picker {
+  position: relative;
+}
+
+.qt-picker-menu {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  min-width: 320px;
+  max-height: 280px;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+  padding: 4px;
+}
+
+.qt-picker-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+}
+
+.qt-picker-option:hover,
+.qt-picker-option:focus {
+  background: #f1f5f9;
+  outline: none;
+}
+
+.qt-picker-empty {
+  padding: 10px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.qt-error {
+  background: #fff1f2;
+  color: #be123c;
+  border: 1px solid #fecdd3;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.qt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.qt-muted {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+@media (max-width: 1024px) {
+  .qt-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .qt-span-4 {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 560px) {
+  .qt-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .qt-span-2,
+  .qt-span-4 {
+    grid-column: span 1;
+  }
+}

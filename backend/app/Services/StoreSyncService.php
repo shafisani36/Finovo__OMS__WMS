@@ -118,7 +118,8 @@ class StoreSyncService
                 ->keyBy('external_id');
 
             $product = $mapped->first()?->variant?->product
-                ?? $this->variantBySku($store, $data->variants)?->product;
+                ?? $this->variantBySku($store, $data->variants)?->product
+                ?? $this->orphanedProduct($store, $data);
 
             $attributes = [
                 'name' => $data->name,
@@ -141,7 +142,8 @@ class StoreSyncService
 
             foreach ($data->variants as $variantData) {
                 $variant = $mapped->get($variantData->externalId)?->variant
-                    ?? $this->unmappedVariantWithSku($store, $variantData->sku);
+                    ?? $this->unmappedVariantWithSku($store, $variantData->sku)
+                    ?? $this->orphanedVariant($store, $product, $variantData);
 
                 $variantAttributes = array_filter([
                     'product_id' => $product->id,
@@ -242,22 +244,61 @@ class StoreSyncService
             ->first();
     }
 
-    private function uniqueProductSku(Store $store, ProductData $data): string
+    /**
+     * A product left behind when its store was deleted (it has no store links any more), e.g. the same shop
+     * connected again as a new store. It is matched by the SKU Finovo generated for it the first time.
+     */
+    private function orphanedProduct(Store $store, ProductData $data): ?Product
+    {
+        $base = $this->productSkuBase($data);
+
+        return Product::where('organization_id', $store->organization_id)
+            ->whereIn('sku', [$base, $this->suffixed($base, $data->externalId)])
+            ->whereDoesntHave('variants.skuMappings')
+            ->first();
+    }
+
+    /**
+     * A variant of this product left behind by a deleted store, matched by its SKU.
+     */
+    private function orphanedVariant(Store $store, Product $product, VariantData $data): ?ProductVariant
+    {
+        $base = $this->variantSkuBase($product, $data);
+
+        return ProductVariant::where('organization_id', $store->organization_id)
+            ->where('product_id', $product->id)
+            ->whereIn('sku', [$base, $this->suffixed($base, $data->externalId)])
+            ->whereDoesntHave('skuMappings')
+            ->first();
+    }
+
+    private function productSkuBase(ProductData $data): string
     {
         $base = count($data->variants) === 1 && $data->variants[0]->sku
             ? $data->variants[0]->sku
             : Str::upper(Str::slug($data->handle ?: $data->name));
 
-        return $this->firstFreeSku(Product::class, $store, $base ?: 'PRODUCT', $data->externalId);
+        return $base ?: 'PRODUCT';
+    }
+
+    private function variantSkuBase(Product $product, VariantData $data): string
+    {
+        return $data->sku ?? $product->sku.'-'.$data->externalId;
+    }
+
+    private function uniqueProductSku(Store $store, ProductData $data): string
+    {
+        return $this->firstFreeSku(Product::class, $store, $this->productSkuBase($data), $data->externalId);
     }
 
     private function uniqueVariantSku(Store $store, Product $product, VariantData $data): string
     {
-        return $this->firstFreeSku(ProductVariant::class, $store, $data->sku ?? $product->sku.'-'.$data->externalId, $data->externalId);
+        return $this->firstFreeSku(ProductVariant::class, $store, $this->variantSkuBase($product, $data), $data->externalId);
     }
 
     /**
-     * SKUs are unique per organization; a taken SKU gets the store's ID for the item appended.
+     * SKUs are unique per organization. A taken SKU gets the store's ID for the item appended, then a counter,
+     * until a free one is found.
      *
      * @param  class-string<Product|ProductVariant>  $model
      */
@@ -265,7 +306,22 @@ class StoreSyncService
     {
         $taken = fn (string $candidate) => $model::where('organization_id', $store->organization_id)->where('sku', $candidate)->exists();
 
-        return $taken($sku) ? Str::limit($sku, 180, '').'-'.$externalId : $sku;
+        if (! $taken($sku)) {
+            return $sku;
+        }
+
+        $candidate = $this->suffixed($sku, $externalId);
+
+        for ($counter = 2; $taken($candidate); $counter++) {
+            $candidate = $this->suffixed($sku, $externalId.'-'.$counter);
+        }
+
+        return $candidate;
+    }
+
+    private function suffixed(string $sku, string $suffix): string
+    {
+        return Str::limit($sku, 180, '').'-'.$suffix;
     }
 
     private function saveOrder(Store $store, OrderData $data, SyncResult $result): void

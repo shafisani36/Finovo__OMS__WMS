@@ -41,11 +41,11 @@ class SyncStoresCommand extends Command
 
             try {
                 $result = $sync->sync($store);
-                $this->info("{$store->name}: {$result->summary()}");
+                $this->info("#{$store->id} {$store->name}: {$result->summary()}");
                 array_map(fn (string $warning) => $this->warn("  {$warning}"), $result->warnings);
             } catch (Throwable $e) {
                 $failed = true;
-                $this->error("{$store->name}: {$e->getMessage()}");
+                $this->error("#{$store->id} {$store->name}: {$e->getMessage()}");
             }
         }
 

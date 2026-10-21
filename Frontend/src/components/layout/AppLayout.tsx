@@ -19,7 +19,8 @@ import {
   Menu,
   X,
   ChevronRight,
-  LogOut
+  LogOut,
+  FileSignature,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useActiveStore } from '../../hooks/useActiveStore';
@@ -155,6 +156,14 @@ export const AppLayout: React.FC = () => {
           >
             <FileText size={18} />
             <span>Orders</span>
+          </NavLink>
+          <NavLink
+            to="/quotations"
+            className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
+            onClick={() => setMobileMenuOpen(false)}
+          >
+            <FileSignature size={18} />
+            <span>Quotations</span>
           </NavLink>
           <NavLink
             to="/products"

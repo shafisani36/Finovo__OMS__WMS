@@ -19,6 +19,10 @@ use Throwable;
 /**
  * Reads osCommerce products and orders from the shop database (osCommerce 2.x and 4.x share these tables).
  * Product attributes are not imported as variants; each product is one variant with its own stock.
+ *
+ * Product photos: osCommerce 4 keeps them in products_images (files under images/products/{product}/{image}/),
+ * osCommerce 2 in products.products_image (files under images/). The public address comes from the store's
+ * website setting or, on osCommerce 4, from the default sales channel in the platforms table.
  */
 class OsCommerceDataSource implements StoreDataSource
 {
@@ -37,6 +41,9 @@ class OsCommerceDataSource implements StoreDataSource
 
     /** @var array<int, string> */
     private array $statusNames = [];
+
+    /** False once looked up and not found. */
+    private string|false|null $siteUrl = null;
 
     public function __construct(
         protected ExternalDatabaseConnector $database
@@ -63,6 +70,8 @@ class OsCommerceDataSource implements StoreDataSource
                 ->limit(self::PAGE_SIZE)
                 ->get());
 
+            $images = $this->imagePaths($store, $products->pluck('products_id')->map(fn ($id) => (int) $id)->all());
+
             foreach ($products as $product) {
                 $id = (string) $product->products_id;
                 $sku = filled($product->products_model) ? (string) $product->products_model : null;
@@ -73,7 +82,7 @@ class OsCommerceDataSource implements StoreDataSource
                     handle: $sku,
                     description: filled($product->products_description) ? trim(strip_tags(html_entity_decode((string) $product->products_description, ENT_QUOTES | ENT_HTML5))) ?: null : null,
                     category: null,
-                    imageUrl: null,
+                    imageUrl: $images[(int) $product->products_id] ?? null,
                     isActive: (bool) (int) $product->products_status,
                     variants: [new VariantData(
                         externalId: $id,
@@ -93,7 +102,11 @@ class OsCommerceDataSource implements StoreDataSource
             }
         }
 
-        $this->warnings[] = 'Product images and attribute variants are not imported for osCommerce stores (database connection).';
+        if ($this->siteUrl($store) === null) {
+            $this->warnings[] = "Product images were not imported because the shop's website address is not known. Run: php artisan stores:set-website {$store->id} https://your-shop-address";
+        }
+
+        $this->warnings[] = 'Attribute variants are not imported for osCommerce stores; each product is imported with its own stock.';
     }
 
     public function orders(Store $store, ?DateTimeInterface $updatedSince): iterable
@@ -120,6 +133,97 @@ class OsCommerceDataSource implements StoreDataSource
                 return;
             }
         }
+    }
+
+    /**
+     * Public image URL per product ID, for the products that have a photo.
+     *
+     * @param  list<int>  $productIds
+     * @return array<int, string>
+     */
+    private function imagePaths(Store $store, array $productIds): array
+    {
+        $siteUrl = $this->siteUrl($store);
+
+        if ($siteUrl === null || $productIds === []) {
+            return [];
+        }
+
+        $schema = $this->db->getSchemaBuilder();
+        $paths = [];
+
+        try {
+            if ($schema->hasTable($this->prefix.'products_images_description')) {
+                // osCommerce 4: the original upload is stored as images/products/{product}/{image}/{hash_file_name}
+                $rows = $this->db->table($this->prefix.'products_images as pi')
+                    ->join($this->prefix.'products_images_description as pid', 'pid.products_images_id', '=', 'pi.products_images_id')
+                    ->whereIn('pi.products_id', $productIds)
+                    ->where('pi.image_status', 1)
+                    ->where('pid.hash_file_name', '!=', '')
+                    ->orderByDesc('pi.default_image')
+                    ->orderBy('pi.sort_order')
+                    ->orderBy('pid.language_id')
+                    ->get(['pi.products_id', 'pi.products_images_id', 'pid.hash_file_name']);
+
+                foreach ($rows as $row) {
+                    $paths[(int) $row->products_id] ??= "products/{$row->products_id}/{$row->products_images_id}/".rawurlencode($row->hash_file_name);
+                }
+            } elseif ($schema->hasColumn($this->prefix.'products', 'products_image')) {
+                // osCommerce 2: a file name relative to images/
+                $rows = $this->db->table($this->prefix.'products')
+                    ->whereIn('products_id', $productIds)
+                    ->where('products_image', '!=', '')
+                    ->pluck('products_image', 'products_id');
+
+                foreach ($rows as $id => $file) {
+                    $paths[(int) $id] = implode('/', array_map('rawurlencode', explode('/', ltrim((string) $file, '/'))));
+                }
+            }
+        } catch (Throwable $e) {
+            report($e);
+            $this->warnings[] = 'Product images could not be read from the osCommerce database.';
+
+            return [];
+        }
+
+        return array_map(fn (string $path) => "{$siteUrl}/images/{$path}", $paths);
+    }
+
+    /**
+     * The shop's public address: the store setting, else osCommerce 4's default sales channel.
+     */
+    private function siteUrl(Store $store): ?string
+    {
+        if ($this->siteUrl === null) {
+            $this->siteUrl = filled($store->credential('site_url')) ? rtrim((string) $store->credential('site_url'), '/') : ($this->platformUrl() ?? false);
+        }
+
+        return $this->siteUrl ?: null;
+    }
+
+    private function platformUrl(): ?string
+    {
+        try {
+            if (! $this->db->getSchemaBuilder()->hasTable($this->prefix.'platforms')) {
+                return null;
+            }
+
+            $platform = $this->db->table($this->prefix.'platforms')
+                ->orderByDesc('is_default')
+                ->orderBy('platform_id')
+                ->first(['platform_url', 'platform_url_secure', 'ssl_enabled']);
+        } catch (Throwable) {
+            return null;
+        }
+
+        $secure = $platform && (int) $platform->ssl_enabled === 1 && filled($platform->platform_url_secure);
+        $host = $platform ? ($secure ? $platform->platform_url_secure : $platform->platform_url) : null;
+
+        if (blank($host)) {
+            return null;
+        }
+
+        return rtrim(preg_match('#^https?://#i', $host) ? $host : ($secure ? 'https://' : 'http://').$host, '/');
     }
 
     private function connect(Store $store): void
