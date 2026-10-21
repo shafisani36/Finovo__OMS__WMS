@@ -21,36 +21,23 @@ class PurchaseOrderController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $query = PurchaseOrder::where('organization_id', $org->id)
-            ->with(['warehouse', 'creator', 'requisition', 'items', 'goodsReceivedNotes']);
+        $orders = PurchaseOrder::where('organization_id', $org->id)
+            ->with(['warehouse', 'creator', 'requisition', 'items', 'goodsReceivedNotes'])
+            ->when($request->query('status'), fn ($q, $status) => $q->where('status', $status))
+            ->when($request->query('warehouse_id'), fn ($q, $warehouseId) => $q->where('warehouse_id', $warehouseId))
+            ->when($request->query('search'), fn ($q, $search) => $q->where(fn ($q) => $q
+                ->where('po_number', 'like', "%{$search}%")
+                ->orWhere('supplier_name', 'like', "%{$search}%")
+                ->orWhere('notes', 'like', "%{$search}%")))
+            ->latest('id')
+            ->paginate($this->perPage($request));
 
-        if ($status = $request->query('status')) {
-            $query->where('status', $status);
+        $byStatus = PurchaseOrder::where('organization_id', $org->id)->selectRaw('status, count(*) as total')->groupBy('status')->pluck('total', 'status');
+        $counts = ['total' => (int) $byStatus->sum()];
+
+        foreach (['draft', 'issued', 'partially_received', 'received', 'cancelled'] as $status) {
+            $counts[$status] = (int) ($byStatus[$status] ?? 0);
         }
-
-        if ($warehouseId = $request->query('warehouse_id')) {
-            $query->where('warehouse_id', $warehouseId);
-        }
-
-        if ($search = $request->query('search')) {
-            $query->where(function ($q) use ($search) {
-                $q->where('po_number', 'like', "%{$search}%")
-                    ->orWhere('supplier_name', 'like', "%{$search}%")
-                    ->orWhere('notes', 'like', "%{$search}%");
-            });
-        }
-
-        $perPage = (int) $request->query('per_page', 15);
-        $orders = $query->latest('id')->paginate($perPage);
-
-        $counts = [
-            'total' => PurchaseOrder::where('organization_id', $org->id)->count(),
-            'draft' => PurchaseOrder::where('organization_id', $org->id)->where('status', 'draft')->count(),
-            'issued' => PurchaseOrder::where('organization_id', $org->id)->where('status', 'issued')->count(),
-            'partially_received' => PurchaseOrder::where('organization_id', $org->id)->where('status', 'partially_received')->count(),
-            'received' => PurchaseOrder::where('organization_id', $org->id)->where('status', 'received')->count(),
-            'cancelled' => PurchaseOrder::where('organization_id', $org->id)->where('status', 'cancelled')->count(),
-        ];
 
         return response()->json([
             'status' => 'success',
@@ -66,7 +53,8 @@ class PurchaseOrderController extends Controller
     }
 
     /**
-     * Create a standalone Purchase Order.
+     * Create a standalone purchase order (orders from a requisition are raised through its convert-po action,
+     * which also tracks the ordered quantities on the requisition).
      */
     public function store(Request $request): JsonResponse
     {
@@ -74,16 +62,15 @@ class PurchaseOrderController extends Controller
             'supplier_name' => 'required|string|max:255',
             'supplier_email' => 'nullable|email|max:255',
             'supplier_contact' => 'nullable|string|max:100',
-            'warehouse_id' => 'required|exists:warehouses,id',
-            'purchase_requisition_id' => 'nullable|exists:purchase_requisitions,id',
+            'warehouse_id' => ['required', 'integer', $this->inOrganization($request, 'warehouses')],
             'order_date' => 'nullable|date',
-            'expected_delivery_date' => 'nullable|date',
+            'expected_delivery_date' => 'nullable|date|after_or_equal:'.($request->input('order_date') ?: 'today'),
             'payment_terms' => 'nullable|string|max:100',
             'currency' => 'nullable|string|max:10',
             'notes' => 'nullable|string',
             'tax_rate' => 'nullable|numeric|min:0|max:100',
             'items' => 'required|array|min:1',
-            'items.*.product_variant_id' => 'required|exists:product_variants,id',
+            'items.*.product_variant_id' => ['required', 'integer', $this->inOrganization($request, 'product_variants')],
             'items.*.sku' => 'required|string|max:100',
             'items.*.product_name' => 'required|string|max:255',
             'items.*.ordered_quantity' => 'required|integer|min:1',
@@ -143,8 +130,9 @@ class PurchaseOrderController extends Controller
         $org = $request->user()->currentOrganization();
         $po = PurchaseOrder::where('organization_id', $org->id)->findOrFail($id);
 
-        $reason = $request->input('reason');
-        $updated = $this->purchaseOrderService->cancelPurchaseOrder($po, $request->user(), $reason);
+        $request->validate(['reason' => 'nullable|string|max:1000']);
+
+        $updated = $this->purchaseOrderService->cancelPurchaseOrder($po, $request->user(), $request->input('reason'));
 
         return response()->json([
             'status' => 'success',

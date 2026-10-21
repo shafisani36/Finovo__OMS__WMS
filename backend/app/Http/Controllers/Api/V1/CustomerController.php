@@ -74,7 +74,7 @@ class CustomerController extends Controller
         abort_if($customer->organization_id !== $request->user()->currentOrganization()->id, 404);
 
         $orders = $customer->orders()
-            ->with(['store:id,name,platform', 'items.variant.product:id,name,image_url'])
+            ->with(['store:id,name,platform', 'items.variant.product:id,name,image_url,image_path'])
             ->latest('placed_at')
             ->latest('id')
             ->get();

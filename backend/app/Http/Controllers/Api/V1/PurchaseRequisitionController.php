@@ -9,6 +9,7 @@ use App\Services\ProcurementRequisitionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Validation\Rule;
 
 class PurchaseRequisitionController extends Controller
 {
@@ -24,42 +25,24 @@ class PurchaseRequisitionController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $query = PurchaseRequisition::where('organization_id', $org->id)
-            ->with(['requester', 'approver', 'warehouse', 'items']);
+        $requisitions = PurchaseRequisition::where('organization_id', $org->id)
+            ->with(['requester', 'approver', 'warehouse', 'items'])
+            ->when($request->query('status'), fn ($q, $status) => $q->where('status', $status))
+            ->when($request->query('warehouse_id'), fn ($q, $warehouseId) => $q->where('warehouse_id', $warehouseId))
+            ->when($request->query('priority'), fn ($q, $priority) => $q->where('priority', $priority))
+            ->when($request->query('search'), fn ($q, $search) => $q->where(fn ($q) => $q
+                ->where('pr_number', 'like', "%{$search}%")
+                ->orWhere('purpose', 'like', "%{$search}%")
+                ->orWhere('department', 'like', "%{$search}%")))
+            ->latest('id')
+            ->paginate($this->perPage($request));
 
-        if ($status = $request->query('status')) {
-            $query->where('status', $status);
+        $byStatus = PurchaseRequisition::where('organization_id', $org->id)->selectRaw('status, count(*) as total')->groupBy('status')->pluck('total', 'status');
+        $counts = ['total' => (int) $byStatus->sum()];
+
+        foreach (['draft', 'submitted', 'approved', 'partially_ordered', 'ordered', 'rejected'] as $status) {
+            $counts[$status] = (int) ($byStatus[$status] ?? 0);
         }
-
-        if ($warehouseId = $request->query('warehouse_id')) {
-            $query->where('warehouse_id', $warehouseId);
-        }
-
-        if ($priority = $request->query('priority')) {
-            $query->where('priority', $priority);
-        }
-
-        if ($search = $request->query('search')) {
-            $query->where(function ($q) use ($search) {
-                $q->where('pr_number', 'like', "%{$search}%")
-                    ->orWhere('purpose', 'like', "%{$search}%")
-                    ->orWhere('department', 'like', "%{$search}%");
-            });
-        }
-
-        $perPage = (int) $request->query('per_page', 15);
-        $requisitions = $query->latest('id')->paginate($perPage);
-
-        // Calculate KPI summary
-        $counts = [
-            'total' => PurchaseRequisition::where('organization_id', $org->id)->count(),
-            'draft' => PurchaseRequisition::where('organization_id', $org->id)->where('status', 'draft')->count(),
-            'submitted' => PurchaseRequisition::where('organization_id', $org->id)->where('status', 'submitted')->count(),
-            'approved' => PurchaseRequisition::where('organization_id', $org->id)->where('status', 'approved')->count(),
-            'partially_ordered' => PurchaseRequisition::where('organization_id', $org->id)->where('status', 'partially_ordered')->count(),
-            'ordered' => PurchaseRequisition::where('organization_id', $org->id)->where('status', 'ordered')->count(),
-            'rejected' => PurchaseRequisition::where('organization_id', $org->id)->where('status', 'rejected')->count(),
-        ];
 
         return response()->json([
             'status' => 'success',
@@ -79,12 +62,10 @@ class PurchaseRequisitionController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
-        $org = $request->user()->currentOrganization();
-        $user = $request->user();
-
         $validated = $request->validate([
-            'warehouse_id' => 'required|exists:warehouses,id',
-            'delivery_location_id' => 'nullable|exists:warehouse_locations,id',
+            'warehouse_id' => ['required', 'integer', $this->inOrganization($request, 'warehouses')],
+            // The delivery bin must be inside the requisition's warehouse.
+            'delivery_location_id' => ['nullable', 'integer', $this->inOrganization($request, 'warehouse_locations')->where('warehouse_id', $request->integer('warehouse_id'))],
             'department' => 'nullable|string|max:100',
             'priority' => 'nullable|in:low,normal,high,urgent',
             'required_by_date' => 'nullable|date',
@@ -94,8 +75,8 @@ class PurchaseRequisitionController extends Controller
             'currency' => 'nullable|string|max:10',
             'tax_rate' => 'nullable|numeric|min:0|max:100',
             'items' => 'required|array|min:1',
-            'items.*.product_variant_id' => 'required|exists:product_variants,id',
-            'items.*.product_id' => 'nullable|exists:products,id',
+            'items.*.product_variant_id' => ['required', 'integer', $this->inOrganization($request, 'product_variants')],
+            'items.*.product_id' => ['nullable', 'integer', $this->inOrganization($request, 'products')],
             'items.*.sku' => 'required|string|max:100',
             'items.*.product_name' => 'required|string|max:255',
             'items.*.requested_quantity' => 'required|integer|min:1',
@@ -104,7 +85,7 @@ class PurchaseRequisitionController extends Controller
             'items.*.notes' => 'nullable|string',
         ]);
 
-        $requisition = $this->requisitionService->createRequisition($validated, $user);
+        $requisition = $this->requisitionService->createRequisition($validated, $request->user());
 
         return response()->json([
             'status' => 'success',
@@ -155,9 +136,9 @@ class PurchaseRequisitionController extends Controller
     {
         $org = $request->user()->currentOrganization();
         $requisition = PurchaseRequisition::where('organization_id', $org->id)->findOrFail($id);
+        $request->validate(['comments' => 'nullable|string|max:1000']);
 
-        $comments = $request->input('comments');
-        $updated = $this->requisitionService->submitRequisition($requisition, $request->user(), $comments);
+        $updated = $this->requisitionService->submitRequisition($requisition, $request->user(), $request->input('comments'));
 
         return response()->json([
             'status' => 'success',
@@ -174,10 +155,13 @@ class PurchaseRequisitionController extends Controller
         $org = $request->user()->currentOrganization();
         $requisition = PurchaseRequisition::where('organization_id', $org->id)->findOrFail($id);
 
-        $itemQuantities = $request->input('approved_quantities'); // [item_id => qty]
-        $comments = $request->input('comments');
+        $request->validate([
+            'approved_quantities' => 'nullable|array', // [requisition item ID => quantity]
+            'approved_quantities.*' => 'integer|min:0',
+            'comments' => 'nullable|string|max:1000',
+        ]);
 
-        $updated = $this->requisitionService->approveRequisition($requisition, $request->user(), $itemQuantities, $comments);
+        $updated = $this->requisitionService->approveRequisition($requisition, $request->user(), $request->input('approved_quantities'), $request->input('comments'));
 
         return response()->json([
             'status' => 'success',
@@ -195,8 +179,8 @@ class PurchaseRequisitionController extends Controller
         $requisition = PurchaseRequisition::where('organization_id', $org->id)->findOrFail($id);
 
         $request->validate([
-            'reason' => 'required|string|min:3',
-            'comments' => 'nullable|string',
+            'reason' => 'required|string|min:3|max:1000',
+            'comments' => 'nullable|string|max:1000',
         ]);
 
         $updated = $this->requisitionService->rejectRequisition(
@@ -225,14 +209,16 @@ class PurchaseRequisitionController extends Controller
             'supplier_name' => 'required|string|max:255',
             'supplier_email' => 'nullable|email|max:255',
             'supplier_contact' => 'nullable|string|max:100',
-            'warehouse_id' => 'nullable|exists:warehouses,id',
+            'warehouse_id' => ['nullable', 'integer', $this->inOrganization($request, 'warehouses')],
             'order_date' => 'nullable|date',
-            'expected_delivery_date' => 'nullable|date',
+            'expected_delivery_date' => 'nullable|date|after_or_equal:'.($request->input('order_date') ?: 'today'),
             'payment_terms' => 'nullable|string|max:100',
             'currency' => 'nullable|string|max:10',
+            'tax_rate' => 'nullable|numeric|min:0|max:100',
             'notes' => 'nullable|string',
             'items' => 'nullable|array',
-            'items.*.purchase_requisition_item_id' => 'required_with:items|exists:purchase_requisition_items,id',
+            // Lines must come from this requisition.
+            'items.*.purchase_requisition_item_id' => ['required_with:items', 'integer', Rule::exists('purchase_requisition_items', 'id')->where('purchase_requisition_id', $requisition->id)],
             'items.*.ordered_quantity' => 'required_with:items|integer|min:1',
             'items.*.unit_cost' => 'nullable|numeric|min:0',
         ]);
@@ -252,17 +238,12 @@ class PurchaseRequisitionController extends Controller
     public function stockContext(Request $request): JsonResponse
     {
         $org = $request->user()->currentOrganization();
-        $warehouseId = (int) $request->query('warehouse_id');
-        $variantId = (int) $request->query('variant_id');
+        $validated = $request->validate([
+            'warehouse_id' => ['required', 'integer', $this->inOrganization($request, 'warehouses')],
+            'variant_id' => ['required', 'integer', $this->inOrganization($request, 'product_variants')],
+        ]);
 
-        if (! $warehouseId || ! $variantId) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'warehouse_id and variant_id are required query parameters.',
-            ], 422);
-        }
-
-        $context = $this->requisitionService->getStockPlanningContext($org->id, $warehouseId, $variantId);
+        $context = $this->requisitionService->getStockPlanningContext($org->id, (int) $validated['warehouse_id'], (int) $validated['variant_id']);
 
         return response()->json([
             'status' => 'success',

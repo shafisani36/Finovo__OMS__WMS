@@ -9,6 +9,7 @@ use App\Models\ReorderRule;
 use App\Models\Warehouse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 
 class ReplenishmentController extends Controller
 {
@@ -88,6 +89,71 @@ class ReplenishmentController extends Controller
             'status' => 'success',
             'message' => 'Reorder rule configured successfully.',
             'data' => $rule->load(['warehouse', 'variant.product']),
+        ]);
+    }
+
+    /**
+     * Stock alerts for the notification bell: items that ran out or are at or below their reorder point
+     * (or the default threshold when they have no reorder rule), worst first.
+     */
+    public function alerts(Request $request): JsonResponse
+    {
+        $orgId = $request->user()->currentOrganization()->id;
+        $limit = 50;
+
+        $lowBalances = InventoryBalance::query()
+            ->from('inventory_balances as b')
+            ->leftJoin('reorder_rules as r', fn ($join) => $join
+                ->on('r.warehouse_id', '=', 'b.warehouse_id')
+                ->on('r.product_variant_id', '=', 'b.product_variant_id')
+                ->where('r.is_active', true))
+            // Archived products are not reordered, so they do not raise alerts.
+            ->join('product_variants as v', fn ($join) => $join->on('v.id', '=', 'b.product_variant_id')->where('v.is_active', true))
+            ->where('b.organization_id', $orgId)
+            ->whereRaw('b.available <= COALESCE(r.reorder_point, ?)', [ReorderRule::DEFAULT_LOW_STOCK_THRESHOLD])
+            ->select('b.warehouse_id', 'b.product_variant_id', 'b.available', 'r.reorder_point');
+
+        // A reorder rule for an item the warehouse has never held is an empty shelf too.
+        $neverStocked = ReorderRule::where('organization_id', $orgId)
+            ->where('is_active', true)
+            ->whereNotExists(fn ($q) => $q->from('inventory_balances')
+                ->whereColumn('inventory_balances.warehouse_id', 'reorder_rules.warehouse_id')
+                ->whereColumn('inventory_balances.product_variant_id', 'reorder_rules.product_variant_id'))
+            ->get(['warehouse_id', 'product_variant_id', 'reorder_point'])
+            ->map(fn (ReorderRule $rule) => (object) [...$rule->only(['warehouse_id', 'product_variant_id', 'reorder_point']), 'available' => 0]);
+
+        /** @var Collection<int, object> $rows */
+        $rows = $lowBalances->get()->map(fn ($row) => (object) $row->getAttributes())->concat($neverStocked)->sortBy('available')->values();
+        $shown = $rows->take($limit);
+
+        $variants = ProductVariant::with('product')->whereIn('id', $shown->pluck('product_variant_id'))->get()->keyBy('id');
+        $warehouses = Warehouse::whereIn('id', $shown->pluck('warehouse_id'))->pluck('name', 'id');
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $shown->map(function ($row) use ($variants, $warehouses) {
+                $variant = $variants->get($row->product_variant_id);
+
+                return [
+                    'warehouse_id' => (int) $row->warehouse_id,
+                    'warehouse_name' => $warehouses->get($row->warehouse_id),
+                    'product_variant_id' => (int) $row->product_variant_id,
+                    'product_name' => $variant?->product?->name,
+                    'variant' => $variant?->option_value,
+                    'sku' => $variant?->sku,
+                    'image_url' => $variant?->product?->image_url,
+                    'available' => (int) $row->available,
+                    'threshold' => (int) ($row->reorder_point ?? ReorderRule::DEFAULT_LOW_STOCK_THRESHOLD),
+                    'has_rule' => $row->reorder_point !== null,
+                    'status' => $row->available <= 0 ? 'out_of_stock' : 'low_stock',
+                ];
+            }),
+            'meta' => [
+                'total' => $rows->count(),
+                'out_of_stock' => $rows->where('available', '<=', 0)->count(),
+                'low_stock' => $rows->where('available', '>', 0)->count(),
+                'default_threshold' => ReorderRule::DEFAULT_LOW_STOCK_THRESHOLD,
+            ],
         ]);
     }
 

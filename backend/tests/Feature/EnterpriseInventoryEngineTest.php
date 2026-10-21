@@ -8,6 +8,7 @@ use App\Models\InventoryLocationBalance;
 use App\Models\Organization;
 use App\Models\Product;
 use App\Models\ProductVariant;
+use App\Models\ReorderRule;
 use App\Models\User;
 use App\Models\Warehouse;
 use App\Models\WarehouseLocation;
@@ -526,6 +527,37 @@ class EnterpriseInventoryEngineTest extends TestCase
     /**
      * Test 10: Strict multi-tenant isolation across all inventory resources.
      */
+    public function test_stock_alerts_list_out_of_stock_and_low_items_for_the_bell(): void
+    {
+        $item = function (string $sku, ?int $available, ?int $reorderPoint = null, bool $active = true) {
+            $variant = ProductVariant::create(['organization_id' => $this->orgA->id, 'product_id' => $this->product->id, 'sku' => $sku, 'price' => 10, 'is_active' => $active]);
+            if ($available !== null) {
+                InventoryBalance::create(['organization_id' => $this->orgA->id, 'warehouse_id' => $this->warehouse1->id, 'product_variant_id' => $variant->id, 'on_hand' => $available, 'available' => $available]);
+            }
+            if ($reorderPoint !== null) {
+                ReorderRule::create(['organization_id' => $this->orgA->id, 'warehouse_id' => $this->warehouse1->id, 'product_variant_id' => $variant->id, 'min_quantity' => 0, 'reorder_point' => $reorderPoint, 'reorder_quantity' => 50, 'is_active' => true]);
+            }
+        };
+
+        $item('LOW-DEFAULT', 3);          // at or below the default threshold of 10
+        $item('EMPTY', 0);                // out of stock
+        $item('LOW-RULE', 20, 25);        // below its own reorder point
+        $item('HEALTHY', 15);             // above the default threshold: no alert
+        $item('RULE-ONLY', null, 5);      // rule but never stocked: out of stock
+        $item('ARCHIVED', 0, null, false); // archived products do not alert
+
+        $response = $this->actingAs($this->userA, 'sanctum')->getJson('/api/v1/inventory/replenishment/alerts')->assertOk();
+
+        $this->assertEqualsCanonicalizing(['EMPTY', 'RULE-ONLY', 'LOW-DEFAULT', 'LOW-RULE'], array_column($response->json('data'), 'sku'));
+        $this->assertSame('out_of_stock', $response->json('data.0.status'));
+        $response->assertJsonPath('meta.total', 4)
+            ->assertJsonPath('meta.out_of_stock', 2)
+            ->assertJsonPath('meta.low_stock', 2);
+        $this->assertSame(25, collect($response->json('data'))->firstWhere('sku', 'LOW-RULE')['threshold']);
+
+        $this->actingAs($this->userB, 'sanctum')->getJson('/api/v1/inventory/replenishment/alerts')->assertJsonPath('meta.total', 0);
+    }
+
     public function test_cross_tenant_isolation_is_strictly_enforced(): void
     {
         // User B (from Org B) attempts to view or transfer stock from Org A's warehouse

@@ -22,9 +22,6 @@ import { ShipmentsPage } from './pages/ShipmentsPage';
 import { ReturnsPage } from './pages/ReturnsPage';
 import { CustomersPage } from './pages/CustomersPage';
 import { CustomerDetailPage } from './pages/CustomerDetailPage';
-import { QuotationsPage } from './pages/QuotationsPage';
-import { QuotationFormPage } from './pages/QuotationFormPage';
-import { QuotationDetailPage } from './pages/QuotationDetailPage';
 import { PurchaseOrdersPage } from './pages/PurchaseOrdersPage';
 import { AppLayout } from './components/layout/AppLayout';
 import { Loader2 } from 'lucide-react';
@@ -123,10 +120,6 @@ export const App: React.FC = () => {
             <Route path="/warehouses/create" element={<WarehouseCreatePage />} />
             <Route path="/warehouses/:id" element={<WarehouseDetailPage />} />
             <Route path="/orders" element={<OrdersPage />} />
-            <Route path="/quotations" element={<QuotationsPage />} />
-            <Route path="/quotations/new" element={<QuotationFormPage />} />
-            <Route path="/quotations/:id" element={<QuotationDetailPage />} />
-            <Route path="/quotations/:id/edit" element={<QuotationFormPage />} />
             <Route path="/products" element={<ProductsPage />} />
             <Route path="/inventory" element={<InventoryPage />} />
             <Route path="/shipments" element={<ShipmentsPage />} />

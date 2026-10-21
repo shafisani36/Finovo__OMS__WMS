@@ -10,6 +10,9 @@ class ReorderRule extends Model
 {
     use HasFactory;
 
+    /** Below or at this many available units an item counts as low on stock when it has no reorder rule. */
+    public const DEFAULT_LOW_STOCK_THRESHOLD = 10;
+
     protected $fillable = [
         'organization_id',
         'warehouse_id',

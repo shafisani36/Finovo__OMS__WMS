@@ -9,9 +9,11 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\Store;
 use App\Services\InventoryEngine;
+use App\Services\InvoiceService;
 use App\Services\OrderAllocationEngine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 
 class OrderController extends Controller
@@ -168,6 +170,16 @@ class OrderController extends Controller
             'status' => 'success',
             'data' => $order,
         ]);
+    }
+
+    /**
+     * Download the order's invoice PDF (numbered on first download).
+     */
+    public function invoice(Request $request, Order $order, InvoiceService $invoices): Response
+    {
+        abort_if($order->organization_id !== $request->user()->currentOrganization()->id, 404);
+
+        return $invoices->download($order);
     }
 
     /**

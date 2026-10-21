@@ -478,6 +478,7 @@ export interface OrderItemModel {
 export interface OrderModel {
   id: number;
   order_number: string;
+  invoice_number?: string | null;
   external_order_id: string;
   customer_name: string;
   customer_email?: string;
@@ -492,6 +493,26 @@ export interface OrderModel {
   placed_at: string;
   store?: { id: number; name: string; platform: StorePlatform } | null;
   items?: OrderItemModel[];
+}
+
+export interface StockAlert {
+  warehouse_id: number;
+  warehouse_name: string | null;
+  product_variant_id: number;
+  product_name: string | null;
+  variant: string | null;
+  sku: string | null;
+  image_url: string | null;
+  available: number;
+  threshold: number;
+  has_rule: boolean;
+  status: 'out_of_stock' | 'low_stock';
+}
+
+export interface StockAlertsResponse {
+  status: string;
+  data: StockAlert[];
+  meta: { total: number; out_of_stock: number; low_stock: number; default_threshold: number };
 }
 
 export interface CustomerAddress {
@@ -577,60 +598,6 @@ export interface CustomerDetailModel {
   };
   stores: Array<CustomerStoreRef & { orders_count: number; last_order_at: string | null }>;
   orders: CustomerOrderModel[];
-}
-
-export type QuotationStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'converted';
-
-export interface QuotationItemInput {
-  product_variant_id?: number | null;
-  sku?: string | null;
-  description: string;
-  quantity: number;
-  unit_price: number;
-  discount_percent?: number;
-  tax_percent?: number;
-}
-
-export interface QuotationItemModel extends QuotationItemInput {
-  id: number;
-  line_total: string;
-  variant?: { id: number; sku: string; product?: { id: number; name: string; image_url?: string | null } | null } | null;
-}
-
-export interface QuotationPayload {
-  store_id: number;
-  customer_id?: number | null;
-  customer_name: string;
-  customer_email?: string | null;
-  customer_phone?: string | null;
-  billing_address?: CustomerAddress | null;
-  currency: string;
-  issue_date?: string;
-  valid_until?: string;
-  notes?: string | null;
-  terms?: string | null;
-  items: QuotationItemInput[];
-}
-
-export interface QuotationModel extends Omit<QuotationPayload, 'items'> {
-  id: number;
-  quotation_number: string;
-  status: QuotationStatus;
-  is_expired: boolean;
-  issue_date: string;
-  valid_until: string;
-  subtotal: string;
-  discount_total: string;
-  tax_total: string;
-  total_amount: string;
-  sent_at: string | null;
-  responded_at: string | null;
-  created_at: string;
-  items_count?: number;
-  items?: QuotationItemModel[];
-  store?: { id: number; name: string; platform: StorePlatform } | null;
-  creator?: { id: number; name: string } | null;
-  order?: { id: number; order_number: string; order_status: string } | null;
 }
 
 export const omsService = {
@@ -995,6 +962,12 @@ export const omsService = {
     return data;
   },
 
+  /** Out-of-stock and low-stock items for the notification bell (at most 50, worst first). */
+  async getStockAlerts(): Promise<StockAlertsResponse> {
+    const { data } = await apiClient.get('/inventory/replenishment/alerts');
+    return data;
+  },
+
   async getReplenishmentRecommendations(warehouseId?: number) {
     const { data } = await apiClient.get('/inventory/replenishment/recommendations', { params: { warehouse_id: warehouseId } });
     return data;
@@ -1032,59 +1005,6 @@ export const omsService = {
     return data;
   },
 
-  // Quotations
-  async getQuotations(params?: { search?: string; status?: string; store_id?: number; page?: number; per_page?: number }) {
-    const { data } = await apiClient.get('/quotations', { params });
-    return data;
-  },
-
-  async getQuotation(id: number): Promise<{ status: string; data: QuotationModel }> {
-    const { data } = await apiClient.get(`/quotations/${id}`);
-    return data;
-  },
-
-  async createQuotation(payload: QuotationPayload): Promise<{ status: string; message: string; data: QuotationModel }> {
-    const { data } = await apiClient.post('/quotations', payload);
-    return data;
-  },
-
-  async updateQuotation(id: number, payload: QuotationPayload): Promise<{ status: string; message: string; data: QuotationModel }> {
-    const { data } = await apiClient.put(`/quotations/${id}`, payload);
-    return data;
-  },
-
-  async deleteQuotation(id: number): Promise<{ status: string; message: string }> {
-    const { data } = await apiClient.delete(`/quotations/${id}`);
-    return data;
-  },
-
-  async setQuotationStatus(id: number, status: 'sent' | 'accepted' | 'rejected'): Promise<{ status: string; message: string; data: QuotationModel }> {
-    const { data } = await apiClient.post(`/quotations/${id}/status`, { status });
-    return data;
-  },
-
-  async convertQuotation(id: number): Promise<{ status: string; message: string; data: OrderModel }> {
-    const { data } = await apiClient.post(`/quotations/${id}/convert`);
-    return data;
-  },
-
-  async downloadQuotationPdf(id: number, filename: string) {
-    const token = getAuthToken();
-    const response = await fetch(`/api/v1/quotations/${id}/pdf`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      credentials: 'include',
-    });
-    if (!response.ok) throw new Error('Could not download the quotation PDF.');
-    const url = window.URL.createObjectURL(await response.blob());
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${filename}.pdf`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.URL.revokeObjectURL(url);
-  },
-
   // Orders
   async getOrders(params?: { search?: string; status?: string; store_id?: number; page?: number; per_page?: number }) {
     const { data } = await apiClient.get('/orders', { params });
@@ -1094,6 +1014,28 @@ export const omsService = {
   async createOrder(payload: any) {
     const { data } = await apiClient.post('/orders', payload);
     return data;
+  },
+
+  /** Downloads the order's invoice PDF; the order gets its invoice number the first time. */
+  async downloadOrderInvoice(orderId: number, orderNumber: string) {
+    const token = getAuthToken();
+    const response = await fetch(`/api/v1/orders/${orderId}/invoice`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new Error(body?.message || 'Could not download the invoice.');
+    }
+    const filename = /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') ?? '')?.[1] ?? `Invoice-${orderNumber}.pdf`;
+    const url = window.URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
   },
 
   async allocateOrder(orderId: number) {
@@ -1250,7 +1192,6 @@ export const omsService = {
     supplier_email?: string;
     supplier_contact?: string;
     warehouse_id: number;
-    purchase_requisition_id?: number;
     order_date?: string;
     expected_delivery_date?: string;
     payment_terms?: string;

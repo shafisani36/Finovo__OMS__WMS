@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -20,12 +20,132 @@ import {
   X,
   ChevronRight,
   LogOut,
-  FileSignature,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { useActiveStore } from '../../hooks/useActiveStore';
 import Logo from '../common/Logo';
 import { platformLabel } from '../stores/storePlatforms';
+import ProductThumb from '../catalog/ProductThumb';
+import omsService from '../../services/omsService';
+import type { StockAlert, StockAlertsResponse } from '../../services/omsService';
+import { STOCK_ALERTS_ON_LOGIN_KEY } from '../../context/AuthContext';
+
+const STOCK_ALERTS_REFRESH_MS = 5 * 60 * 1000;
+
+/**
+ * Notification bell with out-of-stock and low-stock items. It refreshes every few minutes and when the tab
+ * regains focus, and opens by itself once after each login when something needs reordering.
+ */
+const StockAlertsBell: React.FC = () => {
+  const navigate = useNavigate();
+  const [alerts, setAlerts] = useState<StockAlert[]>([]);
+  const [meta, setMeta] = useState<StockAlertsResponse['meta'] | null>(null);
+  const [open, setOpen] = useState(false);
+  const wrapper = useRef<HTMLDivElement>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await omsService.getStockAlerts();
+      setAlerts(res.data);
+      setMeta(res.meta);
+
+      let justLoggedIn = false;
+      try {
+        justLoggedIn = sessionStorage.getItem(STOCK_ALERTS_ON_LOGIN_KEY) === '1';
+        sessionStorage.removeItem(STOCK_ALERTS_ON_LOGIN_KEY);
+      } catch {
+        // Storage unavailable: the bell still shows the count.
+      }
+      if (justLoggedIn && res.meta.total > 0) setOpen(true);
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const timer = window.setInterval(load, STOCK_ALERTS_REFRESH_MS);
+    window.addEventListener('focus', load);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', load);
+    };
+  }, [load]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (wrapper.current && !wrapper.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+
+  const total = meta?.total ?? 0;
+
+  return (
+    <div className="stock-alerts" ref={wrapper}>
+      <button
+        className="topbar-icon-button"
+        title="Stock alerts"
+        aria-label={total ? `${total} stock alerts` : 'No stock alerts'}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Bell size={18} />
+        {total > 0 && <span className="notification-badge-dot">{total > 99 ? '99+' : total}</span>}
+      </button>
+
+      {open && (
+        <div className="stock-alerts-panel" role="dialog" aria-label="Stock alerts">
+          <div className="stock-alerts-head">
+            <strong>Stock alerts</strong>
+            {meta && total > 0 && (
+              <span>
+                {meta.out_of_stock} out of stock · {meta.low_stock} low
+              </span>
+            )}
+          </div>
+
+          {total === 0 ? (
+            <div className="stock-alerts-empty">All items are above their reorder level.</div>
+          ) : (
+            <ul className="stock-alerts-list">
+              {alerts.map((alert) => (
+                <li key={`${alert.warehouse_id}-${alert.product_variant_id}`}>
+                  <ProductThumb src={alert.image_url} size={34} />
+                  <div className="stock-alerts-item">
+                    <div className="stock-alerts-name">
+                      {alert.product_name ?? alert.sku}
+                      {alert.variant ? ` · ${alert.variant}` : ''}
+                    </div>
+                    <div className="stock-alerts-meta">
+                      {alert.sku} · {alert.warehouse_name}
+                    </div>
+                  </div>
+                  <span className={`stock-alerts-qty ${alert.status === 'out_of_stock' ? 'is-out' : 'is-low'}`}>
+                    {alert.status === 'out_of_stock' ? 'Out of stock' : `${alert.available} left`}
+                    <small>reorder at {alert.threshold}</small>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <button
+            className="stock-alerts-footer"
+            onClick={() => {
+              setOpen(false);
+              navigate('/inventory');
+            }}
+          >
+            {total > alerts.length ? `Showing ${alerts.length} of ${total} · ` : ''}Open inventory to reorder
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const AppLayout: React.FC = () => {
   const { user, logout } = useAuth();
@@ -157,14 +277,7 @@ export const AppLayout: React.FC = () => {
             <FileText size={18} />
             <span>Orders</span>
           </NavLink>
-          <NavLink
-            to="/quotations"
-            className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
-            onClick={() => setMobileMenuOpen(false)}
-          >
-            <FileSignature size={18} />
-            <span>Quotations</span>
-          </NavLink>
+
           <NavLink
             to="/products"
             className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
@@ -271,10 +384,7 @@ export const AppLayout: React.FC = () => {
               <HelpCircle size={18} />
             </button>
 
-            <button className="topbar-icon-button" title="Notifications">
-              <Bell size={18} />
-              <span className="notification-badge-dot">2</span>
-            </button>
+            <StockAlertsBell />
 
             {/* User Profile Pill & Dropdown */}
             <div style={{ position: 'relative' }}>

@@ -38,6 +38,7 @@ class StoreSyncService
     public function __construct(
         protected StoreDataSourceFactory $sources,
         protected InventoryEngine $inventory,
+        protected ProductImageStore $images,
     ) {}
 
     public function canSync(Store $store): bool
@@ -67,8 +68,15 @@ class StoreSyncService
         try {
             $warehouse = $this->defaultWarehouse($store);
 
+            $imagesNotSaved = 0;
+
             foreach ($source->products($store) as $product) {
-                $this->saveProduct($store, $product, $warehouse, $result);
+                $saved = $this->saveProduct($store, $product, $warehouse, $result);
+
+                // Outside the database transaction: a slow or failed download never blocks the catalog import.
+                if ($this->images->store($saved) === false) {
+                    $imagesNotSaved++;
+                }
             }
 
             $since = $store->last_sync_at?->copy()->subMinutes(self::ORDER_OVERLAP_MINUTES);
@@ -78,6 +86,10 @@ class StoreSyncService
             }
 
             $result->warnings = $source->warnings();
+
+            if ($imagesNotSaved > 0) {
+                $result->warnings[] = "{$imagesNotSaved} product images could not be downloaded, so the store's own image links are used for them. The next sync tries again.";
+            }
 
             if (! $warehouse) {
                 $result->warnings[] = 'No warehouse is linked to this store, so stock was not imported.';
@@ -108,9 +120,9 @@ class StoreSyncService
             ->first();
     }
 
-    private function saveProduct(Store $store, ProductData $data, ?Warehouse $warehouse, SyncResult $result): void
+    private function saveProduct(Store $store, ProductData $data, ?Warehouse $warehouse, SyncResult $result): Product
     {
-        DB::transaction(function () use ($store, $data, $warehouse, $result) {
+        return DB::transaction(function () use ($store, $data, $warehouse, $result) {
             $mapped = SkuMapping::where('store_id', $store->id)
                 ->whereIn('external_id', array_map(fn (VariantData $variant) => $variant->externalId, $data->variants))
                 ->with('variant.product')
@@ -180,6 +192,8 @@ class StoreSyncService
                     $result->openingStockLines++;
                 }
             }
+
+            return $product;
         });
     }
 

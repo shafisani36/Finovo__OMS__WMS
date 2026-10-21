@@ -126,3 +126,13 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+.detail-error {
+  background: #fff1f2;
+  color: #be123c;
+  border: 1px solid #fecdd3;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}

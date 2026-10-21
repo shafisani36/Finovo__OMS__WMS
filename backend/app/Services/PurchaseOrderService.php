@@ -3,46 +3,42 @@
 namespace App\Services;
 
 use App\Models\PurchaseOrder;
-use App\Models\PurchaseOrderItem;
+use App\Models\PurchaseRequisition;
+use App\Models\PurchaseRequisitionItem;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
-use InvalidArgumentException;
 
+/**
+ * Purchase orders to suppliers: created directly or from an approved requisition, issued and cancelled.
+ */
 class PurchaseOrderService
 {
+    /** Statuses in which a purchase order can still be cancelled. */
+    private const CANCELLABLE = ['draft', 'issued', 'confirmed'];
+
     /**
-     * Create a standalone or PR-linked Purchase Order.
+     * Create a purchase order. Each item: product_variant_id, sku, product_name, ordered_quantity, unit_cost,
+     * and optionally uom, notes and purchase_requisition_item_id (set when the line comes from a requisition).
+     *
+     * @param  array<string, mixed>  $data  validated input
      */
     public function createPurchaseOrder(array $data, User $user): PurchaseOrder
     {
+        if (empty($data['items'])) {
+            throw ValidationException::withMessages(['items' => 'At least one line item is required for a purchase order.']);
+        }
+
         return DB::transaction(function () use ($data, $user) {
             $orgId = $user->currentOrganization()->id;
-            $poNumber = $this->generatePoNumber($orgId);
-
-            $itemsData = $data['items'] ?? [];
-            if (empty($itemsData)) {
-                throw ValidationException::withMessages([
-                    'items' => 'At least one line item is required for a purchase order.',
-                ]);
-            }
-
-            $subtotal = 0.00;
-            foreach ($itemsData as $item) {
-                $qty = max(1, (int) ($item['ordered_quantity'] ?? 1));
-                $cost = (float) ($item['unit_cost'] ?? 0.00);
-                $subtotal += ($qty * $cost);
-            }
-
-            $taxRate = isset($data['tax_rate']) ? (float) $data['tax_rate'] : 0.00;
-            $taxAmount = $subtotal * ($taxRate / 100);
-            $totalAmount = $subtotal + $taxAmount;
-
+            $lines = array_map(fn (array $item) => $item + ['total_cost' => round((int) $item['ordered_quantity'] * (float) $item['unit_cost'], 2)], $data['items']);
+            $subtotal = array_sum(array_column($lines, 'total_cost'));
+            $taxAmount = round($subtotal * (float) ($data['tax_rate'] ?? 0) / 100, 2);
             $status = $data['status'] ?? 'issued';
 
             $po = PurchaseOrder::create([
                 'organization_id' => $orgId,
-                'po_number' => $poNumber,
+                'po_number' => PurchaseOrder::nextNumber($orgId),
                 'purchase_requisition_id' => $data['purchase_requisition_id'] ?? null,
                 'supplier_name' => $data['supplier_name'],
                 'supplier_email' => $data['supplier_email'] ?? null,
@@ -56,28 +52,23 @@ class PurchaseOrderService
                 'currency' => $data['currency'] ?? 'USD',
                 'subtotal' => $subtotal,
                 'tax_amount' => $taxAmount,
-                'total_amount' => $totalAmount,
+                'total_amount' => $subtotal + $taxAmount,
                 'notes' => $data['notes'] ?? null,
                 'issued_at' => $status === 'issued' ? now() : null,
             ]);
 
-            foreach ($itemsData as $item) {
-                $qty = max(1, (int) ($item['ordered_quantity'] ?? 1));
-                $cost = (float) ($item['unit_cost'] ?? 0.00);
-                $lineTotal = $qty * $cost;
-
-                PurchaseOrderItem::create([
-                    'purchase_order_id' => $po->id,
-                    'purchase_requisition_item_id' => $item['purchase_requisition_item_id'] ?? null,
-                    'product_variant_id' => $item['product_variant_id'],
-                    'sku' => $item['sku'] ?? 'SKU',
-                    'product_name' => $item['product_name'] ?? 'Product Variant',
-                    'ordered_quantity' => $qty,
+            foreach ($lines as $line) {
+                $po->items()->create([
+                    'purchase_requisition_item_id' => $line['purchase_requisition_item_id'] ?? null,
+                    'product_variant_id' => $line['product_variant_id'],
+                    'sku' => $line['sku'],
+                    'product_name' => $line['product_name'],
+                    'ordered_quantity' => (int) $line['ordered_quantity'],
                     'received_quantity' => 0,
-                    'unit_cost' => $cost,
-                    'total_cost' => $lineTotal,
-                    'uom' => $item['uom'] ?? 'pcs',
-                    'notes' => $item['notes'] ?? null,
+                    'unit_cost' => (float) $line['unit_cost'],
+                    'total_cost' => $line['total_cost'],
+                    'uom' => $line['uom'] ?? 'pcs',
+                    'notes' => $line['notes'] ?? null,
                 ]);
             }
 
@@ -86,51 +77,52 @@ class PurchaseOrderService
     }
 
     /**
-     * Mark Purchase Order as issued to supplier.
+     * Mark a draft purchase order as issued to the supplier.
      */
     public function issuePurchaseOrder(PurchaseOrder $po, User $user): PurchaseOrder
     {
         if ($po->status !== 'draft') {
-            throw new InvalidArgumentException("Purchase order #{$po->po_number} is already {$po->status}.");
+            throw ValidationException::withMessages(['status' => "Purchase order #{$po->po_number} is already {$po->status}."]);
         }
 
-        $po->update([
-            'status' => 'issued',
-            'issued_at' => now(),
-        ]);
+        $po->update(['status' => 'issued', 'issued_at' => now()]);
 
         return $po->fresh(['items.variant.product', 'warehouse', 'creator', 'requisition']);
     }
 
     /**
-     * Cancel Purchase Order.
+     * Cancel a purchase order before anything is received. Quantities it took from a requisition are
+     * released, so they can be ordered again.
      */
     public function cancelPurchaseOrder(PurchaseOrder $po, User $user, ?string $reason = null): PurchaseOrder
     {
-        if (in_array($po->status, ['cancelled', 'received'])) {
-            throw new InvalidArgumentException("Purchase order #{$po->po_number} cannot be cancelled because it is {$po->status}.");
-        }
+        return DB::transaction(function () use ($po, $reason) {
+            $po = PurchaseOrder::with('items')->lockForUpdate()->findOrFail($po->id);
 
-        if ($po->items()->where('received_quantity', '>', 0)->exists()) {
-            throw new InvalidArgumentException("Purchase order #{$po->po_number} cannot be cancelled because items have already been received.");
-        }
+            if (! in_array($po->status, self::CANCELLABLE, true)) {
+                throw ValidationException::withMessages(['status' => "Purchase order #{$po->po_number} cannot be cancelled because it is {$po->status}."]);
+            }
 
-        $po->update([
-            'status' => 'cancelled',
-            'cancelled_at' => now(),
-            'notes' => $po->notes . ($reason ? "\nCancellation reason: {$reason}" : "\nCancelled by user"),
-        ]);
+            if ($po->items->contains(fn ($item) => $item->received_quantity > 0)) {
+                throw ValidationException::withMessages(['status' => "Purchase order #{$po->po_number} cannot be cancelled because items have already been received."]);
+            }
 
-        return $po->fresh(['items.variant.product', 'warehouse', 'creator', 'requisition']);
-    }
+            $po->update([
+                'status' => 'cancelled',
+                'cancelled_at' => now(),
+                'notes' => trim($po->notes."\n".($reason ? "Cancellation reason: {$reason}" : 'Cancelled by user')),
+            ]);
 
-    public function generatePoNumber(int $organizationId): string
-    {
-        $year = date('Y');
-        $count = PurchaseOrder::where('organization_id', $organizationId)
-            ->whereYear('created_at', $year)
-            ->count() + 1;
+            foreach ($po->items->whereNotNull('purchase_requisition_item_id') as $item) {
+                $requisitionItem = PurchaseRequisitionItem::lockForUpdate()->find($item->purchase_requisition_item_id);
+                $requisitionItem?->update(['ordered_quantity' => max(0, $requisitionItem->ordered_quantity - $item->ordered_quantity)]);
+            }
 
-        return sprintf('PO-%s-%04d', $year, $count);
+            if ($po->purchase_requisition_id) {
+                PurchaseRequisition::find($po->purchase_requisition_id)?->refreshOrderStatus();
+            }
+
+            return $po->fresh(['items.variant.product', 'warehouse', 'creator', 'requisition']);
+        });
     }
 }

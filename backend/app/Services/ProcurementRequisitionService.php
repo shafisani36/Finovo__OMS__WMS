@@ -2,54 +2,49 @@
 
 namespace App\Services;
 
-use App\Models\Organization;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderItem;
 use App\Models\PurchaseRequisition;
 use App\Models\PurchaseRequisitionApproval;
-use App\Models\PurchaseRequisitionItem;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
-use InvalidArgumentException;
 
+/**
+ * Purchase requisitions: draft → submitted → approved or rejected → (partially) ordered through purchase orders.
+ * Every step is recorded in the requisition's approval history.
+ */
 class ProcurementRequisitionService
 {
+    private const RELATIONS = ['items.variant.product', 'requester', 'approver', 'rejecter', 'warehouse', 'approvals.user'];
+
     public function __construct(
-        protected InventoryEngine $inventoryEngine
+        protected InventoryEngine $inventoryEngine,
+        protected PurchaseOrderService $purchaseOrders,
     ) {}
 
     /**
-     * Create a new purchase requisition.
+     * Create a draft requisition.
+     *
+     * @param  array<string, mixed>  $data  validated input
      */
     public function createRequisition(array $data, User $requester): PurchaseRequisition
     {
+        if (empty($data['items'])) {
+            throw ValidationException::withMessages(['items' => 'At least one line item is required for a purchase requisition.']);
+        }
+
         return DB::transaction(function () use ($data, $requester) {
             $orgId = $requester->currentOrganization()->id;
-            $prNumber = $this->generatePrNumber($orgId);
-
-            $subtotal = 0.00;
-            $itemsData = $data['items'] ?? [];
-
-            if (empty($itemsData)) {
-                throw ValidationException::withMessages([
-                    'items' => 'At least one line item is required for a purchase requisition.',
-                ]);
-            }
-
-            foreach ($itemsData as $item) {
-                $qty = (int) ($item['requested_quantity'] ?? 1);
-                $unitPrice = (float) ($item['estimated_unit_price'] ?? 0.00);
-                $subtotal += ($qty * $unitPrice);
-            }
-
-            $taxRate = isset($data['tax_rate']) ? (float) $data['tax_rate'] : 0.00;
-            $taxAmount = $subtotal * ($taxRate / 100);
-            $totalAmount = $subtotal + $taxAmount;
+            $lines = array_map(fn (array $item) => $item + [
+                'estimated_subtotal' => round((int) $item['requested_quantity'] * (float) ($item['estimated_unit_price'] ?? 0), 2),
+            ], $data['items']);
+            $subtotal = array_sum(array_column($lines, 'estimated_subtotal'));
+            $taxAmount = round($subtotal * (float) ($data['tax_rate'] ?? 0) / 100, 2);
 
             $requisition = PurchaseRequisition::create([
                 'organization_id' => $orgId,
-                'pr_number' => $prNumber,
+                'pr_number' => PurchaseRequisition::nextNumber($orgId),
                 'requester_id' => $requester->id,
                 'department' => $data['department'] ?? 'General Procurement',
                 'warehouse_id' => $data['warehouse_id'],
@@ -62,334 +57,223 @@ class ProcurementRequisitionService
                 'notes' => $data['notes'] ?? null,
                 'subtotal' => $subtotal,
                 'tax_amount' => $taxAmount,
-                'total_amount' => $totalAmount,
+                'total_amount' => $subtotal + $taxAmount,
                 'currency' => $data['currency'] ?? 'USD',
             ]);
 
-            foreach ($itemsData as $item) {
-                $qty = max(1, (int) ($item['requested_quantity'] ?? 1));
-                $unitPrice = (float) ($item['estimated_unit_price'] ?? 0.00);
-                $lineSubtotal = $qty * $unitPrice;
-
-                PurchaseRequisitionItem::create([
-                    'purchase_requisition_id' => $requisition->id,
-                    'product_id' => $item['product_id'] ?? null,
-                    'product_variant_id' => $item['product_variant_id'],
-                    'sku' => $item['sku'] ?? 'SKU',
-                    'product_name' => $item['product_name'] ?? 'Product Item',
-                    'requested_quantity' => $qty,
+            foreach ($lines as $line) {
+                $requisition->items()->create([
+                    'product_id' => $line['product_id'] ?? null,
+                    'product_variant_id' => $line['product_variant_id'],
+                    'sku' => $line['sku'],
+                    'product_name' => $line['product_name'],
+                    'requested_quantity' => (int) $line['requested_quantity'],
                     'approved_quantity' => 0,
                     'ordered_quantity' => 0,
-                    'estimated_unit_price' => $unitPrice,
-                    'estimated_subtotal' => $lineSubtotal,
-                    'uom' => $item['uom'] ?? 'pcs',
-                    'notes' => $item['notes'] ?? null,
+                    'estimated_unit_price' => (float) ($line['estimated_unit_price'] ?? 0),
+                    'estimated_subtotal' => $line['estimated_subtotal'],
+                    'uom' => $line['uom'] ?? 'pcs',
+                    'notes' => $line['notes'] ?? null,
                 ]);
             }
 
-            // Record initial audit entry
-            PurchaseRequisitionApproval::create([
-                'purchase_requisition_id' => $requisition->id,
-                'user_id' => $requester->id,
-                'action' => 'created',
-                'comments' => 'Purchase requisition created as draft.',
-                'created_at' => now(),
-            ]);
+            $this->record($requisition, $requester, 'created', 'Purchase requisition created as draft.');
 
-            return $requisition->load(['items.variant.product', 'requester', 'warehouse', 'approvals.user']);
+            return $requisition->load(self::RELATIONS);
         });
     }
 
     /**
-     * Submit purchase requisition for management review.
+     * Send a draft requisition for management approval.
      */
     public function submitRequisition(PurchaseRequisition $requisition, User $user, ?string $comments = null): PurchaseRequisition
     {
-        if ($requisition->status !== 'draft') {
-            throw new InvalidArgumentException("Requisition #{$requisition->pr_number} cannot be submitted because it is currently {$requisition->status}.");
-        }
-
-        if ($requisition->items()->count() === 0) {
-            throw new InvalidArgumentException("Cannot submit an empty requisition.");
-        }
+        $this->ensureStatus($requisition, ['draft'], 'submitted');
 
         return DB::transaction(function () use ($requisition, $user, $comments) {
-            $requisition->status = 'submitted';
-            $requisition->submitted_at = now();
-            $requisition->save();
+            $requisition->update(['status' => 'submitted', 'submitted_at' => now()]);
+            $this->record($requisition, $user, 'submitted', $comments ?: 'Submitted for management authorization.');
 
-            PurchaseRequisitionApproval::create([
-                'purchase_requisition_id' => $requisition->id,
-                'user_id' => $user->id,
-                'action' => 'submitted',
-                'comments' => $comments ?: 'Submitted for management authorization.',
-                'created_at' => now(),
-            ]);
-
-            return $requisition->fresh(['items.variant.product', 'requester', 'approver', 'warehouse', 'approvals.user']);
+            return $requisition->fresh(self::RELATIONS);
         });
     }
 
     /**
-     * Approve purchase requisition with strict Separation of Duties.
+     * Approve a submitted requisition, optionally for smaller quantities than requested ([item ID => quantity]).
+     * The requester cannot approve their own requisition (separation of duties).
+     *
+     * @param  array<int|string, int>|null  $approvedItemQuantities
      */
-    public function approveRequisition(
-        PurchaseRequisition $requisition,
-        User $approver,
-        ?array $approvedItemQuantities = null,
-        ?string $comments = null
-    ): PurchaseRequisition {
-        // Enforce Separation of Duties: Requester cannot approve their own requisition!
+    public function approveRequisition(PurchaseRequisition $requisition, User $approver, ?array $approvedItemQuantities = null, ?string $comments = null): PurchaseRequisition
+    {
         if ($requisition->requester_id === $approver->id) {
             throw ValidationException::withMessages([
                 'approver' => 'Separation of duties violation: You cannot approve your own purchase requisition. An independent authorized manager must review and approve.',
             ]);
         }
 
-        if (! in_array($requisition->status, ['submitted', 'under_review'])) {
-            throw new InvalidArgumentException("Requisition #{$requisition->pr_number} is not pending approval (current status: {$requisition->status}).");
-        }
+        $this->ensureStatus($requisition, ['submitted', 'under_review'], 'approved');
 
         return DB::transaction(function () use ($requisition, $approver, $approvedItemQuantities, $comments) {
-            $subtotal = 0.00;
+            // Keep the tax rate the requisition was raised with when the amounts change.
+            $taxRate = (float) $requisition->subtotal > 0 ? (float) $requisition->tax_amount / (float) $requisition->subtotal : 0.0;
+            $subtotal = 0.0;
 
             foreach ($requisition->items as $item) {
-                // If specific quantities provided, use them; otherwise default to requested quantity
-                $approvedQty = isset($approvedItemQuantities[$item->id])
-                    ? (int) $approvedItemQuantities[$item->id]
-                    : $item->requested_quantity;
-
-                $item->approved_quantity = max(0, $approvedQty);
-                $item->estimated_subtotal = $item->approved_quantity * $item->estimated_unit_price;
-                $item->save();
-
-                $subtotal += $item->estimated_subtotal;
+                // An approver can reduce a quantity, never raise it above what was requested.
+                $approved = min($item->requested_quantity, max(0, (int) ($approvedItemQuantities[$item->id] ?? $item->requested_quantity)));
+                $item->update(['approved_quantity' => $approved, 'estimated_subtotal' => round($approved * (float) $item->estimated_unit_price, 2)]);
+                $subtotal += (float) $item->estimated_subtotal;
             }
 
-            $taxAmount = $subtotal * 0.00; // Recalculate if needed
-            $requisition->subtotal = $subtotal;
-            $requisition->tax_amount = $taxAmount;
-            $requisition->total_amount = $subtotal + $taxAmount;
-            $requisition->status = 'approved';
-            $requisition->approved_at = now();
-            $requisition->approved_by = $approver->id;
-            $requisition->save();
+            if ($requisition->items->every(fn ($item) => $item->approved_quantity === 0)) {
+                throw ValidationException::withMessages(['approved_quantities' => 'Approve at least one item, or reject the requisition instead.']);
+            }
 
-            PurchaseRequisitionApproval::create([
-                'purchase_requisition_id' => $requisition->id,
-                'user_id' => $approver->id,
-                'action' => 'approved',
-                'comments' => $comments ?: 'Approved for procurement conversion.',
-                'created_at' => now(),
+            $taxAmount = round($subtotal * $taxRate, 2);
+            $requisition->update([
+                'subtotal' => $subtotal,
+                'tax_amount' => $taxAmount,
+                'total_amount' => $subtotal + $taxAmount,
+                'status' => 'approved',
+                'approved_at' => now(),
+                'approved_by' => $approver->id,
             ]);
+            $this->record($requisition, $approver, 'approved', $comments ?: 'Approved for procurement conversion.');
 
-            return $requisition->fresh(['items.variant.product', 'requester', 'approver', 'warehouse', 'approvals.user']);
+            return $requisition->fresh(self::RELATIONS);
         });
     }
 
-    /**
-     * Reject purchase requisition.
-     */
     public function rejectRequisition(PurchaseRequisition $requisition, User $rejecter, string $reason, ?string $comments = null): PurchaseRequisition
     {
-        if (! in_array($requisition->status, ['submitted', 'under_review', 'draft'])) {
-            throw new InvalidArgumentException("Requisition #{$requisition->pr_number} cannot be rejected from status {$requisition->status}.");
-        }
-
-        if (trim($reason) === '') {
-            throw ValidationException::withMessages([
-                'reason' => 'A specific rejection reason is required.',
-            ]);
-        }
+        $this->ensureStatus($requisition, ['draft', 'submitted', 'under_review'], 'rejected');
 
         return DB::transaction(function () use ($requisition, $rejecter, $reason, $comments) {
-            $requisition->status = 'rejected';
-            $requisition->rejected_at = now();
-            $requisition->rejected_by = $rejecter->id;
-            $requisition->rejection_reason = $reason;
-            $requisition->save();
-
-            PurchaseRequisitionApproval::create([
-                'purchase_requisition_id' => $requisition->id,
-                'user_id' => $rejecter->id,
-                'action' => 'rejected',
-                'comments' => "Rejected: {$reason}".($comments ? " | Notes: {$comments}" : ''),
-                'created_at' => now(),
+            $requisition->update([
+                'status' => 'rejected',
+                'rejected_at' => now(),
+                'rejected_by' => $rejecter->id,
+                'rejection_reason' => $reason,
             ]);
+            $this->record($requisition, $rejecter, 'rejected', "Rejected: {$reason}".($comments ? " | Notes: {$comments}" : ''));
 
-            return $requisition->fresh(['items.variant.product', 'requester', 'rejecter', 'warehouse', 'approvals.user']);
+            return $requisition->fresh(self::RELATIONS);
         });
     }
 
     /**
-     * Convert an approved Purchase Requisition to a Purchase Order.
+     * Raise a purchase order for an approved requisition. Without item choices, everything approved and not yet
+     * ordered goes on the order; with them ([purchase_requisition_item_id, ordered_quantity, unit_cost?]),
+     * each quantity may not exceed what is still left to order.
+     *
+     * @param  array<string, mixed>  $data  validated input (supplier and order details, optional items)
      */
     public function convertToPurchaseOrder(PurchaseRequisition $requisition, array $data, User $user): PurchaseOrder
     {
-        if (! in_array($requisition->status, ['approved', 'partially_ordered'])) {
-            throw new InvalidArgumentException("Only approved or partially ordered requisitions can be converted into purchase orders (current status: {$requisition->status}).");
-        }
-
         return DB::transaction(function () use ($requisition, $data, $user) {
-            $orgId = $requisition->organization_id;
-            $poNumber = $this->generatePoNumber($orgId);
+            // Locked so two people converting at once cannot order the same quantities twice.
+            $requisition = PurchaseRequisition::with('items')->lockForUpdate()->findOrFail($requisition->id);
+            $this->ensureStatus($requisition, ['approved', 'partially_ordered'], 'converted into a purchase order');
 
-            $po = PurchaseOrder::create([
-                'organization_id' => $orgId,
-                'po_number' => $poNumber,
-                'purchase_requisition_id' => $requisition->id,
-                'supplier_name' => $data['supplier_name'],
-                'supplier_email' => $data['supplier_email'] ?? null,
-                'supplier_contact' => $data['supplier_contact'] ?? null,
-                'warehouse_id' => $data['warehouse_id'] ?? $requisition->warehouse_id,
-                'created_by_user_id' => $user->id,
-                'status' => 'issued',
-                'order_date' => $data['order_date'] ?? now()->toDateString(),
-                'expected_delivery_date' => $data['expected_delivery_date'] ?? null,
-                'payment_terms' => $data['payment_terms'] ?? 'Net 30',
-                'currency' => $data['currency'] ?? $requisition->currency,
-                'notes' => $data['notes'] ?? "Generated from Requisition #{$requisition->pr_number}",
-                'issued_at' => now(),
-            ]);
+            $choices = collect($data['items'] ?? [])->keyBy('purchase_requisition_item_id');
+            $lines = [];
 
-            $subtotal = 0.00;
-            $selectedItems = $data['items'] ?? [];
+            foreach ($requisition->items as $item) {
+                $choice = $choices->get($item->id);
+                $quantity = $choices->isEmpty() ? $item->remaining_quantity : (int) ($choice['ordered_quantity'] ?? 0);
 
-            // If no specific item mapping provided, default to ordering all remaining approved quantities
-            if (empty($selectedItems)) {
-                foreach ($requisition->items as $prItem) {
-                    $remaining = $prItem->remaining_quantity;
-                    if ($remaining > 0) {
-                        $selectedItems[] = [
-                            'purchase_requisition_item_id' => $prItem->id,
-                            'ordered_quantity' => $remaining,
-                            'unit_cost' => $prItem->estimated_unit_price,
-                        ];
-                    }
-                }
-            }
-
-            if (empty($selectedItems)) {
-                throw ValidationException::withMessages([
-                    'items' => 'No remaining approved quantities are available to convert into a purchase order.',
-                ]);
-            }
-
-            foreach ($selectedItems as $itemInput) {
-                /** @var PurchaseRequisitionItem $prItem */
-                $prItem = $requisition->items()->findOrFail($itemInput['purchase_requisition_item_id']);
-                $orderQty = (int) $itemInput['ordered_quantity'];
-                $remaining = $prItem->remaining_quantity;
-
-                if ($orderQty <= 0) {
+                if ($quantity <= 0) {
                     continue;
                 }
 
-                if ($orderQty > $remaining) {
+                if ($quantity > $item->remaining_quantity) {
                     throw ValidationException::withMessages([
-                        'items' => "Requested order quantity ({$orderQty}) for SKU {$prItem->sku} exceeds remaining approved quantity ({$remaining}).",
+                        'items' => "Requested order quantity ({$quantity}) for SKU {$item->sku} exceeds remaining approved quantity ({$item->remaining_quantity}).",
                     ]);
                 }
 
-                $unitCost = isset($itemInput['unit_cost']) ? (float) $itemInput['unit_cost'] : (float) $prItem->estimated_unit_price;
-                $lineTotal = $orderQty * $unitCost;
-
-                PurchaseOrderItem::create([
-                    'purchase_order_id' => $po->id,
-                    'purchase_requisition_item_id' => $prItem->id,
-                    'product_variant_id' => $prItem->product_variant_id,
-                    'sku' => $prItem->sku,
-                    'product_name' => $prItem->product_name,
-                    'ordered_quantity' => $orderQty,
-                    'received_quantity' => 0,
-                    'unit_cost' => $unitCost,
-                    'total_cost' => $lineTotal,
-                    'uom' => $prItem->uom,
-                    'notes' => $itemInput['notes'] ?? null,
-                ]);
-
-                // Increment ordered quantity on PR item
-                $prItem->ordered_quantity += $orderQty;
-                $prItem->save();
-
-                $subtotal += $lineTotal;
+                $lines[] = [
+                    'purchase_requisition_item_id' => $item->id,
+                    'product_variant_id' => $item->product_variant_id,
+                    'sku' => $item->sku,
+                    'product_name' => $item->product_name,
+                    'ordered_quantity' => $quantity,
+                    'unit_cost' => $choice['unit_cost'] ?? $item->estimated_unit_price,
+                    'uom' => $item->uom,
+                ];
+                $item->update(['ordered_quantity' => $item->ordered_quantity + $quantity]);
             }
 
-            $taxRate = isset($data['tax_rate']) ? (float) $data['tax_rate'] : 0.00;
-            $taxAmount = $subtotal * ($taxRate / 100);
-            $po->subtotal = $subtotal;
-            $po->tax_amount = $taxAmount;
-            $po->total_amount = $subtotal + $taxAmount;
-            $po->save();
-
-            // Check if PR is fully ordered or partially ordered
-            $allFulfilled = true;
-            foreach ($requisition->items()->get() as $item) {
-                if ($item->remaining_quantity > 0) {
-                    $allFulfilled = false;
-                    break;
-                }
+            if ($lines === []) {
+                throw ValidationException::withMessages(['items' => 'No remaining approved quantities are available to convert into a purchase order.']);
             }
 
-            $requisition->status = $allFulfilled ? 'ordered' : 'partially_ordered';
-            $requisition->save();
-
-            PurchaseRequisitionApproval::create([
+            $po = $this->purchaseOrders->createPurchaseOrder([
+                ...$data,
                 'purchase_requisition_id' => $requisition->id,
-                'user_id' => $user->id,
-                'action' => 'converted_to_po',
-                'comments' => "Converted to Purchase Order #{$po->po_number}".($allFulfilled ? ' (Fully Ordered)' : ' (Partially Ordered)'),
-                'created_at' => now(),
-            ]);
+                'warehouse_id' => $data['warehouse_id'] ?? $requisition->warehouse_id,
+                'currency' => $data['currency'] ?? $requisition->currency,
+                'notes' => $data['notes'] ?? "Generated from Requisition #{$requisition->pr_number}",
+                'items' => $lines,
+            ], $user);
+
+            $requisition->refreshOrderStatus();
+            $this->record($requisition, $user, 'converted_to_po', "Converted to Purchase Order #{$po->po_number}".($requisition->status === 'ordered' ? ' (Fully Ordered)' : ' (Partially Ordered)'));
 
             return $po->load(['items.variant.product', 'requisition', 'warehouse', 'creator']);
         });
     }
 
     /**
-     * Enrich requisition items with real-time stock planning context from inventory engine.
+     * Stock of a variant in a warehouse, plus what is already on open purchase orders, to help size a requisition.
+     *
+     * @return array{on_hand: int, reserved: int, available: int, damaged: int, quarantined: int, on_order: int}
      */
     public function getStockPlanningContext(int $organizationId, int $warehouseId, int $productVariantId): array
     {
-        $avail = $this->inventoryEngine->getAvailability($organizationId, $warehouseId, $productVariantId);
+        $availability = $this->inventoryEngine->getAvailability($organizationId, $warehouseId, $productVariantId);
 
-        // Calculate on-order quantity from open POs
-        $onOrder = (int) PurchaseOrderItem::whereHas('purchaseOrder', function ($q) use ($organizationId, $warehouseId) {
-            $q->where('organization_id', $organizationId)
-                ->where('warehouse_id', $warehouseId)
-                ->whereIn('status', ['draft', 'issued', 'confirmed', 'partially_received']);
-        })
+        $onOrder = (int) PurchaseOrderItem::whereHas('purchaseOrder', fn ($q) => $q
+            ->where('organization_id', $organizationId)
+            ->where('warehouse_id', $warehouseId)
+            ->whereIn('status', ['draft', 'issued', 'confirmed', 'partially_received']))
             ->where('product_variant_id', $productVariantId)
-            ->selectRaw('SUM(ordered_quantity - received_quantity) as total_on_order')
-            ->value('total_on_order') ?? 0;
+            ->sum(DB::raw('ordered_quantity - received_quantity'));
 
         return [
-            'on_hand' => $avail['on_hand'],
-            'reserved' => $avail['reserved'],
-            'available' => $avail['available'],
-            'damaged' => $avail['damaged'],
-            'quarantined' => $avail['quarantined'],
+            'on_hand' => $availability['on_hand'],
+            'reserved' => $availability['reserved'],
+            'available' => $availability['available'],
+            'damaged' => $availability['damaged'],
+            'quarantined' => $availability['quarantined'],
             'on_order' => max(0, $onOrder),
         ];
     }
 
-    protected function generatePrNumber(int $organizationId): string
+    /**
+     * @param  list<string>  $allowed
+     */
+    private function ensureStatus(PurchaseRequisition $requisition, array $allowed, string $action): void
     {
-        $year = date('Y');
-        $count = PurchaseRequisition::where('organization_id', $organizationId)
-            ->whereYear('created_at', $year)
-            ->count() + 1;
-
-        return sprintf('PR-%s-%04d', $year, $count);
+        if (! in_array($requisition->status, $allowed, true)) {
+            throw ValidationException::withMessages([
+                'status' => "Requisition #{$requisition->pr_number} cannot be {$action} because it is {$requisition->status}.",
+            ]);
+        }
     }
 
-    protected function generatePoNumber(int $organizationId): string
+    /**
+     * Add a step to the requisition's approval history.
+     */
+    private function record(PurchaseRequisition $requisition, User $user, string $action, string $comments): void
     {
-        $year = date('Y');
-        $count = PurchaseOrder::where('organization_id', $organizationId)
-            ->whereYear('created_at', $year)
-            ->count() + 1;
-
-        return sprintf('PO-%s-%04d', $year, $count);
+        PurchaseRequisitionApproval::create([
+            'purchase_requisition_id' => $requisition->id,
+            'user_id' => $user->id,
+            'action' => $action,
+            'comments' => $comments,
+            'created_at' => now(),
+        ]);
     }
 }

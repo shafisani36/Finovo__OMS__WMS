@@ -1,5 +1,6 @@
-import React from 'react';
-import { X } from 'lucide-react';
+import React, { useState } from 'react';
+import { Download, Loader2, X } from 'lucide-react';
+import omsService from '../../services/omsService';
 import type { OrderModel } from '../../services/omsService';
 import { platformLabel } from '../stores/storePlatforms';
 import ProductThumb from './ProductThumb';
@@ -9,6 +10,20 @@ import './DetailModal.css';
 
 export const OrderDetailModal: React.FC<{ order: OrderModel; onClose: () => void }> = ({ order, onClose }) => {
   const items = order.items ?? [];
+  const [downloading, setDownloading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const downloadInvoice = async () => {
+    setDownloading(true);
+    setError(null);
+    try {
+      await omsService.downloadOrderInvoice(order.id, order.order_number);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not download the invoice.');
+    } finally {
+      setDownloading(false);
+    }
+  };
   const addressText = addressLines(order.shipping_address).join(', ');
 
   return (
@@ -22,12 +37,21 @@ export const OrderDetailModal: React.FC<{ order: OrderModel; onClose: () => void
               {order.placed_at ? ` · ${new Date(order.placed_at).toLocaleString()}` : ''}
             </div>
           </div>
-          <button onClick={onClose} className="btn-finovo-secondary" style={{ padding: 6 }} aria-label="Close">
-            <X size={18} />
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {order.order_status !== 'cancelled' && (
+              <button onClick={downloadInvoice} className="btn-finovo-primary" disabled={downloading}>
+                {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                <span>{order.invoice_number ? `Invoice ${order.invoice_number}` : 'Download Invoice'}</span>
+              </button>
+            )}
+            <button onClick={onClose} className="btn-finovo-secondary" style={{ padding: 6 }} aria-label="Close">
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         <div className="detail-modal-body">
+          {error && <div className="detail-error">{error}</div>}
           <div className="detail-modal-facts">
             <div>
               <div className="detail-fact-label">Customer</div>

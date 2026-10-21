@@ -533,6 +533,103 @@ class PurchaseRequisitionAndGrnTest extends TestCase
         $this->assertStringContainsString($grn->grn_number, $grnPdfResponse->headers->get('content-disposition'));
     }
 
+    public function test_documents_cannot_use_another_organizations_warehouse_location_or_product(): void
+    {
+        $line = ['product_variant_id' => $this->variant1->id, 'sku' => 'X', 'product_name' => 'X', 'requested_quantity' => 1];
+
+        // Org B points a requisition and a purchase order at Org A's warehouse and product
+        $this->actingAs($this->userB, 'sanctum')->postJson('/api/v1/purchase-requisitions', ['warehouse_id' => $this->warehouseA->id, 'items' => [$line]])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['warehouse_id', 'items.0.product_variant_id']);
+        $this->actingAs($this->userB, 'sanctum')->postJson('/api/v1/purchase-orders', [
+            'supplier_name' => 'Acme', 'warehouse_id' => $this->warehouseA->id,
+            'items' => [['product_variant_id' => $this->variant1->id, 'sku' => 'X', 'product_name' => 'X', 'ordered_quantity' => 1, 'unit_cost' => 1]],
+        ])->assertStatus(422)->assertJsonValidationErrors(['warehouse_id', 'items.0.product_variant_id']);
+        $this->actingAs($this->userB, 'sanctum')->getJson("/api/v1/purchase-requisitions/stock-context?warehouse_id={$this->warehouseA->id}&variant_id={$this->variant1->id}")
+            ->assertStatus(422);
+
+        // The delivery location must be in the requisition's own warehouse
+        $otherWarehouse = Warehouse::create(['organization_id' => $this->orgA->id, 'name' => 'North', 'code' => 'WH-N']);
+        $this->actingAs($this->requesterA, 'sanctum')->postJson('/api/v1/purchase-requisitions', [
+            'warehouse_id' => $otherWarehouse->id, 'delivery_location_id' => $this->dockLocation->id, 'items' => [$line],
+        ])->assertStatus(422)->assertJsonValidationErrors(['delivery_location_id']);
+    }
+
+    public function test_approving_smaller_quantities_keeps_the_tax_rate_and_never_exceeds_the_request(): void
+    {
+        $id = $this->actingAs($this->requesterA, 'sanctum')->postJson('/api/v1/purchase-requisitions', [
+            'warehouse_id' => $this->warehouseA->id,
+            'tax_rate' => 10,
+            'items' => [
+                ['product_variant_id' => $this->variant1->id, 'sku' => 'A', 'product_name' => 'A', 'requested_quantity' => 10, 'estimated_unit_price' => 100],
+                ['product_variant_id' => $this->variant2->id, 'sku' => 'B', 'product_name' => 'B', 'requested_quantity' => 5, 'estimated_unit_price' => 100],
+            ],
+        ])->json('data.id');
+        $this->actingAs($this->requesterA, 'sanctum')->postJson("/api/v1/purchase-requisitions/{$id}/submit");
+        $items = PurchaseRequisition::findOrFail($id)->items->pluck('id');
+
+        // 4 of the first item, 99 of the second (capped at the 5 requested): 900 + 10% tax
+        $this->actingAs($this->managerA, 'sanctum')->postJson("/api/v1/purchase-requisitions/{$id}/approve", [
+            'approved_quantities' => [$items[0] => 4, $items[1] => 99],
+        ])->assertOk();
+
+        $this->assertDatabaseHas('purchase_requisitions', ['id' => $id, 'subtotal' => 900, 'tax_amount' => 90, 'total_amount' => 990]);
+        $this->assertSame([4, 5], PurchaseRequisition::findOrFail($id)->items->pluck('approved_quantity')->all());
+    }
+
+    public function test_cancelling_a_purchase_order_releases_the_requisition_quantities(): void
+    {
+        $pr = $this->createDraftPr();
+        $this->actingAs($this->requesterA, 'sanctum')->postJson("/api/v1/purchase-requisitions/{$pr->id}/submit");
+        $this->actingAs($this->managerA, 'sanctum')->postJson("/api/v1/purchase-requisitions/{$pr->id}/approve");
+        $poId = $this->actingAs($this->managerA, 'sanctum')->postJson("/api/v1/purchase-requisitions/{$pr->id}/convert-po", ['supplier_name' => 'Zebra'])
+            ->assertCreated()
+            ->json('data.id');
+        $this->assertSame('ordered', $pr->fresh()->status);
+
+        $this->actingAs($this->managerA, 'sanctum')->postJson("/api/v1/purchase-orders/{$poId}/cancel", ['reason' => 'Supplier out of stock'])->assertOk();
+
+        $this->assertSame('approved', $pr->fresh()->status);
+        $this->assertSame([10, 5], $pr->fresh()->items->map->remaining_quantity->all());
+
+        // The released quantities can be ordered again
+        $this->actingAs($this->managerA, 'sanctum')->postJson("/api/v1/purchase-requisitions/{$pr->id}/convert-po", ['supplier_name' => 'Other supplier'])->assertCreated();
+    }
+
+    public function test_actions_in_the_wrong_status_are_refused_with_a_message(): void
+    {
+        $pr = $this->createDraftPr();
+        $this->actingAs($this->managerA, 'sanctum')->postJson("/api/v1/purchase-requisitions/{$pr->id}/approve")
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['status']);
+        $this->actingAs($this->managerA, 'sanctum')->postJson("/api/v1/purchase-requisitions/{$pr->id}/convert-po", ['supplier_name' => 'Zebra'])
+            ->assertStatus(422);
+
+        $po = $this->createSamplePo();
+        $this->actingAs($this->managerA, 'sanctum')->postJson("/api/v1/purchase-orders/{$po->id}/issue")
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['status']);
+    }
+
+    public function test_an_item_approved_at_zero_cannot_be_ordered_and_numbers_continue_after_deletions(): void
+    {
+        $pr = $this->createDraftPr();
+        $pr->update(['status' => 'submitted']);
+        [$first, $second] = $pr->items->pluck('id')->all();
+        $this->actingAs($this->managerA, 'sanctum')->postJson("/api/v1/purchase-requisitions/{$pr->id}/approve", ['approved_quantities' => [$first => 10, $second => 0]])->assertOk();
+
+        $this->actingAs($this->managerA, 'sanctum')->postJson("/api/v1/purchase-requisitions/{$pr->id}/convert-po", [
+            'supplier_name' => 'Zebra',
+            'items' => [['purchase_requisition_item_id' => $second, 'ordered_quantity' => 1]],
+        ])->assertStatus(422);
+
+        // Two orders, the first deleted: the next number does not collide with the second
+        $this->createSamplePo();
+        PurchaseOrder::create(['organization_id' => $this->orgA->id, 'po_number' => 'PO-'.now()->year.'-0002', 'supplier_name' => 'S', 'warehouse_id' => $this->warehouseA->id, 'created_by_user_id' => $this->managerA->id, 'status' => 'issued', 'order_date' => now()]);
+        PurchaseOrder::where('po_number', 'PO-2026-0001')->delete(); // the sample order
+        $this->assertSame('PO-'.now()->year.'-0003', PurchaseOrder::nextNumber($this->orgA->id));
+    }
+
     protected function createDraftPr(): PurchaseRequisition
     {
         $pr = PurchaseRequisition::create([

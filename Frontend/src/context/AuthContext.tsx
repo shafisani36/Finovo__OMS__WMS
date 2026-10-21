@@ -3,6 +3,8 @@ import type { User } from '../types/auth';
 import { authService } from '../services/authService';
 import { getAuthToken, setAuthToken } from '../services/apiClient';
 
+export const STOCK_ALERTS_ON_LOGIN_KEY = 'finovo_show_stock_alerts';
+
 interface AuthContextType {
   user: User | null;
   token: string | null;
@@ -35,6 +37,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setTokenState(newToken);
     setAuthToken(newToken, remember);
     try {
+      // The stock alerts open by themselves once after every login (see StockAlertsBell).
+      sessionStorage.setItem(STOCK_ALERTS_ON_LOGIN_KEY, '1');
       const serialized = JSON.stringify(newUser);
       if (remember) {
         localStorage.setItem(USER_STORAGE_KEY, serialized);

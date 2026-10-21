@@ -72,4 +72,20 @@ class PurchaseOrder extends Model
     {
         return $this->hasMany(GoodsReceivedNote::class);
     }
+
+    /**
+     * Next purchase order number for the organization: PO-2026-0001, PO-2026-0002, ...
+     * The highest existing number is locked, so two orders created together get different numbers.
+     */
+    public static function nextNumber(int $organizationId): string
+    {
+        $prefix = 'PO-'.now()->year.'-';
+        $last = static::where('organization_id', $organizationId)
+            ->where('po_number', 'like', $prefix.'%')
+            ->orderByDesc('po_number')
+            ->lockForUpdate()
+            ->value('po_number');
+
+        return $prefix.str_pad((string) ((int) substr((string) $last, strlen($prefix)) + 1), 4, '0', STR_PAD_LEFT);
+    }
 }

@@ -121,7 +121,7 @@ export const PurchaseOrdersPage: React.FC = () => {
       setPurchaseOrders(res.data || []);
       setPoKpis(res.kpis || {});
     } catch (e: any) {
-      setErrorBanner(e.response?.data?.message || 'Failed to fetch purchase orders.');
+      setErrorBanner(e?.message || 'Failed to fetch purchase orders.');
     } finally {
       setIsLoading(false);
     }
@@ -136,7 +136,7 @@ export const PurchaseOrdersPage: React.FC = () => {
       setRequisitions(res.data || []);
       setPrKpis(res.kpis || {});
     } catch (e: any) {
-      setErrorBanner(e.response?.data?.message || 'Failed to fetch purchase requisitions.');
+      setErrorBanner(e?.message || 'Failed to fetch purchase requisitions.');
     } finally {
       setIsLoading(false);
     }
@@ -151,7 +151,7 @@ export const PurchaseOrdersPage: React.FC = () => {
       setGrns(res.data || []);
       setGrnKpis(res.kpis || {});
     } catch (e: any) {
-      setErrorBanner(e.response?.data?.message || 'Failed to fetch goods received notes.');
+      setErrorBanner(e?.message || 'Failed to fetch goods received notes.');
     } finally {
       setIsLoading(false);
     }
@@ -307,7 +307,7 @@ export const PurchaseOrdersPage: React.FC = () => {
       setShowCreatePrModal(false);
       fetchRequisitions();
     } catch (e: any) {
-      showNotification(e.response?.data?.message || 'Failed to save requisition.', true);
+      showNotification(e?.message || 'Failed to save requisition.', true);
     } finally {
       setIsSubmitting(false);
     }
@@ -322,7 +322,7 @@ export const PurchaseOrdersPage: React.FC = () => {
       setSelectedPr(res.data);
       setShowViewPrModal(true);
     } catch (e: any) {
-      showNotification(e.response?.data?.message || 'Failed to load requisition details.', true);
+      showNotification(e?.message || 'Failed to load requisition details.', true);
     }
   };
 
@@ -335,7 +335,7 @@ export const PurchaseOrdersPage: React.FC = () => {
         handleViewPr(id);
       }
     } catch (e: any) {
-      showNotification(e.response?.data?.message || 'Failed to submit requisition.', true);
+      showNotification(e?.message || 'Failed to submit requisition.', true);
     }
   };
 
@@ -356,7 +356,7 @@ export const PurchaseOrdersPage: React.FC = () => {
         handleViewPr(pr.id);
       }
     } catch (e: any) {
-      showNotification(e.response?.data?.message || 'Failed to approve requisition.', true);
+      showNotification(e?.message || 'Failed to approve requisition.', true);
     }
   };
 
@@ -374,7 +374,7 @@ export const PurchaseOrdersPage: React.FC = () => {
       setShowViewPrModal(false);
       fetchRequisitions();
     } catch (e: any) {
-      showNotification(e.response?.data?.message || 'Failed to reject requisition.', true);
+      showNotification(e?.message || 'Failed to reject requisition.', true);
     }
   };
 
@@ -429,7 +429,7 @@ export const PurchaseOrdersPage: React.FC = () => {
       fetchPurchaseOrders();
       setActiveTab('po');
     } catch (e: any) {
-      showNotification(e.response?.data?.message || 'Failed to convert PR to Purchase Order.', true);
+      showNotification(e?.message || 'Failed to convert PR to Purchase Order.', true);
     } finally {
       setIsSubmitting(false);
     }
@@ -484,7 +484,7 @@ export const PurchaseOrdersPage: React.FC = () => {
       setShowCreatePoModal(false);
       fetchPurchaseOrders();
     } catch (e: any) {
-      showNotification(e.response?.data?.message || 'Failed to create PO.', true);
+      showNotification(e?.message || 'Failed to create PO.', true);
     } finally {
       setIsSubmitting(false);
     }
@@ -496,7 +496,7 @@ export const PurchaseOrdersPage: React.FC = () => {
       setSelectedPo(res.data);
       setShowViewPoModal(true);
     } catch (e: any) {
-      showNotification(e.response?.data?.message || 'Failed to load PO details.', true);
+      showNotification(e?.message || 'Failed to load PO details.', true);
     }
   };
 
@@ -592,7 +592,7 @@ export const PurchaseOrdersPage: React.FC = () => {
       fetchPurchaseOrders();
       setActiveTab('grn');
     } catch (e: any) {
-      showNotification(e.response?.data?.message || 'Failed to create GRN.', true);
+      showNotification(e?.message || 'Failed to create GRN.', true);
     } finally {
       setIsSubmitting(false);
     }
@@ -617,7 +617,7 @@ export const PurchaseOrdersPage: React.FC = () => {
         handleViewGrn(grn.id);
       }
     } catch (e: any) {
-      showNotification(e.response?.data?.message || 'Failed to post GRN to inventory.', true);
+      showNotification(e?.message || 'Failed to post GRN to inventory.', true);
     } finally {
       setIsSubmitting(false);
     }
@@ -629,7 +629,7 @@ export const PurchaseOrdersPage: React.FC = () => {
       setSelectedGrn(res.data);
       setShowViewGrnModal(true);
     } catch (e: any) {
-      showNotification(e.response?.data?.message || 'Failed to load GRN details.', true);
+      showNotification(e?.message || 'Failed to load GRN details.', true);
     }
   };
 
@@ -666,7 +666,7 @@ export const PurchaseOrdersPage: React.FC = () => {
         handleViewGrn(selectedGrn.id);
       }
     } catch (e: any) {
-      showNotification(e.response?.data?.message || 'Failed to record inspection.', true);
+      showNotification(e?.message || 'Failed to record inspection.', true);
     } finally {
       setIsSubmitting(false);
     }
@@ -783,7 +783,7 @@ export const PurchaseOrdersPage: React.FC = () => {
         gap: 12,
         flexWrap: 'wrap',
       }}>
-        <div style={{ display: 'flex', gap: 4, overflowX: 'auto', maxWidth: '100%' }}>
+        <div className="procurement-tabs" role="tablist">
           <button
             onClick={() => setActiveTab('po')}
             className={`procurement-tab-btn ${activeTab === 'po' ? 'is-active' : ''}`}

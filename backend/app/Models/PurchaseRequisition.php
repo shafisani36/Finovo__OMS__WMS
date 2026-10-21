@@ -90,4 +90,35 @@ class PurchaseRequisition extends Model
     {
         return $this->hasMany(PurchaseOrder::class);
     }
+
+    /**
+     * Status after purchase orders were raised or cancelled: ordered when nothing approved is left to order,
+     * partially ordered when some is, approved again when every purchase order was cancelled.
+     */
+    public function refreshOrderStatus(): void
+    {
+        $items = $this->items()->get();
+
+        $this->update(['status' => match (true) {
+            $items->every(fn (PurchaseRequisitionItem $item) => $item->remaining_quantity === 0) => 'ordered',
+            $items->contains(fn (PurchaseRequisitionItem $item) => $item->ordered_quantity > 0) => 'partially_ordered',
+            default => 'approved',
+        }]);
+    }
+
+    /**
+     * Next requisition number for the organization: PR-2026-0001, PR-2026-0002, ...
+     * The highest existing number is locked, so two requisitions created together get different numbers.
+     */
+    public static function nextNumber(int $organizationId): string
+    {
+        $prefix = 'PR-'.now()->year.'-';
+        $last = static::where('organization_id', $organizationId)
+            ->where('pr_number', 'like', $prefix.'%')
+            ->orderByDesc('pr_number')
+            ->lockForUpdate()
+            ->value('pr_number');
+
+        return $prefix.str_pad((string) ((int) substr((string) $last, strlen($prefix)) + 1), 4, '0', STR_PAD_LEFT);
+    }
 }

@@ -1399,8 +1399,45 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
   background-color: #f8fafc;
   flex-shrink: 0;
+}
+
+/* The shared auth buttons stretch to full width; in modal footers they size to their label on one line. */
+.procurement-modal-footer .btn-primary,
+.procurement-modal-footer .btn-outline {
+  width: auto;
+  height: 42px;
+  padding: 0 20px;
+  font-size: 14px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Modal inputs have no leading icon, so they do not need the auth form's icon gap. */
+.procurement-modal .form-input {
+  padding: 0 14px;
+}
+
+.procurement-modal textarea.form-input {
+  height: auto;
+  padding: 10px 14px;
+}
+
+/* Tab row scrolls sideways on narrow screens without showing a scrollbar. */
+.procurement-tabs {
+  display: flex;
+  gap: 4px;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.procurement-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 /* Custom modal scrollbars */
@@ -1690,5 +1727,139 @@ html, body {
   .store-connect-secret {
     flex-direction: column;
     align-items: stretch;
+  }
+}
+
+/* Stock alerts (notification bell) */
+.stock-alerts {
+  position: relative;
+}
+
+.stock-alerts-panel {
+  position: absolute;
+  right: 0;
+  top: 46px;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.14);
+  z-index: 70;
+  overflow: hidden;
+}
+
+.stock-alerts-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.stock-alerts-head span {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.stock-alerts-empty {
+  padding: 24px 16px;
+  font-size: 13px;
+  color: #64748b;
+  text-align: center;
+}
+
+.stock-alerts-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.stock-alerts-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+}
+
+.stock-alerts-list li + li {
+  border-top: 1px solid #f8fafc;
+}
+
+.stock-alerts-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.stock-alerts-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stock-alerts-meta {
+  font-size: 11px;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stock-alerts-qty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.stock-alerts-qty small {
+  font-size: 10px;
+  font-weight: 500;
+  color: #94a3b8;
+}
+
+.stock-alerts-qty.is-out {
+  color: #be123c;
+}
+
+.stock-alerts-qty.is-low {
+  color: #b45309;
+}
+
+.stock-alerts-footer {
+  width: 100%;
+  padding: 11px 16px;
+  border: none;
+  border-top: 1px solid #f1f5f9;
+  background: #f8fafc;
+  color: #1e56ff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.stock-alerts-footer:hover {
+  background: #eff6ff;
+}
+
+@media (max-width: 640px) {
+  .stock-alerts-panel {
+    position: fixed;
+    top: 64px;
+    left: 16px;
+    right: 16px;
+    width: auto;
+    max-width: none;
   }
 }

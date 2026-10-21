@@ -54,9 +54,11 @@ class PurchaseRequisitionItem extends Model
         return $this->hasMany(PurchaseOrderItem::class);
     }
 
+    /**
+     * Approved quantity not yet on a purchase order (nothing can be ordered before approval).
+     */
     public function getRemainingQuantityAttribute(): int
     {
-        $target = $this->approved_quantity > 0 ? $this->approved_quantity : $this->requested_quantity;
-        return max(0, $target - $this->ordered_quantity);
+        return max(0, $this->approved_quantity - $this->ordered_quantity);
     }
 }

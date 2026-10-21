@@ -19,6 +19,7 @@ class Order extends Model
         'store_id',
         'customer_id',
         'order_number',
+        'invoice_number',
         'external_order_id',
         'customer_name',
         'customer_email',
@@ -31,6 +32,7 @@ class Order extends Model
         'currency',
         'notes',
         'placed_at',
+        'invoiced_at',
     ];
 
     protected function casts(): array
@@ -39,6 +41,7 @@ class Order extends Model
             'shipping_address' => 'array',
             'total_amount' => 'decimal:2',
             'placed_at' => 'datetime',
+            'invoiced_at' => 'datetime',
         ];
     }
 
