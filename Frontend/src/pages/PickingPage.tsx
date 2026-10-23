@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useActiveStore } from '../hooks/useActiveStore';
 import {
   Package,
   Layers,
@@ -8,8 +9,10 @@ import {
   Filter,
   Download,
   Info,
-  Loader2
+  Loader2,
+  X
 } from 'lucide-react';
+import { Alert } from '../components/common/Alert';
 import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import DataTable from '../components/common/DataTable';
@@ -27,6 +30,7 @@ export const PickingPage: React.FC = () => {
     ready_to_dispatch: 0,
   });
   const [loading, setLoading] = useState(true);
+  const { activeStore } = useActiveStore();
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
   const [total, setTotal] = useState(0);
@@ -39,11 +43,17 @@ export const PickingPage: React.FC = () => {
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
   const [bulkStatus, setBulkStatus] = useState('in_progress');
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+  const [banner, setBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const showResult = (message: string) => setBanner({ type: 'success', text: message });
+  const showError = (err: unknown, fallback: string) =>
+    setBanner({ type: 'error', text: err instanceof Error && err.message ? err.message : fallback });
 
   const fetchTasks = async () => {
     try {
       setLoading(true);
       const res = await omsService.getPickingTasks({
+        store_id: activeStore?.id,
         search: search || undefined,
         status: statusFilter || undefined,
         page,
@@ -54,7 +64,7 @@ export const PickingPage: React.FC = () => {
       setTotal(res.meta.total);
       setLastPage(res.meta.last_page);
     } catch (err) {
-      console.error('Failed to load picking tasks', err);
+      showError(err, 'Failed to load picking tasks.');
     } finally {
       setLoading(false);
     }
@@ -62,7 +72,7 @@ export const PickingPage: React.FC = () => {
 
   useEffect(() => {
     fetchTasks();
-  }, [page, perPage, statusFilter]);
+  }, [page, perPage, statusFilter, activeStore?.id]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,10 +83,11 @@ export const PickingPage: React.FC = () => {
   const handleQuickComplete = async (taskId: number) => {
     try {
       setActionLoadingId(taskId);
-      await omsService.completePickTask(taskId);
+      const res = await omsService.completePickTask(taskId);
+      showResult(res.message);
       await fetchTasks();
     } catch (err) {
-      console.error(err);
+      showError(err, 'Failed to update the pick task.');
     } finally {
       setActionLoadingId(null);
     }
@@ -84,10 +95,11 @@ export const PickingPage: React.FC = () => {
 
   const handleStatusChange = async (taskId: number, newStatus: string) => {
     try {
-      await omsService.updatePickStatus(taskId, newStatus);
+      const res = await omsService.updatePickStatus(taskId, newStatus);
+      showResult(res.message);
       fetchTasks();
     } catch (err) {
-      console.error(err);
+      showError(err, 'Failed to update the pick task.');
     }
   };
 
@@ -112,13 +124,30 @@ export const PickingPage: React.FC = () => {
   const handleBulkUpdate = async () => {
     if (selectedIds.size === 0) return;
     try {
-      await omsService.bulkUpdatePickTasks(Array.from(selectedIds) as number[], bulkStatus);
+      const res = await omsService.bulkUpdatePickTasks(Array.from(selectedIds) as number[], bulkStatus);
       setBulkModalOpen(false);
       setSelectedIds(new Set());
+      showResult(bulkStatus === 'packed' ? `${res.message} Packed orders are now in Shipments for dispatch.` : res.message);
       fetchTasks();
     } catch (err) {
-      console.error(err);
+      setBulkModalOpen(false);
+      showError(err, 'Failed to update the pick tasks.');
     }
+  };
+
+  /** Download the rows on screen as a CSV picking list. */
+  const handleExport = () => {
+    const header = ['Order', 'Customer', 'Product', 'Quantity', 'Items', 'Status', 'Warehouse', 'Priority'];
+    const rows = tasks.map((t) => [t.order_number, t.customer, t.product, t.quantity, t.items_count, t.status_label, t.warehouse, t.priority]);
+    const csv = [header, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `picking-list-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   const columns: Column<PickingItem>[] = [
@@ -240,10 +269,11 @@ export const PickingPage: React.FC = () => {
         <InfoCalloutCard
           title="Fulfill orders efficiently"
           description="Keep picking and packing status up to date to ensure faster dispatch and happier customers."
-          linkText="Learn more ->"
           icon={<Info size={18} />}
         />
       </div>
+
+      {banner && <Alert type={banner.type} message={banner.text} className="page-banner" />}
 
       {/* 4 KPI Metric Cards matching Screenshot 3 */}
       <div className="kpi-grid">
@@ -293,22 +323,29 @@ export const PickingPage: React.FC = () => {
               {selectedIds.size > 0 && <span>({selectedIds.size})</span>}
             </button>
 
-            <button
-              onClick={() => {
-                const nextStatus = statusFilter === '' ? 'not_started' : statusFilter === 'not_started' ? 'in_progress' : '';
-                setStatusFilter(nextStatus);
-              }}
-              className="btn-finovo-secondary"
-            >
-              <Filter size={14} />
-              <span>{statusFilter ? `Status: ${statusFilter}` : 'Filters'}</span>
-            </button>
+            <div style={{ width: 170 }}>
+              <CustomDropdown
+                value={statusFilter}
+                onChange={(val) => {
+                  setStatusFilter(String(val));
+                  setPage(1);
+                }}
+                options={[
+                  { value: '', label: 'All Statuses' },
+                  { value: 'not_started', label: 'Not Started' },
+                  { value: 'in_progress', label: 'In Progress' },
+                  { value: 'picked', label: 'Picked' },
+                  { value: 'packed', label: 'Packed' },
+                ]}
+                searchable={false}
+                icon={<Filter size={14} />}
+              />
+            </div>
 
             <button
-              onClick={() => {
-                alert('Exporting picking list to CSV...');
-              }}
+              onClick={handleExport}
               className="btn-finovo-secondary"
+              disabled={tasks.length === 0}
             >
               <Download size={14} />
               <span>Export</span>
@@ -357,41 +394,40 @@ export const PickingPage: React.FC = () => {
       {/* Bulk Update Modal */}
       {bulkModalOpen && (
         <div className="modal-overlay" onClick={() => setBulkModalOpen(false)}>
-          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0' }}>
-              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#0f172a' }}>
-                Bulk Update ({selectedIds.size} selected)
-              </h3>
-            </div>
-            <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="procurement-modal" style={{ maxWidth: 460, overflow: 'visible' }} onClick={(e) => e.stopPropagation()}>
+            <div className="procurement-modal-header" style={{ borderRadius: '18px 18px 0 0' }}>
               <div>
-                <CustomDropdown
-                  label="Set Status to"
-                  value={bulkStatus}
-                  onChange={(val) => setBulkStatus(val)}
-                  options={[
-                    { value: 'not_started', label: 'Not Started' },
-                    { value: 'in_progress', label: 'In Progress' },
-                    { value: 'picked', label: 'Picked' },
-                    { value: 'packed', label: 'Packed' },
-                  ]}
-                  searchable={false}
-                />
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#0f172a' }}>Bulk Update</h3>
+                <p style={{ margin: '3px 0 0 0', fontSize: 12, color: '#64748b' }}>
+                  Set one status on the {selectedIds.size} selected order(s).
+                </p>
               </div>
+              <button type="button" onClick={() => setBulkModalOpen(false)} className="topbar-icon-button" aria-label="Close">
+                <X size={18} />
+              </button>
+            </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 12 }}>
-                <button
-                  type="button"
-                  onClick={() => setBulkModalOpen(false)}
-                  className="btn-finovo-secondary"
-                >
+            <div className="procurement-modal-body" style={{ overflow: 'visible' }}>
+              <CustomDropdown
+                label="Set Status to"
+                value={bulkStatus}
+                onChange={(val) => setBulkStatus(val)}
+                options={[
+                  { value: 'not_started', label: 'Not Started' },
+                  { value: 'in_progress', label: 'In Progress' },
+                  { value: 'picked', label: 'Picked' },
+                  { value: 'packed', label: 'Packed', description: 'Sends the orders to Shipments for dispatch' },
+                ]}
+                searchable={false}
+              />
+            </div>
+
+            <div className="procurement-modal-footer" style={{ justifyContent: 'flex-end', borderRadius: '0 0 18px 18px' }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" onClick={() => setBulkModalOpen(false)} className="btn-outline">
                   Cancel
                 </button>
-                <button
-                  type="button"
-                  onClick={handleBulkUpdate}
-                  className="btn-finovo-primary"
-                >
+                <button type="button" onClick={handleBulkUpdate} className="btn-primary">
                   Update Tasks
                 </button>
               </div>

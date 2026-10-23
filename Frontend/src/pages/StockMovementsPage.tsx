@@ -18,13 +18,30 @@ import DataTable from '../components/common/DataTable';
 import type { Column } from '../components/common/DataTable';
 import CustomDropdown from '../components/common/CustomDropdown';
 import omsService from '../services/omsService';
+import { useActiveStore } from '../hooks/useActiveStore';
+import { useConfirmDialog } from '../components/common/ConfirmDialog';
 import type {
   StockMovementItem,
   WarehouseModel,
   ProductModel,
 } from '../services/omsService';
 
+const MOVEMENT_TYPES = [
+  { value: '', label: 'All Movement Types' },
+  { value: 'receipt', label: 'Receipts' },
+  { value: 'transfer', label: 'Transfers' },
+  { value: 'adjustment', label: 'Adjustments' },
+  { value: 'putaway', label: 'Putaway' },
+  { value: 'shipment', label: 'Shipments' },
+  { value: 'return', label: 'Returns' },
+  { value: 'reservation', label: 'Reservations' },
+  { value: 'release', label: 'Released Reservations' },
+  { value: 'quarantine', label: 'Quarantine' },
+];
+
 export const StockMovementsPage: React.FC = () => {
+  const { activeStore } = useActiveStore();
+  const { notify, dialog } = useConfirmDialog();
   const [activeTab, setActiveTab] = useState<'transfer' | 'adjust' | 'history'>('transfer');
   const [movements, setMovements] = useState<StockMovementItem[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseModel[]>([]);
@@ -65,6 +82,7 @@ export const StockMovementsPage: React.FC = () => {
     try {
       setLoading(true);
       const res = await omsService.getStockMovements({
+        store_id: activeStore?.id,
         search: search || undefined,
         type: typeFilter || undefined,
         page,
@@ -109,7 +127,7 @@ export const StockMovementsPage: React.FC = () => {
 
   useEffect(() => {
     fetchMovements();
-  }, [page, perPage, typeFilter]);
+  }, [page, perPage, typeFilter, activeStore?.id]);
 
   // Update availability when product or source warehouse changes
   useEffect(() => {
@@ -293,7 +311,20 @@ export const StockMovementsPage: React.FC = () => {
       header: 'Action',
       render: (row) => (
         <button
-          onClick={() => alert(`Movement Details:\nRef: ${row.reference}\nProduct: ${row.product}\nReason: ${row.reason || 'N/A'}`)}
+          onClick={() =>
+            notify({
+              title: 'Movement Details',
+              message: (
+                <>
+                  Reference <strong>{row.reference}</strong>
+                  <br />
+                  Product <strong>{row.product}</strong>
+                </>
+              ),
+              note: `Reason: ${row.reason || 'Not recorded'}`,
+              confirmLabel: 'Close',
+            })
+          }
           className="btn-finovo-secondary"
           style={{ padding: '4px 10px', fontSize: 12 }}
         >
@@ -324,7 +355,6 @@ export const StockMovementsPage: React.FC = () => {
         <InfoCalloutCard
           title="Keep your inventory accurate"
           description="Use stock movements to maintain accurate inventory across all warehouses and stores."
-          linkText="Learn more ->"
           icon={<ArrowLeftRight size={18} />}
         />
       </div>
@@ -706,23 +736,25 @@ export const StockMovementsPage: React.FC = () => {
               <div className="topbar-search-input" style={{ width: 280 }}>
                 <input
                   type="text"
-                  placeholder="Search orders, customers or products..."
+                  placeholder="Search reference, product or warehouse..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
               </div>
             </form>
 
-            <button
-              onClick={() => {
-                const nextType = typeFilter === '' ? 'transfer' : typeFilter === 'transfer' ? 'adjustment' : '';
-                setTypeFilter(nextType);
-              }}
-              className="btn-finovo-secondary"
-            >
-              <Filter size={14} />
-              <span>{typeFilter ? `Type: ${typeFilter}` : 'Filters'}</span>
-            </button>
+            <div style={{ width: 190 }}>
+              <CustomDropdown
+                value={typeFilter}
+                onChange={(val) => {
+                  setTypeFilter(String(val));
+                  setPage(1);
+                }}
+                options={MOVEMENT_TYPES}
+                searchable={false}
+                icon={<Filter size={14} />}
+              />
+            </div>
           </div>
         </div>
 
@@ -745,6 +777,7 @@ export const StockMovementsPage: React.FC = () => {
           }}
         />
       </div>
+      {dialog}
     </div>
   );
 };

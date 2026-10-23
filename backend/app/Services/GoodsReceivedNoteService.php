@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\GoodsReceivedNote;
 use App\Models\GoodsReceivedNoteItem;
+use App\Models\ProductVariant;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseOrderItem;
 use App\Models\User;
@@ -111,7 +112,7 @@ class GoodsReceivedNoteService
                 $maxAllowed = (int) ceil($poItem->ordered_quantity * 1.10);
                 if (! $allowOverReceipt && ($previouslyReceived + $receivedQty) > $maxAllowed) {
                     throw ValidationException::withMessages([
-                        'items' => "Item SKU {$poItem->sku}: Total receiving ({$previouslyReceived} previous + {$receivedQty} current = " . ($previouslyReceived + $receivedQty) . ") exceeds 10% over-receipt tolerance for ordered quantity ({$poItem->ordered_quantity}). Over-receipt override required.",
+                        'items' => "Item SKU {$poItem->sku}: Total receiving ({$previouslyReceived} previous + {$receivedQty} current = ".($previouslyReceived + $receivedQty).") exceeds 10% over-receipt tolerance for ordered quantity ({$poItem->ordered_quantity}). Over-receipt override required.",
                     ]);
                 }
 
@@ -309,6 +310,11 @@ class GoodsReceivedNoteService
                 if ($poItem) {
                     $poItem->received_quantity += $physicalCustodyQty;
                     $poItem->save();
+
+                    // Stock is valued at what it was last bought for.
+                    if ((float) $poItem->unit_cost > 0) {
+                        ProductVariant::whereKey($variantId)->update(['cost_price' => $poItem->unit_cost]);
+                    }
                 }
 
                 $grnItem->status = 'posted';
@@ -353,7 +359,7 @@ class GoodsReceivedNoteService
                 $grn->update(['pdf_path' => $pdfPath]);
             }
         } catch (\Throwable $e) {
-            Log::warning("GRN #{$grn->grn_number} PDF generation failed after posting: " . $e->getMessage());
+            Log::warning("GRN #{$grn->grn_number} PDF generation failed after posting: ".$e->getMessage());
         }
 
         return $grn->fresh(['items.destinationLocation', 'purchaseOrder.items', 'warehouse', 'receivingLocation', 'postedBy']);

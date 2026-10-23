@@ -88,6 +88,7 @@
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--finovo-text-muted);
+  white-space: pre-line;
 }
 
 .confirm-dialog-actions {

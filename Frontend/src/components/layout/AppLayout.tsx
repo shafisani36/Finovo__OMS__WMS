@@ -16,6 +16,7 @@ import {
   Search,
   Bell,
   HelpCircle,
+  Loader2,
   Menu,
   X,
   ChevronRight,
@@ -26,8 +27,9 @@ import { useActiveStore } from '../../hooks/useActiveStore';
 import Logo from '../common/Logo';
 import { platformLabel } from '../stores/storePlatforms';
 import ProductThumb from '../catalog/ProductThumb';
+import BarcodeScanner from '../barcode/BarcodeScanner';
 import omsService from '../../services/omsService';
-import type { StockAlert, StockAlertsResponse } from '../../services/omsService';
+import type { CustomerModel, OrderModel, ProductModel, StockAlert, StockAlertsResponse } from '../../services/omsService';
 import { STOCK_ALERTS_ON_LOGIN_KEY } from '../../context/AuthContext';
 
 const STOCK_ALERTS_REFRESH_MS = 5 * 60 * 1000;
@@ -141,6 +143,142 @@ const StockAlertsBell: React.FC = () => {
           >
             {total > alerts.length ? `Showing ${alerts.length} of ${total} · ` : ''}Open inventory to reorder
           </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface SearchResults {
+  orders: OrderModel[];
+  products: ProductModel[];
+  customers: CustomerModel[];
+}
+
+/**
+ * Top-bar search across the managed store's orders, products and customers. Picking a result opens it on its page.
+ */
+const GlobalSearch: React.FC = () => {
+  const navigate = useNavigate();
+  const { activeStore } = useActiveStore();
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<SearchResults | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const term = query.trim();
+    if (term.length < 2) {
+      setResults(null);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const params = { search: term, store_id: activeStore?.id, per_page: 5 };
+        const [orders, products, customers] = await Promise.all([
+          omsService.getOrders(params),
+          omsService.getProducts(params),
+          omsService.getCustomers(params),
+        ]);
+        if (!cancelled) setResults({ orders: orders.data, products: products.data, customers: customers.data });
+      } catch {
+        if (!cancelled) setResults({ orders: [], products: [], customers: [] });
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, activeStore?.id]);
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, []);
+
+  const go = (path: string) => {
+    setOpen(false);
+    setQuery('');
+    navigate(path);
+  };
+
+  const term = query.trim();
+  const empty = results && !results.orders.length && !results.products.length && !results.customers.length;
+
+  return (
+    <div className="global-search" ref={boxRef}>
+      <div className="topbar-search-input">
+        <Search size={16} color="#94a3b8" />
+        <input
+          type="text"
+          placeholder="Search orders, products, customers..."
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setOpen(false);
+            if (e.key === 'Enter' && term) go(`/orders?search=${encodeURIComponent(term)}`);
+          }}
+          aria-label="Search orders, products and customers"
+        />
+        {loading && <Loader2 size={14} className="animate-spin" color="#94a3b8" />}
+      </div>
+
+      {open && term.length >= 2 && results && (
+        <div className="global-search-results" role="listbox">
+          {empty && <div className="global-search-empty">Nothing found for "{term}".</div>}
+
+          {results.orders.length > 0 && (
+            <div className="global-search-group">
+              <div className="global-search-heading">Orders</div>
+              {results.orders.map((o) => (
+                <button key={`o${o.id}`} type="button" className="global-search-item" onClick={() => go(`/orders?search=${encodeURIComponent(o.order_number)}`)}>
+                  <FileText size={15} />
+                  <span className="global-search-title">{o.order_number}</span>
+                  <span className="global-search-meta">{o.customer_name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {results.products.length > 0 && (
+            <div className="global-search-group">
+              <div className="global-search-heading">Products</div>
+              {results.products.map((p) => (
+                <button key={`p${p.id}`} type="button" className="global-search-item" onClick={() => go(`/products?search=${encodeURIComponent(p.sku)}`)}>
+                  <Package size={15} />
+                  <span className="global-search-title">{p.name}</span>
+                  <span className="global-search-meta">{p.sku}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {results.customers.length > 0 && (
+            <div className="global-search-group">
+              <div className="global-search-heading">Customers</div>
+              {results.customers.map((c) => (
+                <button key={`c${c.id}`} type="button" className="global-search-item" onClick={() => go(`/customers/${c.id}`)}>
+                  <Users size={15} />
+                  <span className="global-search-title">{c.name}</span>
+                  <span className="global-search-meta">{c.email ?? c.phone ?? ''}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -371,19 +509,12 @@ export const AppLayout: React.FC = () => {
               <Menu size={20} />
             </button>
 
-            {/* Global Search Input */}
-            <div className="topbar-search-input">
-              <Search size={16} color="#94a3b8" />
-              <input type="text" placeholder="Search anything..." />
-            </div>
+            <GlobalSearch />
           </div>
 
           {/* Right Controls */}
           <div className="topbar-right-controls">
-            <button className="topbar-icon-button" title="Help & Docs">
-              <HelpCircle size={18} />
-            </button>
-
+            <BarcodeScanner />
             <StockAlertsBell />
 
             {/* User Profile Pill & Dropdown */}

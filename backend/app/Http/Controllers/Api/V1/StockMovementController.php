@@ -24,7 +24,12 @@ class StockMovementController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
+        // With ?store_id= only movements of products sold in that store are listed and counted.
+        $storeId = $request->integer('store_id');
+        $inStore = fn ($q) => $q->when($storeId, fn ($q) => $q->whereHas('variant.skuMappings', fn ($m) => $m->where('store_id', $storeId)));
+
         $query = InventoryLedgerEntry::where('organization_id', $org->id)
+            ->tap($inStore)
             ->with(['warehouse', 'variant.product', 'user']);
 
         // Search
@@ -44,7 +49,10 @@ class StockMovementController extends Controller
 
         // Filter by movement type
         if ($type = $request->query('type')) {
-            $query->where('movement_type', $type);
+            // "transfer" covers both legs of a transfer between warehouses.
+            $type === 'transfer'
+                ? $query->whereIn('movement_type', ['transfer', 'transfer_in', 'transfer_out'])
+                : $query->where('movement_type', $type);
         }
 
         // Filter by warehouse
@@ -52,8 +60,7 @@ class StockMovementController extends Controller
             $query->where('warehouse_id', $warehouseId);
         }
 
-        $perPage = (int) $request->query('per_page', 10);
-        $movements = $query->latest('id')->paginate($perPage);
+        $movements = $query->latest('id')->paginate($this->perPage($request, 10));
 
         // Transform for UI table matching Screenshot 4
         $items = collect($movements->items())->map(function ($m) {
@@ -77,8 +84,12 @@ class StockMovementController extends Controller
 
         // KPI Counts matching Screenshot 4
         $totalWarehouses = Warehouse::where('organization_id', $org->id)->where('is_active', true)->count();
-        $totalProducts = Product::where('organization_id', $org->id)->where('is_active', true)->count();
+        $totalProducts = Product::where('organization_id', $org->id)
+            ->where('is_active', true)
+            ->when($storeId, fn ($q) => $q->whereHas('variants.skuMappings', fn ($m) => $m->where('store_id', $storeId)))
+            ->count();
         $movementsThisMonth = InventoryLedgerEntry::where('organization_id', $org->id)
+            ->tap($inStore)
             ->where('created_at', '>=', now()->startOfMonth())
             ->count();
 

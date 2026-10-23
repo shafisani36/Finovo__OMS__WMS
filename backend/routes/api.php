@@ -1,13 +1,14 @@
 <?php
 
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\BarcodeController;
 use App\Http\Controllers\Api\V1\CustomBridgeWebhookController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\CycleCountController;
+use App\Http\Controllers\Api\V1\GoodsReceivedNoteController;
 use App\Http\Controllers\Api\V1\InventoryController;
 use App\Http\Controllers\Api\V1\InventoryReceiptController;
 use App\Http\Controllers\Api\V1\InventoryTransferController;
-use App\Http\Controllers\Api\V1\GoodsReceivedNoteController;
 use App\Http\Controllers\Api\V1\OperationsController;
 use App\Http\Controllers\Api\V1\OrderController;
 use App\Http\Controllers\Api\V1\PasswordChangeController;
@@ -17,6 +18,8 @@ use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\PurchaseOrderController;
 use App\Http\Controllers\Api\V1\PurchaseRequisitionController;
 use App\Http\Controllers\Api\V1\ReplenishmentController;
+use App\Http\Controllers\Api\V1\ReturnController;
+use App\Http\Controllers\Api\V1\ShipmentController;
 use App\Http\Controllers\Api\V1\StockAdjustmentController;
 use App\Http\Controllers\Api\V1\StockMovementController;
 use App\Http\Controllers\Api\V1\StoreAuthorizationController;
@@ -105,7 +108,6 @@ Route::prefix('v1')->group(function () {
 
         // Catalog & Products
         Route::get('products', [ProductController::class, 'index']);
-        Route::post('products', [ProductController::class, 'store']);
 
         // Enterprise Inventory Engine Endpoints
         Route::prefix('inventory')->group(function () {
@@ -155,9 +157,9 @@ Route::prefix('v1')->group(function () {
         Route::get('customers/{customer}', [CustomerController::class, 'show']);
 
         Route::get('orders', [OrderController::class, 'index']);
-        Route::post('orders', [OrderController::class, 'store']);
         Route::get('orders/{order}', [OrderController::class, 'show']);
         Route::get('orders/{order}/invoice', [OrderController::class, 'invoice']);
+        Route::get('orders/{order}/fulfillment', [OrderController::class, 'fulfillment']);
         Route::post('orders/{order}/allocate', [OrderController::class, 'allocate']);
         Route::post('orders/{order}/cancel', [OrderController::class, 'cancel']);
 
@@ -166,6 +168,24 @@ Route::prefix('v1')->group(function () {
         Route::put('picking/{pickTask}/status', [PickingController::class, 'updateStatus']);
         Route::post('picking/{pickTask}/complete', [PickingController::class, 'complete']);
         Route::post('picking/bulk-update', [PickingController::class, 'bulkUpdate']);
+
+        // Shipments (packed orders are dispatched from here)
+        Route::get('shipments', [ShipmentController::class, 'index']);
+        Route::post('shipments/{id}/dispatch', [ShipmentController::class, 'dispatch']);
+        Route::post('shipments/{id}/deliver', [ShipmentController::class, 'deliver']);
+
+        // Barcodes (label settings and scanning)
+        Route::get('barcode/settings', [BarcodeController::class, 'settings']);
+        Route::put('barcode/settings', [BarcodeController::class, 'updateSettings'])->middleware('role:admin');
+        Route::get('barcode/scan', [BarcodeController::class, 'scan']);
+
+        // Returns (customer RMAs, inspection and restocking)
+        Route::get('returns', [ReturnController::class, 'index']);
+        Route::get('returns/returnable-orders', [ReturnController::class, 'returnableOrders']);
+        Route::post('returns', [ReturnController::class, 'store']);
+        Route::post('returns/{id}/receive', [ReturnController::class, 'receive']);
+        Route::post('returns/{id}/complete', [ReturnController::class, 'complete']);
+        Route::post('returns/{id}/reject', [ReturnController::class, 'reject']);
 
         // Purchase Requisitions (Procurement Planning & Approval)
         Route::prefix('purchase-requisitions')->group(function () {

@@ -32,13 +32,11 @@ class StoreSyncService
     /** Orders changed shortly before the previous sync are read again, so none are missed between runs. */
     private const ORDER_OVERLAP_MINUTES = 10;
 
-    /** Order statuses after which an order is no longer cancelled from the store. */
-    private const SHIPPED_STATUSES = ['shipped', 'partially_shipped', 'delivered', 'returned'];
-
     public function __construct(
         protected StoreDataSourceFactory $sources,
         protected InventoryEngine $inventory,
         protected ProductImageStore $images,
+        protected EmailService $emails,
     ) {}
 
     public function canSync(Store $store): bool
@@ -340,7 +338,7 @@ class StoreSyncService
 
     private function saveOrder(Store $store, OrderData $data, SyncResult $result): void
     {
-        DB::transaction(function () use ($store, $data, $result) {
+        $created = DB::transaction(function () use ($store, $data, $result) {
             $order = Order::where('organization_id', $store->organization_id)
                 ->where('store_id', $store->id)
                 ->where('external_order_id', $data->externalId)
@@ -365,14 +363,14 @@ class StoreSyncService
                     $order->customer_name = $data->customerName;
                 }
 
-                if ($data->cancelled && ! in_array($order->order_status, self::SHIPPED_STATUSES, true)) {
+                if ($data->cancelled && ! in_array($order->order_status, Order::SHIPPED_STATUSES, true)) {
                     $order->order_status = 'cancelled';
                 }
 
                 $order->save();
                 $result->ordersUpdated++;
 
-                return;
+                return null;
             }
 
             $order = Order::create($attributes + [
@@ -399,7 +397,13 @@ class StoreSyncService
             }
 
             $result->ordersCreated++;
+
+            return $order;
         });
+
+        if ($created) {
+            $this->emails->sendOrderConfirmationEmail($created);
+        }
     }
 
     private function variantForLine(Store $store, OrderLineData $line): ?ProductVariant

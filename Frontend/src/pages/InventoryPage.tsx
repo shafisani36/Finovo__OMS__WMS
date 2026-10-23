@@ -25,7 +25,9 @@ import {
   X,
   Package,
   Trash2,
+  Settings,
 } from 'lucide-react';
+import { BarcodeLabel, BarcodeSettingsDialog } from '../components/barcode/BarcodeLabel';
 import MetricCard from '../components/common/MetricCard';
 import CustomDropdown from '../components/common/CustomDropdown';
 import omsService from '../services/omsService';
@@ -102,14 +104,7 @@ export const InventoryPage: React.FC = () => {
   // Tab 7: Replenishment State
   const [recommendations, setRecommendations] = useState<ReplenishmentRecommendationModel[]>([]);
   const [showNewRuleModal, setShowNewRuleModal] = useState(false);
-
-  // SKU Registration Modal State
-  const [showNewSkuModal, setShowNewSkuModal] = useState(false);
-  const [skuName, setSkuName] = useState('');
-  const [skuCode, setSkuCode] = useState('');
-  const [skuCategory, setSkuCategory] = useState('General');
-  const [skuBarcode, setSkuBarcode] = useState('');
-  const [skuPrice, setSkuPrice] = useState('29.99');
+  const [showBarcodeSettings, setShowBarcodeSettings] = useState(false);
 
   // Detail Modal State
   const [detailVariantId, setDetailVariantId] = useState<number | null>(null);
@@ -135,7 +130,7 @@ export const InventoryPage: React.FC = () => {
   const fetchKpis = async () => {
     try {
       const whId = selectedWarehouseId !== 'all' ? Number(selectedWarehouseId) : undefined;
-      const res = await omsService.getInventoryKpis(whId);
+      const res = await omsService.getInventoryKpis(whId, activeStore?.id);
       setKpis(res.data);
     } catch (err) {
       console.error('Failed to fetch KPIs', err);
@@ -255,13 +250,16 @@ export const InventoryPage: React.FC = () => {
 
   // SKU Detail Inspector
   const openSkuDetail = async (variantId: number) => {
+    // Clear the previous product first, so its details never show under the new one while loading.
+    setSkuDetail(null);
     setDetailVariantId(variantId);
     try {
       setDetailLoading(true);
       const res = await omsService.getInventorySkuDetail(variantId);
       setSkuDetail(res.data);
-    } catch (err) {
-      console.error('Failed to load SKU detail', err);
+    } catch (err: any) {
+      setDetailVariantId(null);
+      setFeedback({ type: 'error', text: err?.message || 'Could not load the stock details for this product.' });
     } finally {
       setDetailLoading(false);
     }
@@ -409,39 +407,6 @@ export const InventoryPage: React.FC = () => {
   }, [showPutawayModal]);
 
   // Submission Handlers
-  const handleCreateSku = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!skuName.trim() || !skuCode.trim()) {
-      setFeedback({ type: 'error', text: 'Product name and unique SKU code are required.' });
-      return;
-    }
-    try {
-      setLoading(true);
-      await omsService.createProduct({
-        name: skuName.trim(),
-        sku: skuCode.trim().toUpperCase(),
-        category: skuCategory.trim() || 'General',
-        barcode: skuBarcode.trim() || undefined,
-        price: parseFloat(skuPrice) || 0,
-      });
-      setShowNewSkuModal(false);
-      setSkuName('');
-      setSkuCode('');
-      setSkuBarcode('');
-      setSkuPrice('29.99');
-      setFeedback({
-        type: 'success',
-        text: `Product SKU "${skuCode.trim().toUpperCase()}" created in catalog. You can now receive, putaway, or adjust stock for it.`,
-      });
-      await fetchMetadata();
-      await fetchKpis();
-    } catch (err: any) {
-      setFeedback({ type: 'error', text: err.message || 'Failed to create product SKU.' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleCreateReceipt = async (e: React.FormEvent) => {
     e.preventDefault();
     const whId = Number(receiptWhId || (warehouses[0]?.id || 0));
@@ -717,13 +682,13 @@ export const InventoryPage: React.FC = () => {
 
           <div className="inventory-header-btn-group">
             <button
-              onClick={() => setShowNewSkuModal(true)}
-              className="btn-finovo-primary"
-              style={{ padding: '8px 14px', fontSize: 12 }}
-              title="Register a new Product SKU in the master catalog"
+              onClick={() => setShowBarcodeSettings(true)}
+              className="btn-finovo-secondary"
+              style={{ padding: '8px 10px' }}
+              title="Barcode settings"
+              aria-label="Barcode settings"
             >
-              <Package size={14} />
-              <span>New SKU</span>
+              <Settings size={15} />
             </button>
 
             <button
@@ -1110,7 +1075,7 @@ export const InventoryPage: React.FC = () => {
                             </td>
                             <td style={{ textAlign: 'right' }}>
                               <button
-                                onClick={() => openSkuDetail(b.id)}
+                                onClick={() => openSkuDetail(b.product_variant_id)}
                                 className="btn-finovo-secondary"
                                 style={{ padding: '4px 10px', fontSize: 11 }}
                                 title="View SKU Stock Details"
@@ -1780,117 +1745,6 @@ export const InventoryPage: React.FC = () => {
       </div>
 
       {/* ------------------------------------------------------------- */}
-      {/* MODAL 0: REGISTER NEW PRODUCT / SKU */}
-      {/* ------------------------------------------------------------- */}
-      {showNewSkuModal && (
-        <div className="modal-overlay" style={{ zIndex: 9999 }} onClick={() => setShowNewSkuModal(false)}>
-          <div
-            className="modal-container"
-            style={{ maxWidth: 540, maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#ffffff', padding: 24, borderRadius: 18, border: '1px solid #e2e8f0', boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Register New Product / SKU</h3>
-                <p style={{ margin: '4px 0 0 0', fontSize: 12, color: '#64748b' }}>
-                  Define product identity in the master catalog. Physical stock is created separately via dock receiving or adjustments.
-                </p>
-              </div>
-              <button onClick={() => setShowNewSkuModal(false)} className="btn-finovo-secondary" style={{ padding: 6 }}>
-                <X size={16} />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateSku} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
-                  Product Name *
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Wireless Ergonomic Mouse"
-                  value={skuName}
-                  onChange={(e) => setSkuName(e.target.value)}
-                  required
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
-                />
-              </div>
-
-              <div className="finovo-form-grid-2">
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
-                    Unique SKU Code *
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. WM-1001"
-                    value={skuCode}
-                    onChange={(e) => setSkuCode(e.target.value.toUpperCase())}
-                    required
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, fontFamily: 'monospace', fontWeight: 600, boxSizing: 'border-box' }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
-                    Category
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Electronics, Hardware"
-                    value={skuCategory}
-                    onChange={(e) => setSkuCategory(e.target.value)}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
-                  />
-                </div>
-              </div>
-
-              <div className="finovo-form-grid-2">
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
-                    Barcode / GTIN / UPC
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 890123456789"
-                    value={skuBarcode}
-                    onChange={(e) => setSkuBarcode(e.target.value)}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
-                    Base Unit Price ($)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="29.99"
-                    value={skuPrice}
-                    onChange={(e) => setSkuPrice(e.target.value)}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ padding: 12, borderRadius: 8, backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', fontSize: 12, color: '#1e40af' }}>
-                <strong>Enterprise Architecture Note:</strong> Creating this SKU registers the item catalog master. Stock will only exist after a validated dock receiving, opening-stock adjustment, or inbound transfer.
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
-                <button type="button" onClick={() => setShowNewSkuModal(false)} className="btn-finovo-secondary" style={{ padding: '8px 16px', fontSize: 13 }}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn-finovo-primary" style={{ padding: '8px 16px', fontSize: 13 }}>
-                  Register SKU in Catalog
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ------------------------------------------------------------- */}
       {/* MODAL: SKU STOCK INSPECTOR */}
       {/* ------------------------------------------------------------- */}
       {detailVariantId && (
@@ -1918,6 +1772,10 @@ export const InventoryPage: React.FC = () => {
               <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>Loading SKU details...</div>
             ) : skuDetail ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                <div className="barcode-panel" style={{ justifyContent: 'center' }}>
+                  <BarcodeLabel value={skuDetail.sku} caption={skuDetail.product_name} printable />
+                </div>
+
                 {/* Metrics Row */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
                   <div style={{ padding: 12, borderRadius: 8, backgroundColor: '#f8fafc', border: '1px solid #e2e8f0' }}>
@@ -2942,6 +2800,7 @@ export const InventoryPage: React.FC = () => {
           </div>
         </div>
       )}
+      {showBarcodeSettings && <BarcodeSettingsDialog onClose={() => setShowBarcodeSettings(false)} />}
     </div>
   );
 };

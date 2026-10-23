@@ -6,6 +6,8 @@ use App\Models\Organization;
 use App\Models\Store;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Mail\Mailable;
+use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
 class CustomBridgeSecurityTest extends TestCase
@@ -40,6 +42,8 @@ class CustomBridgeSecurityTest extends TestCase
 
     public function test_valid_hmac_signed_order_is_accepted_and_persisted(): void
     {
+        Mail::fake();
+
         $payload = [
             'order_id' => 'EXT-1001',
             'customer_name' => 'Michael Scott',
@@ -87,6 +91,9 @@ class CustomBridgeSecurityTest extends TestCase
             'external_order_id' => 'EXT-1001',
             'customer_name' => 'Michael Scott',
         ]);
+
+        // The customer gets an order confirmation.
+        Mail::assertSent(Mailable::class, fn (Mailable $mail) => $mail->hasTo('michael@dundermifflin.com') && str_contains($mail->subject, 'confirmed'));
     }
 
     public function test_replay_attack_with_same_nonce_is_blocked(): void

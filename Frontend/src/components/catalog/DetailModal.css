@@ -136,3 +136,366 @@
   font-size: 13px;
   margin-bottom: 16px;
 }
+
+/* Order screen layout */
+.order-modal {
+  max-width: 920px !important;
+}
+
+.order-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.order-modal-title h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.order-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  background: #f8fafc;
+}
+
+.order-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.order-card {
+  padding: 14px 16px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  min-width: 0;
+}
+
+.order-card .detail-fact-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+
+.order-card .detail-muted {
+  margin-top: 2px;
+  word-break: break-word;
+}
+
+.order-card-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.order-section {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+
+.order-section > .detail-section-title {
+  margin-bottom: 14px;
+}
+
+.order-section .detail-lines th:first-child,
+.order-section .detail-lines td:first-child {
+  padding-left: 0;
+}
+
+.order-section .detail-lines th:last-child,
+.order-section .detail-lines td:last-child {
+  padding-right: 0;
+}
+
+.order-section .detail-lines th {
+  background: transparent;
+}
+
+.order-labels {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.order-label-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 12px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.order-label-card-title {
+  align-self: flex-start;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+
+@media (max-width: 720px) {
+  .order-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Order progress and next step (order screen and barcode scan) */
+.ow {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ow-steps {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ow-steps li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+
+/* The line joining each step to the previous one */
+.ow-steps li + li::before {
+  content: '';
+  position: absolute;
+  top: 12px;
+  right: 50%;
+  width: 100%;
+  height: 2px;
+  background: #e2e8f0;
+  z-index: 0;
+}
+
+.ow-steps li.is-done + li::before,
+.ow-steps li.is-done::before {
+  background: #1e56ff;
+}
+
+.ow-step-dot {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid #e2e8f0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.ow-steps li.is-done .ow-step-dot {
+  background: #1e56ff;
+  border-color: #1e56ff;
+  color: #ffffff;
+}
+
+.ow-steps li.is-current .ow-step-dot {
+  border-color: #1e56ff;
+  color: #1e56ff;
+  box-shadow: 0 0 0 4px #dbeafe;
+}
+
+.ow-step-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.ow-steps li.is-done .ow-step-label,
+.ow-steps li.is-current .ow-step-label {
+  color: #0f172a;
+}
+
+.ow-next {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #f5f8ff;
+}
+
+.ow-next.is-cancelled {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.ow-next-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.ow-next-text {
+  margin: 2px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #475569;
+}
+
+.ow-next > .btn-finovo-primary {
+  align-self: flex-start;
+}
+
+.btn-finovo-primary.ow-success {
+  background: #059669;
+}
+
+.btn-finovo-primary.ow-success:hover:not(:disabled) {
+  background: #047857;
+}
+
+.ow-segmented {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.ow-segmented button {
+  padding: 8px 6px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+}
+
+.ow-segmented button:hover:not(:disabled) {
+  background: #f1f5f9;
+  color: #1e56ff;
+}
+
+.ow-segmented button.is-current {
+  background: #1e56ff;
+  color: #ffffff;
+  cursor: default;
+}
+
+.ow-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ow-inline-grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.ow-shipment {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.ow-shipment dt {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.ow-shipment dd {
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  word-break: break-all;
+}
+
+.ow-shipment a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #1e56ff;
+  text-decoration: none;
+}
+
+.ow-shipment a:hover {
+  text-decoration: underline;
+}
+
+.ow-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 12px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.ow-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #dc2626;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ow-cancel:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
+@media (max-width: 560px) {
+  .ow-step-label {
+    font-size: 10px;
+  }
+
+  .ow-segmented {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ow-inline {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ow-shipment {
+    grid-template-columns: 1fr;
+  }
+}

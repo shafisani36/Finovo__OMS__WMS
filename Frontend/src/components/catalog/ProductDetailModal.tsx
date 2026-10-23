@@ -5,6 +5,7 @@ import { platformLabel } from '../stores/storePlatforms';
 import ProductThumb from './ProductThumb';
 import StatusPill from '../common/StatusPill';
 import { variantLabel } from '../../utils/format';
+import { BarcodeLabel } from '../barcode/BarcodeLabel';
 import './DetailModal.css';
 
 export const ProductDetailModal: React.FC<{ product: ProductModel; onClose: () => void }> = ({ product, onClose }) => {
@@ -90,6 +91,17 @@ export const ProductDetailModal: React.FC<{ product: ProductModel; onClose: () =
               </tbody>
             </table>
           </div>
+
+          {variants.length > 0 && (
+            <>
+              <h4 className="detail-section-title">Barcode Labels</h4>
+              <div className="barcode-panel">
+                {variants.map((variant) => (
+                  <BarcodeLabel key={variant.id} value={variant.sku} caption={`${product.name}${variantLabel(variant) ? ` · ${variantLabel(variant)}` : ''}`} printable />
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

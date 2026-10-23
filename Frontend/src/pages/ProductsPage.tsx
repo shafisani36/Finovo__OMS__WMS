@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Package, Plus, Tag, CheckCircle2, X, Loader2, Eye, Layers } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Package, Tag, CheckCircle2, Eye, Layers } from 'lucide-react';
 import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import DataTable from '../components/common/DataTable';
@@ -20,17 +21,10 @@ export const ProductsPage: React.FC = () => {
   const [perPage] = useState(10);
   const [total, setTotal] = useState(0);
   const [lastPage, setLastPage] = useState(1);
-  const [search, setSearch] = useState('');
+  const [searchParams] = useSearchParams();
+  const [search, setSearch] = useState(searchParams.get('search') ?? '');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [viewProduct, setViewProduct] = useState<ProductModel | null>(null);
-
-  // Modal
-  const [modalOpen, setModalOpen] = useState(false);
-  const [modalLoading, setModalLoading] = useState(false);
-  const [name, setName] = useState('');
-  const [sku, setSku] = useState('');
-  const [category, setCategory] = useState('General');
-  const [price, setPrice] = useState('29.99');
 
   const fetchProducts = async () => {
     try {
@@ -51,6 +45,12 @@ export const ProductsPage: React.FC = () => {
     }
   };
 
+  // A search handed over in the address (e.g. from the top-bar search) fills the search box.
+  useEffect(() => {
+    const fromUrl = searchParams.get('search');
+    if (fromUrl !== null) setSearch(fromUrl);
+  }, [searchParams]);
+
   // Search 300 ms after the user stops typing, from the first page.
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -67,29 +67,6 @@ export const ProductsPage: React.FC = () => {
   useEffect(() => {
     fetchProducts();
   }, [page, perPage, debouncedSearch, activeStore?.id]);
-
-  const handleCreateProduct = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim() || !sku.trim()) return;
-
-    try {
-      setModalLoading(true);
-      await omsService.createProduct({
-        name,
-        sku,
-        category,
-        price: Number(price),
-      });
-      setModalOpen(false);
-      setName('');
-      setSku('');
-      fetchProducts();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setModalLoading(false);
-    }
-  };
 
   const columns: Column<ProductModel>[] = [
     {
@@ -211,10 +188,6 @@ export const ProductsPage: React.FC = () => {
             description="Manage internal SKU identifiers linked with remote channel listings."
             icon={<Tag size={18} />}
           />
-          <button onClick={() => setModalOpen(true)} className="btn-finovo-primary">
-            <Plus size={16} />
-            <span>Add Product</span>
-          </button>
         </div>
       </div>
 
@@ -253,82 +226,6 @@ export const ProductsPage: React.FC = () => {
         />
       </div>
 
-      {modalOpen && (
-        <div className="modal-overlay" style={{ zIndex: 9999 }} onClick={() => setModalOpen(false)}>
-          <div
-            className="modal-container"
-            style={{ maxWidth: 540, backgroundColor: '#ffffff', borderRadius: 18, border: '1px solid #e2e8f0', boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)', padding: 0 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Add Product & SKU</h3>
-                <p style={{ margin: '2px 0 0 0', fontSize: 12, color: '#64748b' }}>Register new item identity and SKU in the master catalog.</p>
-              </div>
-              <button onClick={() => setModalOpen(false)} className="btn-finovo-secondary" style={{ padding: 6 }}>
-                <X size={16} />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateProduct} style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Product Name *</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Mechanical Keyboard"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-                  required
-                />
-              </div>
-
-              <div className="finovo-form-grid-2">
-                <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>SKU *</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. KB-RGB-01"
-                    value={sku}
-                    onChange={(e) => setSku(e.target.value)}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-                    required
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Price ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Category</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Electronics"
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 12 }}>
-                <button type="button" onClick={() => setModalOpen(false)} className="btn-finovo-secondary">Cancel</button>
-                <button type="submit" disabled={modalLoading} className="btn-finovo-primary">
-                  {modalLoading && <Loader2 size={16} className="animate-spin" />}
-                  <span>Save Product</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
       {viewProduct && <ProductDetailModal product={viewProduct} onClose={() => setViewProduct(null)} />}
     </div>
   );

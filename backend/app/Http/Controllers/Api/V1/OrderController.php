@@ -5,8 +5,6 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\InventoryReservation;
 use App\Models\Order;
-use App\Models\OrderItem;
-use App\Models\Product;
 use App\Models\Store;
 use App\Services\InventoryEngine;
 use App\Services\InvoiceService;
@@ -20,7 +18,7 @@ class OrderController extends Controller
 {
     public function __construct(
         protected OrderAllocationEngine $allocationEngine,
-        protected InventoryEngine $inventoryEngine
+        protected InventoryEngine $inventoryEngine,
     ) {}
 
     /**
@@ -62,7 +60,7 @@ class OrderController extends Controller
         $totalOrders = $metrics()->count();
         $pending = $metrics()->whereIn('order_status', ['imported', 'pending'])->count();
         $allocated = $metrics()->where('order_status', 'allocated')->count();
-        $shipped = $metrics()->where('order_status', 'shipped')->count();
+        $shipped = $metrics()->whereIn('order_status', ['partially_shipped', 'shipped', 'delivered', 'returned'])->count();
 
         return response()->json([
             'status' => 'success',
@@ -83,78 +81,6 @@ class OrderController extends Controller
     }
 
     /**
-     * Create manual order.
-     */
-    public function store(Request $request): JsonResponse
-    {
-        $org = $request->user()->currentOrganization();
-
-        $validated = $request->validate([
-            'store_id' => ['required', 'exists:stores,id'],
-            'customer_name' => ['required', 'string', 'max:255'],
-            'customer_email' => ['nullable', 'email', 'max:255'],
-            'customer_phone' => ['nullable', 'string', 'max:50'],
-            'shipping_address' => ['nullable', 'array'],
-            'items' => ['required', 'array', 'min:1'],
-            'items.*.product_id' => ['required', 'exists:products,id'],
-            'items.*.quantity' => ['required', 'integer', 'min:1'],
-            'items.*.unit_price' => ['required', 'numeric', 'min:0'],
-        ]);
-
-        return DB::transaction(function () use ($org, $validated) {
-            $store = Store::where('organization_id', $org->id)->findOrFail($validated['store_id']);
-            $orderNum = 'ORD-'.strtoupper(substr(uniqid(), -6));
-            $extId = 'MAN-'.rand(1000, 9999);
-
-            $order = Order::create([
-                'organization_id' => $org->id,
-                'store_id' => $store->id,
-                'order_number' => $orderNum,
-                'external_order_id' => $extId,
-                'customer_name' => $validated['customer_name'],
-                'customer_email' => $validated['customer_email'] ?? null,
-                'customer_phone' => $validated['customer_phone'] ?? null,
-                'shipping_address' => $validated['shipping_address'] ?? null,
-                'order_status' => 'pending',
-                'payment_status' => 'paid',
-                'fulfillment_status' => 'unfulfilled',
-                'total_amount' => 0,
-                'placed_at' => now(),
-            ]);
-
-            $total = 0;
-            foreach ($validated['items'] as $itemData) {
-                $product = Product::where('organization_id', $org->id)->findOrFail($itemData['product_id']);
-                $variant = $product->variants()->first();
-                $lineTotal = $itemData['quantity'] * $itemData['unit_price'];
-                $total += $lineTotal;
-
-                OrderItem::create([
-                    'order_id' => $order->id,
-                    'product_variant_id' => $variant ? $variant->id : null,
-                    'external_sku' => $product->sku,
-                    'product_name' => $product->name,
-                    'quantity' => $itemData['quantity'],
-                    'unit_price' => $itemData['unit_price'],
-                    'total_amount' => $lineTotal,
-                    'status' => 'pending',
-                ]);
-            }
-
-            $order->update(['total_amount' => $total]);
-
-            // Attempt automatic allocation
-            $order = $this->allocationEngine->allocateOrder($order);
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Order created and processed.',
-                'data' => $order->load(['items', 'store']),
-            ], 201);
-        });
-    }
-
-    /**
      * Show order details.
      */
     public function show(Request $request, Order $order): JsonResponse
@@ -170,6 +96,16 @@ class OrderController extends Controller
             'status' => 'success',
             'data' => $order,
         ]);
+    }
+
+    /**
+     * The order's fulfillment state and the next steps it allows (allocate, pick, dispatch, deliver, cancel).
+     */
+    public function fulfillment(Request $request, Order $order): JsonResponse
+    {
+        abort_unless($order->organization_id === $request->user()->currentOrganization()->id, 404);
+
+        return response()->json(['status' => 'success', 'data' => $order->fulfillmentSummary()]);
     }
 
     /**
@@ -192,11 +128,22 @@ class OrderController extends Controller
             abort(403, 'Unauthorized.');
         }
 
+        if (! in_array($order->order_status, Order::ALLOCATABLE_STATUSES, true)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => "Order {$order->order_number} is {$order->order_status} and has nothing left to allocate.",
+            ], 422);
+        }
+
         $order = $this->allocationEngine->allocateOrder($order);
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Order allocation recalculated.',
+            'message' => match ($order->order_status) {
+                'allocated' => "Stock reserved for order {$order->order_number}. It is now on the picking list.",
+                'partially_allocated' => "Only part of order {$order->order_number} could be reserved; the rest is out of stock.",
+                default => "Order {$order->order_number} could not be allocated: ".($order->notes ?: 'not enough stock in any linked warehouse.'),
+            },
             'data' => $order->load(['items', 'pickTasks']),
         ]);
     }
@@ -211,7 +158,7 @@ class OrderController extends Controller
             abort(403, 'Unauthorized.');
         }
 
-        if (in_array($order->order_status, ['shipped', 'delivered'])) {
+        if (in_array($order->order_status, Order::SHIPPED_STATUSES, true)) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'Cannot cancel an order that has already shipped.',
@@ -233,8 +180,9 @@ class OrderController extends Controller
                 'fulfillment_status' => 'cancelled',
             ]);
 
-            // Cancel pick tasks
-            $order->pickTasks()->update(['status' => 'not_started', 'notes' => 'Order cancelled']);
+            // Take the order off the picking list and withdraw a shipment still waiting for dispatch.
+            $order->pickTasks()->update(['status' => 'cancelled', 'notes' => 'Order cancelled']);
+            $order->shipments()->where('status', 'pending')->delete();
         });
 
         return response()->json([

@@ -18,9 +18,11 @@ import {
   Boxes,
   Loader2,
   Layers,
-  UserCheck
+  UserCheck,
+  Ban,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { useActiveStore } from '../hooks/useActiveStore';
 import omsService from '../services/omsService';
 import CustomDropdown from '../components/common/CustomDropdown';
 import MetricCard from '../components/common/MetricCard';
@@ -34,6 +36,7 @@ interface Warehouse {
 
 export const PurchaseOrdersPage: React.FC = () => {
   const { user } = useAuth();
+  const { activeStore } = useActiveStore();
   const location = useLocation();
 
   // Active Main Tab: 'po' | 'pr' | 'grn'
@@ -86,6 +89,9 @@ export const PurchaseOrdersPage: React.FC = () => {
   const [showCreatePoModal, setShowCreatePoModal] = useState(false);
   const [showViewPoModal, setShowViewPoModal] = useState(false);
   const [selectedPo, setSelectedPo] = useState<any | null>(null);
+  const [cancellingPo, setCancellingPo] = useState<any | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [isCancellingPo, setIsCancellingPo] = useState(false);
 
   const [showCreateGrnModal, setShowCreateGrnModal] = useState(false);
   const [showViewGrnModal, setShowViewGrnModal] = useState(false);
@@ -115,7 +121,7 @@ export const PurchaseOrdersPage: React.FC = () => {
   const fetchPurchaseOrders = async () => {
     setIsLoading(true);
     try {
-      const params: any = { search: poSearch };
+      const params: any = { search: poSearch, store_id: activeStore?.id };
       if (poStatusFilter !== 'all') params.status = poStatusFilter;
       const res = await omsService.getPurchaseOrders(params);
       setPurchaseOrders(res.data || []);
@@ -130,7 +136,7 @@ export const PurchaseOrdersPage: React.FC = () => {
   const fetchRequisitions = async () => {
     setIsLoading(true);
     try {
-      const params: any = { search: prSearch };
+      const params: any = { search: prSearch, store_id: activeStore?.id };
       if (prStatusFilter !== 'all') params.status = prStatusFilter;
       const res = await omsService.getPurchaseRequisitions(params);
       setRequisitions(res.data || []);
@@ -145,7 +151,7 @@ export const PurchaseOrdersPage: React.FC = () => {
   const fetchGrns = async () => {
     setIsLoading(true);
     try {
-      const params: any = { search: grnSearch };
+      const params: any = { search: grnSearch, store_id: activeStore?.id };
       if (grnStatusFilter !== 'all') params.status = grnStatusFilter;
       const res = await omsService.getGoodsReceivedNotes(params);
       setGrns(res.data || []);
@@ -165,7 +171,7 @@ export const PurchaseOrdersPage: React.FC = () => {
     if (activeTab === 'po') fetchPurchaseOrders();
     else if (activeTab === 'pr') fetchRequisitions();
     else if (activeTab === 'grn') fetchGrns();
-  }, [activeTab, poStatusFilter, prStatusFilter, grnStatusFilter]);
+  }, [activeTab, poStatusFilter, prStatusFilter, grnStatusFilter, activeStore?.id]);
 
   const showNotification = (msg: string, isErr = false) => {
     if (isErr) {
@@ -282,6 +288,7 @@ export const PurchaseOrdersPage: React.FC = () => {
     setIsSubmitting(true);
     try {
       const payload = {
+        store_id: activeStore?.id,
         warehouse_id: prWarehouseId,
         department: prDepartment,
         priority: prPriority,
@@ -473,6 +480,7 @@ export const PurchaseOrdersPage: React.FC = () => {
     setIsSubmitting(true);
     try {
       const payload = {
+        store_id: activeStore?.id,
         supplier_name: poSupplier,
         warehouse_id: poWhId,
         items: poStandaloneItems.map((item) => ({
@@ -493,6 +501,33 @@ export const PurchaseOrdersPage: React.FC = () => {
       showNotification(e?.message || 'Failed to create PO.', true);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  /** A purchase order can be cancelled until goods start arriving against it. */
+  const canCancelPo = (po: any) =>
+    ['draft', 'issued', 'confirmed'].includes(po.status) &&
+    !(po.items || []).some((item: any) => Number(item.received_quantity) > 0);
+
+  const openCancelPo = (po: any) => {
+    setCancellingPo(po);
+    setCancelReason('');
+  };
+
+  const handleCancelPoConfirm = async () => {
+    if (!cancellingPo) return;
+    try {
+      setIsCancellingPo(true);
+      const res = await omsService.cancelPurchaseOrder(cancellingPo.id, cancelReason.trim() || undefined);
+      showNotification(res.message || `Purchase Order #${cancellingPo.po_number} cancelled.`);
+      setCancellingPo(null);
+      setShowViewPoModal(false);
+      fetchPurchaseOrders();
+      if (cancellingPo.purchase_requisition_id) fetchRequisitions();
+    } catch (e: any) {
+      showNotification(e?.message || 'Failed to cancel purchase order.', true);
+    } finally {
+      setIsCancellingPo(false);
     }
   };
 
@@ -1015,6 +1050,17 @@ export const PurchaseOrdersPage: React.FC = () => {
                               >
                                 <Eye size={15} />
                               </button>
+
+                              {canCancelPo(po) && (
+                                <button
+                                  onClick={() => openCancelPo(po)}
+                                  className="table-action-btn is-danger"
+                                  title="Cancel Purchase Order"
+                                  aria-label="Cancel Purchase Order"
+                                >
+                                  <Ban size={15} />
+                                </button>
+                              )}
 
                               {po.status !== 'received' && po.status !== 'cancelled' && (
                                 <button
@@ -2000,6 +2046,55 @@ export const PurchaseOrdersPage: React.FC = () => {
       )}
 
       {/* ========================================================= */}
+      {/* CANCEL PURCHASE ORDER                                     */}
+      {/* ========================================================= */}
+      {cancellingPo && (
+        <div
+          className="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isCancellingPo) setCancellingPo(null);
+          }}
+        >
+          <div className="procurement-modal" style={{ maxWidth: 480 }}>
+            <div className="procurement-modal-header">
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: '#dc2626' }}>
+                Cancel Purchase Order #{cancellingPo.po_number}
+              </h3>
+              <button onClick={() => setCancellingPo(null)} className="topbar-icon-button" disabled={isCancellingPo}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="procurement-modal-body">
+              <p style={{ margin: '0 0 12px 0', fontSize: 13, color: '#64748b' }}>
+                The order to {cancellingPo.supplier_name} will be cancelled
+                {cancellingPo.purchase_requisition_id ? ' and its quantities go back to the requisition so they can be ordered again' : ''}.
+              </p>
+
+              <label className="form-label">Reason (optional)</label>
+              <textarea
+                className="form-input"
+                style={{ height: 90, width: '100%' }}
+                placeholder="e.g. Supplier cannot deliver on time; ordering from another vendor..."
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                maxLength={1000}
+              />
+            </div>
+
+            <div className="procurement-modal-footer">
+              <button onClick={() => setCancellingPo(null)} className="btn-outline" disabled={isCancellingPo}>
+                Keep Order
+              </button>
+              <button onClick={handleCancelPoConfirm} className="btn-primary is-danger" disabled={isCancellingPo}>
+                {isCancellingPo ? 'Cancelling...' : 'Cancel Purchase Order'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
       {/* MODAL 5: RECEIVE INBOUND SHIPMENT (CREATE GRN)            */}
       {/* ========================================================= */}
       {showCreateGrnModal && selectedPo && (
@@ -2736,6 +2831,12 @@ export const PurchaseOrdersPage: React.FC = () => {
               <button onClick={() => setShowViewPoModal(false)} className="btn-outline">
                 Close
               </button>
+              {canCancelPo(selectedPo) && (
+                <button onClick={() => openCancelPo(selectedPo)} className="btn-outline is-danger">
+                  <Ban size={14} />
+                  <span>Cancel PO</span>
+                </button>
+              )}
               {selectedPo.status !== 'received' && selectedPo.status !== 'cancelled' && (
                 <button
                   onClick={() => {

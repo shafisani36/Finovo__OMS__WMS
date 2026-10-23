@@ -25,7 +25,11 @@ class GoodsReceivedNoteController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $query = GoodsReceivedNote::where('organization_id', $org->id)
+        // With ?store_id= only notes for that store's purchase orders are listed and counted.
+        $scoped = fn () => GoodsReceivedNote::where('organization_id', $org->id)
+            ->when($request->integer('store_id'), fn ($q, $storeId) => $q->whereHas('purchaseOrder', fn ($po) => $po->where('store_id', $storeId)));
+
+        $query = $scoped()
             ->with(['purchaseOrder', 'warehouse', 'receivingLocation', 'receivedBy', 'inspectedBy', 'postedBy', 'items']);
 
         if ($status = $request->query('status')) {
@@ -52,13 +56,12 @@ class GoodsReceivedNoteController extends Controller
         $perPage = (int) $request->query('per_page', 15);
         $grns = $query->latest('id')->paginate($perPage);
 
-        $counts = [
-            'total' => GoodsReceivedNote::where('organization_id', $org->id)->count(),
-            'draft' => GoodsReceivedNote::where('organization_id', $org->id)->where('status', 'draft')->count(),
-            'inspected' => GoodsReceivedNote::where('organization_id', $org->id)->where('status', 'inspected')->count(),
-            'posted' => GoodsReceivedNote::where('organization_id', $org->id)->where('status', 'posted')->count(),
-            'cancelled' => GoodsReceivedNote::where('organization_id', $org->id)->where('status', 'cancelled')->count(),
-        ];
+        $byStatus = $scoped()->selectRaw('status, count(*) as total')->groupBy('status')->pluck('total', 'status');
+        $counts = ['total' => (int) $byStatus->sum()];
+
+        foreach (['draft', 'inspected', 'posted', 'cancelled'] as $status) {
+            $counts[$status] = (int) ($byStatus[$status] ?? 0);
+        }
 
         return response()->json([
             'status' => 'success',

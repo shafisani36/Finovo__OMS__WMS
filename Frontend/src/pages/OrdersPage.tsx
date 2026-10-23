@@ -1,24 +1,28 @@
 import React, { useEffect, useState } from 'react';
-import { FileText, Plus, CheckCircle, XCircle, Loader2, AlertCircle, Eye } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { FileText, CheckCircle, AlertCircle, Eye } from 'lucide-react';
 import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import DataTable from '../components/common/DataTable';
 import type { Column } from '../components/common/DataTable';
-import CustomDropdown from '../components/common/CustomDropdown';
 import omsService from '../services/omsService';
+import { useConfirmDialog } from '../components/common/ConfirmDialog';
 import { useActiveStore } from '../hooks/useActiveStore';
-import type { OrderModel, ProductModel, StoreModel } from '../services/omsService';
+import type { OrderModel } from '../services/omsService';
 import ProductThumb from '../components/catalog/ProductThumb';
 import StatusPill from '../components/common/StatusPill';
 import { formatMoney, variantNote } from '../utils/format';
 import OrderDetailModal from '../components/catalog/OrderDetailModal';
 import '../components/catalog/DetailModal.css';
 
+/** Same rules as the backend's Order::ALLOCATABLE_STATUSES and Order::SHIPPED_STATUSES. */
+const ALLOCATABLE_STATUSES = ['imported', 'pending', 'partially_allocated', 'exception'];
+const SHIPPED_STATUSES = ['partially_shipped', 'shipped', 'delivered', 'returned'];
+
 export const OrdersPage: React.FC = () => {
+  const { confirm, notify, dialog } = useConfirmDialog();
   const { activeStore } = useActiveStore();
   const [orders, setOrders] = useState<OrderModel[]>([]);
-  const [products, setProducts] = useState<ProductModel[]>([]);
-  const [stores, setStores] = useState<StoreModel[]>([]);
   const [kpis, setKpis] = useState({
     total_orders: 0,
     pending: 0,
@@ -30,25 +34,18 @@ export const OrdersPage: React.FC = () => {
   const [perPage] = useState(10);
   const [total, setTotal] = useState(0);
   const [lastPage, setLastPage] = useState(1);
-  const [search, setSearch] = useState('');
+  const [searchParams] = useSearchParams();
+  const [search, setSearch] = useState(searchParams.get('search') ?? '');
+  const [debouncedSearch, setDebouncedSearch] = useState(search.trim());
   const [statusFilter] = useState('');
   const [viewOrder, setViewOrder] = useState<OrderModel | null>(null);
 
-  // Manual Order Modal
-  const [modalOpen, setModalOpen] = useState(false);
-  const [modalLoading, setModalLoading] = useState(false);
-  const [selectedStoreId, setSelectedStoreId] = useState<number | ''>('');
-  const [customerName, setCustomerName] = useState('');
-  const [customerEmail, setCustomerEmail] = useState('');
-  const [selectedProductId, setSelectedProductId] = useState<number | ''>('');
-  const [quantity, setQuantity] = useState(1);
-  const [unitPrice, setUnitPrice] = useState('49.00');
 
   const fetchOrders = async () => {
     try {
       setLoading(true);
       const res = await omsService.getOrders({
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         status: statusFilter || undefined,
         store_id: activeStore?.id,
         page,
@@ -65,74 +62,49 @@ export const OrdersPage: React.FC = () => {
     }
   };
 
-  const fetchDependencies = async () => {
-    try {
-      const [pRes, sRes] = await Promise.all([
-        omsService.getProducts({ per_page: 50 }),
-        omsService.getStores(),
-      ]);
-      setProducts(pRes.data);
-      setStores(sRes.data);
-      if (sRes.data.length > 0) setSelectedStoreId(sRes.data[0].id);
-      if (pRes.data.length > 0) setSelectedProductId(pRes.data[0].id);
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  // A search handed over in the address (e.g. from the top-bar search) fills the search box.
+  useEffect(() => {
+    const fromUrl = searchParams.get('search');
+    if (fromUrl !== null) setSearch(fromUrl);
+  }, [searchParams]);
+
+  // Search 300 ms after the user stops typing, from the first page.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   useEffect(() => {
     fetchOrders();
-  }, [page, perPage, statusFilter, activeStore?.id]);
-
-  useEffect(() => {
-    fetchDependencies();
-  }, []);
-
-  const handleCreateOrder = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedStoreId || !customerName || !selectedProductId) return;
-
-    try {
-      setModalLoading(true);
-      await omsService.createOrder({
-        store_id: Number(selectedStoreId),
-        customer_name: customerName,
-        customer_email: customerEmail || undefined,
-        items: [
-          {
-            product_id: Number(selectedProductId),
-            quantity: Number(quantity),
-            unit_price: Number(unitPrice),
-          },
-        ],
-      });
-      setModalOpen(false);
-      setCustomerName('');
-      setCustomerEmail('');
-      fetchOrders();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setModalLoading(false);
-    }
-  };
+  }, [page, perPage, statusFilter, debouncedSearch, activeStore?.id]);
 
   const handleAllocate = async (orderId: number) => {
     try {
-      await omsService.allocateOrder(orderId);
+      const res = await omsService.allocateOrder(orderId);
+      notify({ title: 'Stock allocation', message: res.message });
       fetchOrders();
     } catch (err) {
-      console.error(err);
+      notify({ title: 'Allocation failed', message: err instanceof Error ? err.message : 'The order could not be allocated.' });
     }
   };
 
   const handleCancel = async (orderId: number) => {
-    if (!confirm('Are you sure you want to cancel this order and release stock reservations?')) return;
+    const ok = await confirm({
+      title: 'Cancel this order?',
+      message: 'The order will be cancelled and its reserved stock released back to the warehouse.',
+      confirmLabel: 'Cancel Order',
+      cancelLabel: 'Keep Order',
+      tone: 'danger',
+    });
+    if (!ok) return;
     try {
       await omsService.cancelOrder(orderId);
       fetchOrders();
     } catch (err) {
-      console.error(err);
+      notify({ title: 'Order not cancelled', message: err instanceof Error ? err.message : 'The order could not be cancelled.' });
     }
   };
 
@@ -213,9 +185,9 @@ export const OrdersPage: React.FC = () => {
             style={{ padding: '4px 8px', fontSize: 11 }}
           >
             <Eye size={13} />
-            <span>View</span>
+            <span>Manage</span>
           </button>
-          {row.order_status === 'pending' || row.order_status === 'imported' ? (
+          {ALLOCATABLE_STATUSES.includes(row.order_status) ? (
             <button
               onClick={() => handleAllocate(row.id)}
               className="btn-finovo-primary"
@@ -224,7 +196,7 @@ export const OrdersPage: React.FC = () => {
               Allocate
             </button>
           ) : null}
-          {row.order_status !== 'cancelled' && row.order_status !== 'shipped' && (
+          {row.order_status !== 'cancelled' && !SHIPPED_STATUSES.includes(row.order_status) && (
             <button
               onClick={() => handleCancel(row.id)}
               className="btn-finovo-secondary"
@@ -263,10 +235,6 @@ export const OrdersPage: React.FC = () => {
             description="Orders imported from connected stores are automatically validated and assigned to fulfillment hubs."
             icon={<FileText size={18} />}
           />
-          <button onClick={() => setModalOpen(true)} className="btn-finovo-primary">
-            <Plus size={16} />
-            <span>Create Order</span>
-          </button>
         </div>
       </div>
 
@@ -309,106 +277,8 @@ export const OrdersPage: React.FC = () => {
         />
       </div>
 
-      {modalOpen && (
-        <div className="modal-overlay" onClick={() => setModalOpen(false)}>
-          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between' }}>
-              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>New Manual Order</h3>
-              <button onClick={() => setModalOpen(false)} style={{ border: 'none', background: 'none', cursor: 'pointer' }}>
-                <XCircle size={20} />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateOrder} style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div>
-                <CustomDropdown
-                  label="Store"
-                  required
-                  placeholder="Select store..."
-                  value={selectedStoreId}
-                  onChange={(val) => setSelectedStoreId(Number(val))}
-                  options={stores.map((s) => ({
-                    value: s.id,
-                    label: `${s.name} (${s.platform})`,
-                  }))}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Customer Name *</label>
-                <input
-                  type="text"
-                  placeholder="e.g. John Doe"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-                  required
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Customer Email</label>
-                <input
-                  type="email"
-                  placeholder="john@example.com"
-                  value={customerEmail}
-                  onChange={(e) => setCustomerEmail(e.target.value)}
-                  style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-                />
-              </div>
-
-              <div>
-                <CustomDropdown
-                  label="Select Product"
-                  required
-                  placeholder="Select product..."
-                  value={selectedProductId}
-                  onChange={(val) => setSelectedProductId(Number(val))}
-                  options={products.map((p) => ({
-                    value: p.id,
-                    label: `${p.name} (${p.sku})`,
-                  }))}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Quantity *</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={quantity}
-                    onChange={(e) => setQuantity(Number(e.target.value))}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-                    required
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Unit Price ($) *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={unitPrice}
-                    onChange={(e) => setUnitPrice(e.target.value)}
-                    style={{ width: '100%', padding: '10px 14px', borderRadius: 10, border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 12 }}>
-                <button type="button" onClick={() => setModalOpen(false)} className="btn-finovo-secondary">Cancel</button>
-                <button type="submit" disabled={modalLoading} className="btn-finovo-primary">
-                  {modalLoading && <Loader2 size={16} className="animate-spin" />}
-                  <span>Place Order</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-      {viewOrder && <OrderDetailModal order={viewOrder} onClose={() => setViewOrder(null)} />}
+      {viewOrder && <OrderDetailModal order={viewOrder} onClose={() => setViewOrder(null)} onChanged={fetchOrders} />}
+      {dialog}
     </div>
   );
 };

@@ -21,7 +21,11 @@ class PurchaseOrderController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $orders = PurchaseOrder::where('organization_id', $org->id)
+        // With ?store_id= only that store's purchase orders are listed and counted.
+        $scoped = fn () => PurchaseOrder::where('organization_id', $org->id)
+            ->when($request->integer('store_id'), fn ($q, $storeId) => $q->where('store_id', $storeId));
+
+        $orders = $scoped()
             ->with(['warehouse', 'creator', 'requisition', 'items', 'goodsReceivedNotes'])
             ->when($request->query('status'), fn ($q, $status) => $q->where('status', $status))
             ->when($request->query('warehouse_id'), fn ($q, $warehouseId) => $q->where('warehouse_id', $warehouseId))
@@ -32,7 +36,7 @@ class PurchaseOrderController extends Controller
             ->latest('id')
             ->paginate($this->perPage($request));
 
-        $byStatus = PurchaseOrder::where('organization_id', $org->id)->selectRaw('status, count(*) as total')->groupBy('status')->pluck('total', 'status');
+        $byStatus = $scoped()->selectRaw('status, count(*) as total')->groupBy('status')->pluck('total', 'status');
         $counts = ['total' => (int) $byStatus->sum()];
 
         foreach (['draft', 'issued', 'partially_received', 'received', 'cancelled'] as $status) {
@@ -62,6 +66,7 @@ class PurchaseOrderController extends Controller
             'supplier_name' => 'required|string|max:255',
             'supplier_email' => 'nullable|email|max:255',
             'supplier_contact' => 'nullable|string|max:100',
+            'store_id' => ['nullable', 'integer', $this->inOrganization($request, 'stores')],
             'warehouse_id' => ['required', 'integer', $this->inOrganization($request, 'warehouses')],
             'order_date' => 'nullable|date',
             'expected_delivery_date' => 'nullable|date|after_or_equal:'.($request->input('order_date') ?: 'today'),

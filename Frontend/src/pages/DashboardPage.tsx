@@ -14,9 +14,11 @@ import { useAuth } from '../hooks/useAuth';
 import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import omsService from '../services/omsService';
+import { useActiveStore } from '../hooks/useActiveStore';
 
 export const DashboardPage: React.FC = () => {
   const { user } = useAuth();
+  const { activeStore } = useActiveStore();
   const [stats, setStats] = useState({
     stores: 0,
     warehouses: 0,
@@ -31,9 +33,9 @@ export const DashboardPage: React.FC = () => {
         const [storesRes, whRes, prodRes, ordRes, pickRes] = await Promise.all([
           omsService.getStores(),
           omsService.getWarehouses(),
-          omsService.getProducts({ per_page: 1 }),
-          omsService.getOrders({ per_page: 1 }),
-          omsService.getPickingTasks({ per_page: 1 }),
+          omsService.getProducts({ per_page: 1, store_id: activeStore?.id }),
+          omsService.getOrders({ per_page: 1, store_id: activeStore?.id }),
+          omsService.getPickingTasks({ per_page: 1, store_id: activeStore?.id }),
         ]);
 
         setStats({
@@ -49,7 +51,7 @@ export const DashboardPage: React.FC = () => {
     };
 
     fetchDashboardData();
-  }, []);
+  }, [activeStore?.id]);
 
   return (
     <div className="page-container">

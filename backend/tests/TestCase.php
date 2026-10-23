@@ -2,7 +2,12 @@
 
 namespace Tests;
 
+use App\Models\Order;
+use App\Models\ProductVariant;
+use App\Models\Store;
+use App\Services\OrderAllocationEngine;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Illuminate\Support\Str;
 
 abstract class TestCase extends BaseTestCase
 {
@@ -12,5 +17,37 @@ abstract class TestCase extends BaseTestCase
     protected function sampleJpeg(): string
     {
         return base64_decode(self::SAMPLE_JPEG);
+    }
+
+    /**
+     * An order as a store import brings it in (orders are never typed into Finovo), allocated against stock.
+     *
+     * @param  array<string, mixed>  $attributes  order fields to override, e.g. customer_email
+     */
+    protected function importOrder(Store $store, ProductVariant $variant, int $quantity, float $unitPrice = 10.0, array $attributes = []): Order
+    {
+        $order = Order::create($attributes + [
+            'organization_id' => $store->organization_id,
+            'store_id' => $store->id,
+            'order_number' => '#'.Str::upper(Str::random(8)),
+            'external_order_id' => (string) Str::uuid(),
+            'customer_name' => 'Test Customer',
+            'order_status' => 'imported',
+            'total_amount' => $quantity * $unitPrice,
+            'currency' => 'USD',
+            'placed_at' => now(),
+        ]);
+
+        $order->items()->create([
+            'product_variant_id' => $variant->id,
+            'external_sku' => $variant->sku,
+            'product_name' => $variant->product->name,
+            'quantity' => $quantity,
+            'unit_price' => $unitPrice,
+            'total_amount' => $quantity * $unitPrice,
+            'status' => 'pending',
+        ]);
+
+        return app(OrderAllocationEngine::class)->allocateOrder($order)->load('items');
     }
 }

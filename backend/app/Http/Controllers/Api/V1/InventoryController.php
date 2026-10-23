@@ -141,14 +141,20 @@ class InventoryController extends Controller
         $org = $request->user()->currentOrganization();
         $warehouseId = $request->query('warehouse_id');
 
-        $query = InventoryBalance::where('organization_id', $org->id);
+        // With ?store_id= the figures cover only products sold in that store, like the stock table.
+        $storeId = $request->integer('store_id');
+
+        $query = InventoryBalance::where('organization_id', $org->id)
+            ->when($storeId, fn ($q) => $q->whereHas('variant.skuMappings', fn ($m) => $m->where('store_id', $storeId)));
         if ($warehouseId) {
             $query->where('warehouse_id', $warehouseId);
         }
 
         $balances = $query->with('variant')->get();
 
-        $totalSkus = ProductVariant::where('organization_id', $org->id)->count();
+        $totalSkus = ProductVariant::where('organization_id', $org->id)
+            ->when($storeId, fn ($q) => $q->whereHas('skuMappings', fn ($m) => $m->where('store_id', $storeId)))
+            ->count();
         $totalOnHand = $balances->sum('on_hand');
         $totalReserved = $balances->sum('reserved');
         $totalAvailable = $balances->sum('available');

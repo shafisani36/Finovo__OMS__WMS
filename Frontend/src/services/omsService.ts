@@ -182,6 +182,113 @@ export interface PickingItem {
   priority: string;
 }
 
+export interface ShipmentModel {
+  id: number;
+  order_id: number;
+  order_number: string | null;
+  customer: string;
+  store: string | null;
+  items_count: number;
+  total_amount: string | null;
+  currency: string | null;
+  warehouse: string | null;
+  carrier: string | null;
+  tracking_number: string | null;
+  tracking_url: string | null;
+  status: 'pending' | 'shipped' | 'delivered';
+  packed_at: string | null;
+  shipped_at: string | null;
+  delivered_at: string | null;
+  dispatched_by: string | null;
+}
+
+export interface ShipmentKpis {
+  ready_to_dispatch: number;
+  dispatched_today: number;
+  in_transit: number;
+  delivered: number;
+}
+
+export interface ReturnModel {
+  id: number;
+  return_number: string;
+  order_id: number;
+  order_number: string | null;
+  customer: string;
+  store: string | null;
+  warehouse: string | null;
+  status: 'requested' | 'received' | 'completed' | 'rejected';
+  reason: string | null;
+  disposition: 'sellable' | 'damaged' | 'quarantine' | 'disposed' | null;
+  notes: string | null;
+  items_count: number;
+  items: { product_name: string; sku: string | null; quantity: number }[];
+  created_by: string | null;
+  created_at: string | null;
+  received_at: string | null;
+  completed_at: string | null;
+}
+
+export interface ReturnKpis {
+  requested: number;
+  received: number;
+  completed: number;
+  rejected: number;
+  restocked_units: number;
+}
+
+export interface ReturnableOrder {
+  id: number;
+  order_number: string;
+  customer: string;
+  items: { id: number; product_name: string; sku: string | null; shipped_quantity: number; returnable_quantity: number }[];
+}
+
+export interface BarcodeSettings {
+  format: 'CODE128' | 'CODE39' | 'EAN13' | 'UPC';
+  width: number;
+  height: number;
+  display_value: boolean;
+  font_size: number;
+  margin: number;
+}
+
+/** An order with its fulfillment state and the next steps it allows. */
+export interface OrderFulfillment {
+  id: number;
+  order_number: string;
+  customer: string;
+  customer_email: string | null;
+  store: string | null;
+  order_status: string;
+  payment_status: string;
+  fulfillment_status: string;
+  total_amount: string;
+  currency: string | null;
+  placed_at: string | null;
+  items: { product_name: string; sku: string | null; quantity: number }[];
+  can_allocate: boolean;
+  can_cancel: boolean;
+  pick_task: { id: number; status: 'not_started' | 'in_progress' | 'picked' | 'packed' } | null;
+  shipment: { id: number; status: 'pending' | 'shipped' | 'delivered'; carrier: string | null; tracking_number: string | null; tracking_url: string | null } | null;
+}
+
+export interface ScannedProduct {
+  id: number;
+  product_id: number;
+  name: string;
+  variant: string | null;
+  sku: string;
+  barcode: string | null;
+  image_url: string | null;
+  price: string;
+  is_active: boolean;
+  stock: { on_hand: number; available: number; reserved: number };
+  warehouses: { warehouse: string | null; on_hand: number; available: number; reserved: number }[];
+}
+
+export type ScanResult = { type: 'order'; data: OrderFulfillment } | { type: 'product'; data: ScannedProduct };
+
 export interface ProductVariantModel {
   id: number;
   sku: string;
@@ -233,7 +340,7 @@ export interface InventoryItemModel {
   warehouse_name: string;
   warehouse_code: string;
   product_id: number;
-  product_variant_id?: number;
+  product_variant_id: number;
   product_name: string;
   sku: string;
   barcode?: string | null;
@@ -602,7 +709,7 @@ export interface CustomerDetailModel {
 
 export const omsService = {
   // Stores
-  async getStores(params?: { search?: string; status?: string; page?: number; per_page?: number }) {
+  async getStores(params?: { search?: string; status?: string; platform?: string; page?: number; per_page?: number }) {
     const { data } = await apiClient.get('/stores', { params });
     return data;
   },
@@ -765,7 +872,7 @@ export const omsService = {
   },
 
   // Stock Movements & Inventory
-  async getStockMovements(params?: { search?: string; type?: string; warehouse_id?: number; page?: number; per_page?: number }) {
+  async getStockMovements(params?: { store_id?: number; search?: string; type?: string; warehouse_id?: number; page?: number; per_page?: number }) {
     const { data } = await apiClient.get('/inventory/movements', { params });
     return data;
   },
@@ -791,8 +898,8 @@ export const omsService = {
     return data;
   },
 
-  async getInventoryKpis(warehouseId?: number) {
-    const { data } = await apiClient.get('/inventory/kpis', { params: { warehouse_id: warehouseId } });
+  async getInventoryKpis(warehouseId?: number, storeId?: number) {
+    const { data } = await apiClient.get('/inventory/kpis', { params: { warehouse_id: warehouseId, store_id: storeId } });
     return data;
   },
 
@@ -974,7 +1081,7 @@ export const omsService = {
   },
 
   // Picking & Packing
-  async getPickingTasks(params?: { search?: string; status?: string; page?: number; per_page?: number }) {
+  async getPickingTasks(params?: { store_id?: number; search?: string; status?: string; page?: number; per_page?: number }) {
     const { data } = await apiClient.get('/picking', { params });
     return data;
   },
@@ -991,6 +1098,77 @@ export const omsService = {
 
   async bulkUpdatePickTasks(taskIds: number[], status: string) {
     const { data } = await apiClient.post('/picking/bulk-update', { task_ids: taskIds, status });
+    return data;
+  },
+
+  // Shipments
+  async getShipments(params?: { store_id?: number; search?: string; status?: string; page?: number; per_page?: number }): Promise<{
+    data: ShipmentModel[];
+    meta: { current_page: number; last_page: number; per_page: number; total: number };
+    kpis: ShipmentKpis;
+  }> {
+    const { data } = await apiClient.get('/shipments', { params });
+    return data;
+  },
+
+  async dispatchShipment(shipmentId: number, payload: { carrier: string; tracking_number?: string; tracking_url?: string }) {
+    const { data } = await apiClient.post(`/shipments/${shipmentId}/dispatch`, payload);
+    return data;
+  },
+
+  async deliverShipment(shipmentId: number) {
+    const { data } = await apiClient.post(`/shipments/${shipmentId}/deliver`);
+    return data;
+  },
+
+  // Returns
+  async getReturns(params?: { store_id?: number; search?: string; status?: string; page?: number; per_page?: number }): Promise<{
+    data: ReturnModel[];
+    meta: { current_page: number; last_page: number; per_page: number; total: number };
+    kpis: ReturnKpis;
+  }> {
+    const { data } = await apiClient.get('/returns', { params });
+    return data;
+  },
+
+  async getReturnableOrders(params?: { store_id?: number; search?: string }): Promise<{ data: ReturnableOrder[] }> {
+    const { data } = await apiClient.get('/returns/returnable-orders', { params });
+    return data;
+  },
+
+  async createReturn(payload: { order_id: number; reason: string; notes?: string; items: { order_item_id: number; quantity: number }[] }) {
+    const { data } = await apiClient.post('/returns', payload);
+    return data;
+  },
+
+  async receiveReturn(returnId: number) {
+    const { data } = await apiClient.post(`/returns/${returnId}/receive`);
+    return data;
+  },
+
+  async completeReturn(returnId: number, payload: { disposition: string; notes?: string }) {
+    const { data } = await apiClient.post(`/returns/${returnId}/complete`, payload);
+    return data;
+  },
+
+  async rejectReturn(returnId: number, reason: string) {
+    const { data } = await apiClient.post(`/returns/${returnId}/reject`, { reason });
+    return data;
+  },
+
+  // Barcodes
+  async getBarcodeSettings(): Promise<{ data: BarcodeSettings }> {
+    const { data } = await apiClient.get('/barcode/settings');
+    return data;
+  },
+
+  async updateBarcodeSettings(settings: BarcodeSettings): Promise<{ message: string; data: BarcodeSettings }> {
+    const { data } = await apiClient.put('/barcode/settings', settings);
+    return data;
+  },
+
+  async scanBarcode(code: string): Promise<ScanResult> {
+    const { data } = await apiClient.get('/barcode/scan', { params: { code } });
     return data;
   },
 
@@ -1011,10 +1189,6 @@ export const omsService = {
     return data;
   },
 
-  async createOrder(payload: any) {
-    const { data } = await apiClient.post('/orders', payload);
-    return data;
-  },
 
   /** Downloads the order's invoice PDF; the order gets its invoice number the first time. */
   async downloadOrderInvoice(orderId: number, orderNumber: string) {
@@ -1043,6 +1217,11 @@ export const omsService = {
     return data;
   },
 
+  async getOrderFulfillment(orderId: number): Promise<{ data: OrderFulfillment }> {
+    const { data } = await apiClient.get(`/orders/${orderId}/fulfillment`);
+    return data;
+  },
+
   async cancelOrder(orderId: number) {
     const { data } = await apiClient.post(`/orders/${orderId}/cancel`);
     return data;
@@ -1054,15 +1233,11 @@ export const omsService = {
     return data;
   },
 
-  async createProduct(payload: { name: string; sku: string; category?: string; barcode?: string; price?: number }) {
-    const { data } = await apiClient.post('/products', payload);
-    return data;
-  },
-
   // ==========================================
   // Purchase Requisitions (PR)
   // ==========================================
   async getPurchaseRequisitions(params?: {
+    store_id?: number;
     search?: string;
     status?: string;
     warehouse_id?: number;
@@ -1075,6 +1250,7 @@ export const omsService = {
   },
 
   async createPurchaseRequisition(payload: {
+    store_id?: number;
     warehouse_id: number;
     delivery_location_id?: number;
     department?: string;
@@ -1177,6 +1353,7 @@ export const omsService = {
   // Purchase Orders (PO)
   // ==========================================
   async getPurchaseOrders(params?: {
+    store_id?: number;
     search?: string;
     status?: string;
     warehouse_id?: number;
@@ -1188,6 +1365,7 @@ export const omsService = {
   },
 
   async createPurchaseOrder(payload: {
+    store_id?: number;
     supplier_name: string;
     supplier_email?: string;
     supplier_contact?: string;
@@ -1231,6 +1409,7 @@ export const omsService = {
   // Goods Received Notes (GRN)
   // ==========================================
   async getGoodsReceivedNotes(params?: {
+    store_id?: number;
     search?: string;
     status?: string;
     warehouse_id?: number;

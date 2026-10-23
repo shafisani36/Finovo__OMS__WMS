@@ -19,11 +19,13 @@ import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import DataTable from '../components/common/DataTable';
 import type { Column } from '../components/common/DataTable';
 import omsService from '../services/omsService';
+import { useConfirmDialog } from '../components/common/ConfirmDialog';
 import type { WarehouseModel } from '../services/omsService';
 import WarehouseStatusBadge from '../components/warehouse/WarehouseStatusBadge';
 import CustomDropdown from '../components/common/CustomDropdown';
 
 export const WarehousesPage: React.FC = () => {
+  const { notify, dialog } = useConfirmDialog();
   const navigate = useNavigate();
 
   const [warehouses, setWarehouses] = useState<WarehouseModel[]>([]);
@@ -89,7 +91,12 @@ export const WarehousesPage: React.FC = () => {
       await omsService.activateWarehouse(warehouseId);
       fetchWarehouses();
     } catch (err: any) {
-      alert(err.message || 'Cannot activate warehouse: check readiness issues.');
+      await notify({
+        title: 'Warehouse not ready',
+        message: err.message || 'This warehouse cannot be activated yet.',
+        note: 'Its setup checklist opens next so you can fix what is missing.',
+        confirmLabel: 'Open Setup',
+      });
       navigate(`/warehouses/${warehouseId}`);
     }
   };
@@ -453,6 +460,7 @@ export const WarehousesPage: React.FC = () => {
           emptyMessage="No warehouses match your filter criteria."
         />
       </div>
+      {dialog}
     </div>
   );
 };

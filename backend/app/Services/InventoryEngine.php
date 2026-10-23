@@ -5,13 +5,9 @@ namespace App\Services;
 use App\Models\InventoryBalance;
 use App\Models\InventoryLedgerEntry;
 use App\Models\InventoryLocationBalance;
-use App\Models\InventoryReceipt;
-use App\Models\InventoryReceiptItem;
 use App\Models\InventoryReservation;
 use App\Models\InventoryTransfer;
-use App\Models\ProductVariant;
 use App\Models\StockAdjustment;
-use App\Models\WarehouseLocation;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use RuntimeException;
@@ -863,6 +859,51 @@ class InventoryEngine
                 'reference_id' => $orderId,
                 'reference_number' => 'SHP-'.$orderId,
                 'reason' => "Shipped $quantity units for Order #$orderId",
+                'user_id' => $userId,
+            ]);
+        });
+    }
+
+    /**
+     * Put returned units back on hand. Sellable units become available again; damaged or quarantined units are
+     * counted on hand but held out of what can be sold.
+     */
+    public function receiveReturn(
+        int $organizationId,
+        int $warehouseId,
+        int $productVariantId,
+        int $quantity,
+        string $condition, // sellable, damaged, quarantine
+        int $returnId,
+        string $returnNumber,
+        ?int $userId = null
+    ): void {
+        DB::transaction(function () use ($organizationId, $warehouseId, $productVariantId, $quantity, $condition, $returnId, $returnNumber, $userId) {
+            $balance = $this->lockBalance($organizationId, $warehouseId, $productVariantId);
+            $before = $balance->on_hand;
+
+            $balance->on_hand += $quantity;
+            if ($condition === 'damaged') {
+                $balance->damaged += $quantity;
+            } elseif ($condition === 'quarantine') {
+                $balance->quarantined = ($balance->quarantined ?? 0) + $quantity;
+            }
+            $balance->available = max(0, $balance->on_hand - $balance->reserved - $balance->damaged - ($balance->quarantined ?? 0));
+            $balance->save();
+
+            InventoryLedgerEntry::create([
+                'organization_id' => $organizationId,
+                'warehouse_id' => $warehouseId,
+                'product_variant_id' => $productVariantId,
+                'movement_type' => 'return',
+                'quantity' => $quantity,
+                'balance_before' => $before,
+                'balance_after' => $balance->on_hand,
+                'reference_type' => 'Return',
+                'reference_id' => $returnId,
+                'reference_number' => $returnNumber,
+                'inventory_status' => $condition === 'sellable' ? 'available' : ($condition === 'damaged' ? 'damaged' : 'quarantined'),
+                'reason' => "Returned $quantity units ($condition) on $returnNumber",
                 'user_id' => $userId,
             ]);
         });

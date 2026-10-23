@@ -14,6 +14,12 @@ class Order extends Model
 {
     use HasFactory;
 
+    /** Orders in these statuses can (re)try reserving stock. */
+    public const ALLOCATABLE_STATUSES = ['imported', 'pending', 'partially_allocated', 'exception'];
+
+    /** Orders in these statuses have left the warehouse and can no longer be cancelled. */
+    public const SHIPPED_STATUSES = ['partially_shipped', 'shipped', 'delivered', 'returned'];
+
     protected $fillable = [
         'organization_id',
         'store_id',
@@ -78,5 +84,50 @@ class Order extends Model
     public function returns(): HasMany
     {
         return $this->hasMany(OrderReturn::class);
+    }
+
+    /**
+     * The order with its fulfillment state and the next steps it allows, as shown on the order screen and
+     * after a barcode scan.
+     *
+     * @return array<string, mixed>
+     */
+    public function fulfillmentSummary(): array
+    {
+        $this->loadMissing(['store', 'items', 'pickTasks', 'shipments']);
+        $task = $this->pickTasks->first();
+        $shipment = $this->shipments->sortByDesc('id')->first();
+
+        return [
+            'id' => $this->id,
+            'order_number' => $this->order_number,
+            'customer' => $this->customer_name ?: 'Unknown',
+            'customer_email' => $this->customer_email,
+            'store' => $this->store?->name,
+            'order_status' => $this->order_status,
+            'payment_status' => $this->payment_status,
+            'fulfillment_status' => $this->fulfillment_status,
+            'total_amount' => $this->total_amount,
+            'currency' => $this->currency,
+            'placed_at' => $this->placed_at?->toIso8601String(),
+            'items' => $this->items->map(fn (OrderItem $item) => [
+                'product_name' => $item->product_name,
+                'sku' => $item->external_sku,
+                'quantity' => $item->quantity,
+            ]),
+            'can_allocate' => in_array($this->order_status, self::ALLOCATABLE_STATUSES, true),
+            'can_cancel' => $this->order_status !== 'cancelled' && ! in_array($this->order_status, self::SHIPPED_STATUSES, true),
+            // The picking step can still be changed only while the order has not left the warehouse.
+            'pick_task' => $task && ! in_array($task->status, PickTask::CLOSED, true)
+                ? ['id' => $task->id, 'status' => $task->status]
+                : null,
+            'shipment' => $shipment ? [
+                'id' => $shipment->id,
+                'status' => $shipment->status,
+                'carrier' => $shipment->carrier,
+                'tracking_number' => $shipment->tracking_number,
+                'tracking_url' => $shipment->trackingLink(),
+            ] : null,
+        ];
     }
 }

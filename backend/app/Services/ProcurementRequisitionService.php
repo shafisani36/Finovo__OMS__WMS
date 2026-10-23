@@ -45,6 +45,7 @@ class ProcurementRequisitionService
             $requisition = PurchaseRequisition::create([
                 'organization_id' => $orgId,
                 'pr_number' => PurchaseRequisition::nextNumber($orgId),
+                'store_id' => $data['store_id'] ?? null,
                 'requester_id' => $requester->id,
                 'department' => $data['department'] ?? 'General Procurement',
                 'warehouse_id' => $data['warehouse_id'],
@@ -212,6 +213,7 @@ class ProcurementRequisitionService
             $po = $this->purchaseOrders->createPurchaseOrder([
                 ...$data,
                 'purchase_requisition_id' => $requisition->id,
+                'store_id' => $requisition->store_id,
                 'warehouse_id' => $data['warehouse_id'] ?? $requisition->warehouse_id,
                 'currency' => $data['currency'] ?? $requisition->currency,
                 'notes' => $data['notes'] ?? "Generated from Requisition #{$requisition->pr_number}",

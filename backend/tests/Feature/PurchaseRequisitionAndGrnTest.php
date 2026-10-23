@@ -10,10 +10,10 @@ use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseRequisition;
+use App\Models\Store;
 use App\Models\User;
 use App\Models\Warehouse;
 use App\Models\WarehouseLocation;
-use App\Services\InventoryEngine;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -22,14 +22,23 @@ class PurchaseRequisitionAndGrnTest extends TestCase
     use RefreshDatabase;
 
     protected Organization $orgA;
+
     protected Organization $orgB;
+
     protected User $requesterA;
+
     protected User $managerA;
+
     protected User $userB;
+
     protected Warehouse $warehouseA;
+
     protected WarehouseLocation $dockLocation;
+
     protected Product $product;
+
     protected ProductVariant $variant1;
+
     protected ProductVariant $variant2;
 
     protected function setUp(): void
@@ -473,6 +482,9 @@ class PurchaseRequisitionAndGrnTest extends TestCase
         $poFresh = $po->fresh();
         $this->assertEquals('received', $poFresh->status);
         $this->assertEquals(10, $poFresh->items->first()->received_quantity);
+
+        // The product is now valued at what it was bought for.
+        $this->assertEquals($poFresh->items->first()->unit_cost, $this->variant1->fresh()->cost_price);
     }
 
     public function test_multi_tenant_isolation_prevents_cross_org_access(): void
@@ -628,6 +640,32 @@ class PurchaseRequisitionAndGrnTest extends TestCase
         PurchaseOrder::create(['organization_id' => $this->orgA->id, 'po_number' => 'PO-'.now()->year.'-0002', 'supplier_name' => 'S', 'warehouse_id' => $this->warehouseA->id, 'created_by_user_id' => $this->managerA->id, 'status' => 'issued', 'order_date' => now()]);
         PurchaseOrder::where('po_number', 'PO-2026-0001')->delete(); // the sample order
         $this->assertSame('PO-'.now()->year.'-0003', PurchaseOrder::nextNumber($this->orgA->id));
+    }
+
+    public function test_purchase_documents_are_listed_only_for_the_store_that_raised_them(): void
+    {
+        [$karachi, $lahore] = array_map(fn (string $code) => Store::create([
+            'organization_id' => $this->orgA->id, 'name' => $code, 'code' => $code, 'platform' => 'manual',
+            'status' => 'active', 'sync_status' => 'healthy', 'orders_awaiting_sync' => 0,
+        ]), ['khi', 'lhr']);
+
+        $line = ['product_variant_id' => $this->variant1->id, 'sku' => 'A', 'product_name' => 'A', 'requested_quantity' => 2, 'estimated_unit_price' => 10];
+        $prId = $this->actingAs($this->requesterA, 'sanctum')->postJson('/api/v1/purchase-requisitions', [
+            'store_id' => $karachi->id, 'warehouse_id' => $this->warehouseA->id, 'items' => [$line],
+        ])->assertCreated()->json('data.id');
+        $this->actingAs($this->requesterA, 'sanctum')->postJson("/api/v1/purchase-requisitions/{$prId}/submit");
+        $this->actingAs($this->managerA, 'sanctum')->postJson("/api/v1/purchase-requisitions/{$prId}/approve");
+        $poId = $this->actingAs($this->managerA, 'sanctum')->postJson("/api/v1/purchase-requisitions/{$prId}/convert-po", ['supplier_name' => 'Zebra'])->json('data.id');
+        $this->assertSame($karachi->id, PurchaseOrder::findOrFail($poId)->store_id, 'the order inherits the requisition\'s store');
+
+        $this->actingAs($this->managerA, 'sanctum')->getJson("/api/v1/purchase-requisitions?store_id={$karachi->id}")->assertJsonCount(1, 'data')->assertJsonPath('kpis.total', 1);
+        $this->actingAs($this->managerA, 'sanctum')->getJson("/api/v1/purchase-requisitions?store_id={$lahore->id}")->assertJsonCount(0, 'data')->assertJsonPath('kpis.total', 0);
+        $this->actingAs($this->managerA, 'sanctum')->getJson("/api/v1/purchase-orders?store_id={$karachi->id}")->assertJsonCount(1, 'data');
+        $this->actingAs($this->managerA, 'sanctum')->getJson("/api/v1/purchase-orders?store_id={$lahore->id}")->assertJsonCount(0, 'data')->assertJsonPath('kpis.total', 0);
+
+        $other = Store::create(['organization_id' => $this->orgB->id, 'name' => 'Rival', 'code' => 'rival', 'platform' => 'manual', 'status' => 'active', 'sync_status' => 'healthy', 'orders_awaiting_sync' => 0]);
+        $this->actingAs($this->requesterA, 'sanctum')->postJson('/api/v1/purchase-requisitions', ['store_id' => $other->id, 'warehouse_id' => $this->warehouseA->id, 'items' => [$line]])
+            ->assertStatus(422)->assertJsonValidationErrors(['store_id']);
     }
 
     protected function createDraftPr(): PurchaseRequisition

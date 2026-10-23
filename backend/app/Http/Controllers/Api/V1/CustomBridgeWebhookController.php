@@ -8,6 +8,7 @@ use App\Models\OrderItem;
 use App\Models\OutboxEvent;
 use App\Models\Product;
 use App\Services\CustomBridgeService;
+use App\Services\EmailService;
 use App\Services\OrderAllocationEngine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,7 +19,8 @@ class CustomBridgeWebhookController extends Controller
 {
     public function __construct(
         protected CustomBridgeService $bridgeService,
-        protected OrderAllocationEngine $allocationEngine
+        protected OrderAllocationEngine $allocationEngine,
+        protected EmailService $emails,
     ) {}
 
     /**
@@ -50,7 +52,7 @@ class CustomBridgeWebhookController extends Controller
             'currency' => ['nullable', 'string', 'max:10'],
         ]);
 
-        return DB::transaction(function () use ($store, $validated) {
+        $response = DB::transaction(function () use ($store, $validated, &$order) {
             // Deduplicate external order
             $existing = Order::where('organization_id', $store->organization_id)
                 ->where('store_id', $store->id)
@@ -133,6 +135,13 @@ class CustomBridgeWebhookController extends Controller
                 'external_id' => $order->external_order_id,
             ], 201);
         });
+
+        // A new order is confirmed to the customer once it is saved.
+        if ($response->getStatusCode() === 201) {
+            $this->emails->sendOrderConfirmationEmail($order);
+        }
+
+        return $response;
     }
 
     /**

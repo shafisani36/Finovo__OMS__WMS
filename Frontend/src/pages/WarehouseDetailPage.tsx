@@ -30,11 +30,12 @@ import type {
 } from '../services/omsService';
 import WarehouseStatusBadge from '../components/warehouse/WarehouseStatusBadge';
 import CustomDropdown from '../components/common/CustomDropdown';
-import ConfirmDialog from '../components/common/ConfirmDialog';
+import ConfirmDialog, { useConfirmDialog } from '../components/common/ConfirmDialog';
 
 type TabType = 'overview' | 'layout' | 'staff' | 'opening_stock' | 'audit_logs';
 
 export const WarehouseDetailPage: React.FC = () => {
+  const { confirm, dialog } = useConfirmDialog();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const warehouseId = Number(id);
@@ -189,7 +190,13 @@ export const WarehouseDetailPage: React.FC = () => {
   };
 
   const handleDeleteLocation = async (locId: number, code: string) => {
-    if (!confirm(`Delete location ${code}? All child bins will be removed.`)) return;
+    const ok = await confirm({
+      title: 'Delete location?',
+      message: <>Delete location <strong>{code}</strong>? All child bins will be removed.</>,
+      confirmLabel: 'Delete Location',
+      tone: 'danger',
+    });
+    if (!ok) return;
 
     try {
       setActionLoading(true);
@@ -204,7 +211,13 @@ export const WarehouseDetailPage: React.FC = () => {
   };
 
   const handleGenerateStarter = async () => {
-    if (!confirm('Auto-generate a starter layout topology with 1 Zone and standard aisles/bins?')) return;
+    const ok = await confirm({
+      title: 'Generate starter layout?',
+      message: 'A starter layout with 1 zone and standard aisles and bins will be created for this warehouse.',
+      confirmLabel: 'Generate Layout',
+      tone: 'primary',
+    });
+    if (!ok) return;
 
     try {
       setActionLoading(true);
@@ -239,7 +252,13 @@ export const WarehouseDetailPage: React.FC = () => {
   };
 
   const handleRemoveStaff = async (staffId: number, name?: string) => {
-    if (!confirm(`Remove ${name || 'staff member'} from this warehouse?`)) return;
+    const ok = await confirm({
+      title: 'Remove staff member?',
+      message: <>Remove <strong>{name || 'this staff member'}</strong> from this warehouse?</>,
+      confirmLabel: 'Remove',
+      tone: 'danger',
+    });
+    if (!ok) return;
 
     try {
       setActionLoading(true);
@@ -287,7 +306,14 @@ export const WarehouseDetailPage: React.FC = () => {
   };
 
   const handleCommitOpeningStock = async () => {
-    if (!confirm('Commit opening inventory? Ledger balance and stock movement records will be initialized.')) return;
+    const ok = await confirm({
+      title: 'Commit opening inventory?',
+      message: 'Stock balances and stock movement records will be created from these rows.',
+      note: 'This cannot be undone. Later changes need stock adjustments.',
+      confirmLabel: 'Commit Stock',
+      tone: 'primary',
+    });
+    if (!ok) return;
 
     try {
       setStockCommitLoading(true);
@@ -1311,6 +1337,7 @@ export const WarehouseDetailPage: React.FC = () => {
         onConfirm={handleDeleteWarehouse}
         onCancel={() => setDeleteDialogOpen(false)}
       />
+      {dialog}
     </div>
   );
 };

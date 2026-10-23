@@ -1,6 +1,6 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, Loader2, X } from 'lucide-react';
+import { AlertTriangle, Info, Loader2, X } from 'lucide-react';
 import './ConfirmDialog.css';
 
 export interface ConfirmDialogProps {
@@ -10,9 +10,10 @@ export interface ConfirmDialogProps {
   /** Optional muted line under the message, e.g. what will happen next. */
   note?: string;
   confirmLabel?: string;
-  cancelLabel?: string;
-  /** "danger" for destructive actions (red), "primary" otherwise. */
-  tone?: 'danger' | 'primary';
+  /** null hides the cancel button, for a popup that only informs. */
+  cancelLabel?: string | null;
+  /** "danger" for destructive actions (red), "primary" otherwise, "info" for a popup that only informs. */
+  tone?: 'danger' | 'primary' | 'info';
   loading?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
@@ -64,8 +65,8 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           <X size={18} />
         </button>
 
-        <span className={`confirm-dialog-icon confirm-dialog-icon-${tone}`}>
-          <AlertTriangle size={22} />
+        <span className={`confirm-dialog-icon confirm-dialog-icon-${tone === 'danger' ? 'danger' : 'primary'}`}>
+          {tone === 'info' ? <Info size={22} /> : <AlertTriangle size={22} />}
         </span>
 
         <h3 id="confirm-dialog-title" className="confirm-dialog-title">{title}</h3>
@@ -73,9 +74,11 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         {note && <p className="confirm-dialog-note">{note}</p>}
 
         <div className="confirm-dialog-actions">
-          <button type="button" className="btn-finovo-secondary" onClick={onCancel} disabled={loading}>
-            {cancelLabel}
-          </button>
+          {cancelLabel !== null && (
+            <button type="button" className="btn-finovo-secondary" onClick={onCancel} disabled={loading}>
+              {cancelLabel}
+            </button>
+          )}
           <button
             type="button"
             className={tone === 'danger' ? 'btn-finovo-primary confirm-dialog-danger' : 'btn-finovo-primary'}
@@ -90,6 +93,52 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
     </div>,
     document.body
   );
+};
+
+export type ConfirmOptions = Pick<ConfirmDialogProps, 'title' | 'message' | 'note' | 'confirmLabel' | 'cancelLabel' | 'tone'>;
+
+/**
+ * Promise-based replacement for the browser's confirm() and alert():
+ * `if (!(await confirm({ title, message }))) return;` and render `dialog` once in the page.
+ */
+export const useConfirmDialog = () => {
+  const [request, setRequest] = useState<(ConfirmOptions & { resolve: (ok: boolean) => void }) | null>(null);
+
+  const confirm = useCallback(
+    (options: ConfirmOptions) => new Promise<boolean>((resolve) => setRequest({ ...options, resolve })),
+    []
+  );
+
+  /** A popup with a single OK button. */
+  const notify = useCallback(
+    (options: Omit<ConfirmOptions, 'cancelLabel'>) =>
+      confirm({ tone: 'info', confirmLabel: 'OK', ...options, cancelLabel: null }).then(() => undefined),
+    [confirm]
+  );
+
+  const close = useCallback(
+    (ok: boolean) => {
+      request?.resolve(ok);
+      setRequest(null);
+    },
+    [request]
+  );
+
+  const dialog = (
+    <ConfirmDialog
+      open={request !== null}
+      title={request?.title ?? ''}
+      message={request?.message}
+      note={request?.note}
+      confirmLabel={request?.confirmLabel}
+      cancelLabel={request?.cancelLabel}
+      tone={request?.tone ?? 'primary'}
+      onConfirm={() => close(true)}
+      onCancel={() => close(false)}
+    />
+  );
+
+  return { confirm, notify, dialog };
 };
 
 export default ConfirmDialog;

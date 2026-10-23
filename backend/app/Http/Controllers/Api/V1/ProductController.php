@@ -95,45 +95,4 @@ class ProductController extends Controller
             ],
         ]);
     }
-
-    /**
-     * Create product with default variant.
-     */
-    public function store(Request $request): JsonResponse
-    {
-        $org = $request->user()->currentOrganization();
-
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'sku' => ['required', 'string', 'max:100'],
-            'barcode' => ['nullable', 'string', 'max:100'],
-            'description' => ['nullable', 'string'],
-            'category' => ['nullable', 'string', 'max:100'],
-            'price' => ['nullable', 'numeric', 'min:0'],
-        ]);
-
-        $product = Product::create([
-            'organization_id' => $org->id,
-            'name' => $validated['name'],
-            'sku' => strtoupper(trim($validated['sku'])),
-            'barcode' => $validated['barcode'] ?? null,
-            'description' => $validated['description'] ?? null,
-            'category' => $validated['category'] ?? 'General',
-            'is_active' => true,
-        ]);
-
-        $product->variants()->create([
-            'organization_id' => $org->id,
-            'sku' => $product->sku,
-            'barcode' => $product->barcode,
-            'price' => $validated['price'] ?? 0.00,
-            'is_active' => true,
-        ]);
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Product created successfully.',
-            'data' => $product->load('variants'),
-        ], 201);
-    }
 }

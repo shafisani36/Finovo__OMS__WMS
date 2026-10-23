@@ -3,10 +3,11 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use App\Models\Order;
 use App\Models\PickTask;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class PickingController extends Controller
 {
@@ -17,8 +18,13 @@ class PickingController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $query = PickTask::where('organization_id', $org->id)
-            ->with(['order.items.variant.product', 'warehouse', 'assignedUser']);
+        // With ?store_id= only pick tasks for that store's orders are listed and counted.
+        // Shipped and cancelled orders have left picking, so they are not listed.
+        $scoped = fn () => PickTask::where('organization_id', $org->id)
+            ->whereNotIn('status', PickTask::CLOSED)
+            ->when($request->integer('store_id'), fn ($q, $storeId) => $q->whereHas('order', fn ($o) => $o->where('store_id', $storeId)));
+
+        $query = $scoped()->with(['order.items.variant.product', 'warehouse', 'assignedUser']);
 
         // Search
         if ($search = $request->query('search')) {
@@ -39,8 +45,7 @@ class PickingController extends Controller
             $query->where('status', $status);
         }
 
-        $perPage = (int) $request->query('per_page', 10);
-        $tasks = $query->latest('id')->paginate($perPage);
+        $tasks = $query->latest('id')->paginate($this->perPage($request, 10));
 
         // Transform for UI table matching Screenshot 3
         $items = collect($tasks->items())->map(function ($task) {
@@ -69,10 +74,10 @@ class PickingController extends Controller
         });
 
         // KPIs matching Screenshot 3
-        $pendingOrders = PickTask::where('organization_id', $org->id)->where('status', 'not_started')->count();
-        $itemsToPick = (int) PickTask::where('organization_id', $org->id)->where('status', 'not_started')->sum('items_count');
-        $inProgress = PickTask::where('organization_id', $org->id)->where('status', 'in_progress')->count();
-        $readyToDispatch = PickTask::where('organization_id', $org->id)->whereIn('status', ['picked', 'packed'])->count();
+        $pendingOrders = $scoped()->where('status', 'not_started')->count();
+        $itemsToPick = (int) $scoped()->where('status', 'not_started')->sum('items_count');
+        $inProgress = $scoped()->where('status', 'in_progress')->count();
+        $readyToDispatch = $scoped()->where('status', 'packed')->count();
 
         return response()->json([
             'status' => 'success',
@@ -93,98 +98,67 @@ class PickingController extends Controller
     }
 
     /**
-     * Update status of a pick task.
+     * Set a pick task's status. Packing it sends the order to Shipments for dispatch.
      */
     public function updateStatus(Request $request, PickTask $pickTask): JsonResponse
     {
-        $org = $request->user()->currentOrganization();
-        if ($pickTask->organization_id !== $org->id) {
-            abort(403, 'Unauthorized.');
-        }
+        $this->authorizeTask($request, $pickTask);
+        $validated = $request->validate(['status' => ['required', Rule::in(PickTask::STATUSES)]]);
 
-        $validated = $request->validate([
-            'status' => ['required', 'string', 'in:not_started,in_progress,picked,packed'],
-        ]);
-
-        $pickTask->status = $validated['status'];
-        if ($validated['status'] === 'in_progress' && ! $pickTask->started_at) {
-            $pickTask->started_at = now();
-            $pickTask->assigned_to_user_id = $request->user()->id;
-        } elseif (in_array($validated['status'], ['picked', 'packed'])) {
-            $pickTask->completed_at = now();
-        }
-        $pickTask->save();
-
-        // Update corresponding order status
-        if ($pickTask->order) {
-            if ($validated['status'] === 'in_progress') {
-                $pickTask->order->update(['order_status' => 'picking']);
-            } elseif ($validated['status'] === 'picked') {
-                $pickTask->order->update(['order_status' => 'picked']);
-            } elseif ($validated['status'] === 'packed') {
-                $pickTask->order->update(['order_status' => 'packed']);
-            }
-        }
+        $pickTask->moveTo($validated['status'], $request->user());
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Pick task updated successfully.',
+            'message' => $validated['status'] === 'packed' ? 'Order packed and sent to Shipments for dispatch.' : 'Pick task updated successfully.',
             'data' => $pickTask,
         ]);
     }
 
     /**
-     * Quick complete checkmark action for a pick task.
+     * Advance a pick task to its next status.
      */
     public function complete(Request $request, PickTask $pickTask): JsonResponse
     {
-        $org = $request->user()->currentOrganization();
-        if ($pickTask->organization_id !== $org->id) {
-            abort(403, 'Unauthorized.');
-        }
+        $this->authorizeTask($request, $pickTask);
+        $nextStatus = $pickTask->nextStatus();
 
-        $nextStatus = match ($pickTask->status) {
-            'not_started' => 'in_progress',
-            'in_progress' => 'picked',
-            'picked' => 'packed',
-            default => 'packed',
-        };
-
-        $pickTask->update([
-            'status' => $nextStatus,
-            'completed_at' => $nextStatus === 'picked' || $nextStatus === 'packed' ? now() : $pickTask->completed_at,
-        ]);
+        $pickTask->moveTo($nextStatus, $request->user());
 
         return response()->json([
             'status' => 'success',
-            'message' => "Task transitioned to {$nextStatus}.",
+            'message' => $nextStatus === 'packed' ? 'Order packed and sent to Shipments for dispatch.' : 'Task moved to '.str_replace('_', ' ', $nextStatus).'.',
             'data' => $pickTask,
         ]);
     }
 
     /**
-     * Bulk update status for multiple tasks.
+     * Set the same status on several pick tasks.
      */
     public function bulkUpdate(Request $request): JsonResponse
     {
         $org = $request->user()->currentOrganization();
 
         $validated = $request->validate([
-            'task_ids' => ['required', 'array'],
-            'task_ids.*' => ['exists:pick_tasks,id'],
-            'status' => ['required', 'string', 'in:not_started,in_progress,picked,packed'],
+            'task_ids' => ['required', 'array', 'min:1'],
+            'task_ids.*' => ['integer', $this->inOrganization($request, 'pick_tasks')],
+            'status' => ['required', Rule::in(PickTask::STATUSES)],
         ]);
 
-        PickTask::where('organization_id', $org->id)
+        $tasks = PickTask::where('organization_id', $org->id)
             ->whereIn('id', $validated['task_ids'])
-            ->update([
-                'status' => $validated['status'],
-                'completed_at' => in_array($validated['status'], ['picked', 'packed']) ? now() : null,
-            ]);
+            ->whereNotIn('status', PickTask::CLOSED)
+            ->get();
+
+        DB::transaction(fn () => $tasks->each->moveTo($validated['status'], $request->user()));
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Bulk update completed successfully.',
+            'message' => "{$tasks->count()} pick task(s) updated.",
         ]);
+    }
+
+    private function authorizeTask(Request $request, PickTask $pickTask): void
+    {
+        abort_unless($pickTask->organization_id === $request->user()->currentOrganization()->id, 404);
     }
 }

@@ -39,6 +39,7 @@ class PurchaseOrderService
             $po = PurchaseOrder::create([
                 'organization_id' => $orgId,
                 'po_number' => PurchaseOrder::nextNumber($orgId),
+                'store_id' => $data['store_id'] ?? null,
                 'purchase_requisition_id' => $data['purchase_requisition_id'] ?? null,
                 'supplier_name' => $data['supplier_name'],
                 'supplier_email' => $data['supplier_email'] ?? null,

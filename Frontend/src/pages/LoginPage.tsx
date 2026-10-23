@@ -6,11 +6,13 @@ import { Input } from '../components/common/Input';
 import { PasswordInput } from '../components/common/PasswordInput';
 import { Button } from '../components/common/Button';
 import { Alert } from '../components/common/Alert';
+import { useConfirmDialog } from '../components/common/ConfirmDialog';
 import { authService } from '../services/authService';
 import { ApiError } from '../services/apiClient';
 import { useAuth } from '../hooks/useAuth';
 
 export const LoginPage: React.FC = () => {
+  const { notify, dialog } = useConfirmDialog();
   const navigate = useNavigate();
   const { setAuthSession } = useAuth();
 
@@ -160,7 +162,7 @@ export const LoginPage: React.FC = () => {
               type="button"
               variant="outline"
               disabled={isLoading}
-              onClick={() => alert('Enterprise Microsoft SSO is configured through your identity provider.')}
+              onClick={() => notify({ title: 'Microsoft Sign-In', message: 'Enterprise Microsoft SSO is configured through your identity provider. Contact your administrator to enable it.' })}
               leftIcon={
                 <svg width="18" height="18" viewBox="0 0 21 21" fill="none" aria-hidden="true">
                   <path fill="#f25022" d="M1 1h9v9H1z"/>
@@ -177,7 +179,7 @@ export const LoginPage: React.FC = () => {
               type="button"
               variant="outline"
               disabled={isLoading}
-              onClick={() => alert('SAML / OIDC Single Sign-On is available for corporate domain users.')}
+              onClick={() => notify({ title: 'Enterprise SSO', message: 'SAML / OIDC Single Sign-On is available for corporate domain users. Contact your administrator to enable it.' })}
               leftIcon={<Shield size={16} color="#64748b" aria-hidden="true" />}
             >
               Enterprise SSO
@@ -190,6 +192,7 @@ export const LoginPage: React.FC = () => {
           <span style={{ color: '#2563eb', fontWeight: 600 }}>Contact your administrator</span>
         </div>
       </div>
+      {dialog}
     </AuthLayout>
   );
 };

@@ -23,7 +23,8 @@ import type { Column } from '../components/common/DataTable';
 import { Alert } from '../components/common/Alert';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import ConnectStoreModal from '../components/stores/ConnectStoreModal';
-import { platformLabel } from '../components/stores/storePlatforms';
+import { STORE_PLATFORMS, platformLabel } from '../components/stores/storePlatforms';
+import CustomDropdown from '../components/common/CustomDropdown';
 import omsService from '../services/omsService';
 import type { StoreModel, WarehouseModel } from '../services/omsService';
 import { useActiveStore } from '../hooks/useActiveStore';
@@ -49,6 +50,8 @@ export const StoresPage: React.FC = () => {
   const [total, setTotal] = useState(0);
   const [lastPage, setLastPage] = useState(1);
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [platformFilter, setPlatformFilter] = useState('');
   const [showAlert, setShowAlert] = useState(true);
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -63,6 +66,8 @@ export const StoresPage: React.FC = () => {
       setLoading(true);
       const res = await omsService.getStores({
         search: search || undefined,
+        status: statusFilter || undefined,
+        platform: platformFilter || undefined,
         page,
         per_page: perPage,
       });
@@ -89,7 +94,7 @@ export const StoresPage: React.FC = () => {
   useEffect(() => {
     fetchStores();
     fetchWarehouses();
-  }, [page, perPage]);
+  }, [page, perPage, statusFilter, platformFilter]);
 
   // Shopify, BigCommerce and eBay send the merchant back here after the approval step.
   useEffect(() => {
@@ -493,10 +498,35 @@ export const StoresPage: React.FC = () => {
               </div>
             </form>
 
-            <button className="btn-finovo-secondary">
-              <Filter size={14} />
-              <span>Filter</span>
-            </button>
+            <div style={{ width: 170 }}>
+              <CustomDropdown
+                value={statusFilter}
+                onChange={(val) => {
+                  setStatusFilter(String(val));
+                  setPage(1);
+                }}
+                options={[
+                  { value: '', label: 'All Statuses' },
+                  { value: 'active', label: 'Active' },
+                  { value: 'setup_incomplete', label: 'Setup Incomplete' },
+                  { value: 'disconnected', label: 'Disconnected' },
+                ]}
+                searchable={false}
+                icon={<Filter size={14} />}
+              />
+            </div>
+
+            <div style={{ width: 170 }}>
+              <CustomDropdown
+                value={platformFilter}
+                onChange={(val) => {
+                  setPlatformFilter(String(val));
+                  setPage(1);
+                }}
+                options={[{ value: '', label: 'All Platforms' }, ...STORE_PLATFORMS.map((p) => ({ value: p.value, label: p.label }))]}
+                searchable={false}
+              />
+            </div>
           </div>
         </div>
 

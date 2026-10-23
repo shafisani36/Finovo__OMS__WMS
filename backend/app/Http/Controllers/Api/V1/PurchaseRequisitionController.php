@@ -25,7 +25,11 @@ class PurchaseRequisitionController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $requisitions = PurchaseRequisition::where('organization_id', $org->id)
+        // With ?store_id= only that store's requisitions are listed and counted.
+        $scoped = fn () => PurchaseRequisition::where('organization_id', $org->id)
+            ->when($request->integer('store_id'), fn ($q, $storeId) => $q->where('store_id', $storeId));
+
+        $requisitions = $scoped()
             ->with(['requester', 'approver', 'warehouse', 'items'])
             ->when($request->query('status'), fn ($q, $status) => $q->where('status', $status))
             ->when($request->query('warehouse_id'), fn ($q, $warehouseId) => $q->where('warehouse_id', $warehouseId))
@@ -37,7 +41,7 @@ class PurchaseRequisitionController extends Controller
             ->latest('id')
             ->paginate($this->perPage($request));
 
-        $byStatus = PurchaseRequisition::where('organization_id', $org->id)->selectRaw('status, count(*) as total')->groupBy('status')->pluck('total', 'status');
+        $byStatus = $scoped()->selectRaw('status, count(*) as total')->groupBy('status')->pluck('total', 'status');
         $counts = ['total' => (int) $byStatus->sum()];
 
         foreach (['draft', 'submitted', 'approved', 'partially_ordered', 'ordered', 'rejected'] as $status) {
@@ -63,6 +67,7 @@ class PurchaseRequisitionController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
+            'store_id' => ['nullable', 'integer', $this->inOrganization($request, 'stores')],
             'warehouse_id' => ['required', 'integer', $this->inOrganization($request, 'warehouses')],
             // The delivery bin must be inside the requisition's warehouse.
             'delivery_location_id' => ['nullable', 'integer', $this->inOrganization($request, 'warehouse_locations')->where('warehouse_id', $request->integer('warehouse_id'))],

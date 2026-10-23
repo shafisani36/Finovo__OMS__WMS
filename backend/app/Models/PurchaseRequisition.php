@@ -13,6 +13,7 @@ class PurchaseRequisition extends Model
 
     protected $fillable = [
         'organization_id',
+        'store_id',
         'pr_number',
         'requester_id',
         'department',
@@ -45,6 +46,11 @@ class PurchaseRequisition extends Model
         'approved_at' => 'datetime',
         'rejected_at' => 'datetime',
     ];
+
+    public function store(): BelongsTo
+    {
+        return $this->belongsTo(Store::class);
+    }
 
     public function organization(): BelongsTo
     {

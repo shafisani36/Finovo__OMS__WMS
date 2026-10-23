@@ -13,6 +13,7 @@ class PurchaseOrder extends Model
 
     protected $fillable = [
         'organization_id',
+        'store_id',
         'po_number',
         'purchase_requisition_id',
         'supplier_name',
@@ -42,6 +43,11 @@ class PurchaseOrder extends Model
         'issued_at' => 'datetime',
         'cancelled_at' => 'datetime',
     ];
+
+    public function store(): BelongsTo
+    {
+        return $this->belongsTo(Store::class);
+    }
 
     public function organization(): BelongsTo
     {
