@@ -2,11 +2,13 @@
 
 namespace App\Jobs;
 
+use App\Integrations\ConnectorErrors;
 use App\Models\Store;
 use App\Services\StoreSyncService;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Imports one store's products and orders in the background (a large catalog can take minutes).
@@ -32,10 +34,16 @@ class SyncStoreJob implements ShouldBeUnique, ShouldQueue
         return (string) $this->store->id;
     }
 
-    public function handle(StoreSyncService $sync): void
+    public function handle(StoreSyncService $sync, ConnectorErrors $errors): void
     {
-        if ($sync->canSync($this->store)) {
-            $sync->sync($this->store);
+        if (! $sync->canSync($this->store)) {
+            return;
+        }
+
+        try {
+            $errors->run($this->store, 'sync', fn () => $sync->sync($this->store));
+        } catch (ValidationException) {
+            // Already recorded on the store, where the Stores page shows it; the next sync tries again.
         }
     }
 }

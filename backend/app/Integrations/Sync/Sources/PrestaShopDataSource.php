@@ -176,6 +176,15 @@ class PrestaShopDataSource extends HttpDataSource
             imageUrl: $this->imageUrl($store, (int) ($product['id_default_image'] ?? 0)),
             isActive: (bool) (int) ($product['active'] ?? 1),
             variants: $variants,
+            images: array_values(array_filter(array_map(fn (array $image) => $this->imageUrl($store, (int) ($image['id'] ?? 0)), $product['associations']['images'] ?? []))),
+            details: array_filter([
+                'Reference' => self::text($product['reference'] ?? null),
+                'Weight' => (float) ($product['weight'] ?? 0) > 0 ? $product['weight'] : null,
+                'Condition' => $product['condition'] ?? null,
+                'Created on PrestaShop' => $product['date_add'] ?? null,
+                'Updated on PrestaShop' => $product['date_upd'] ?? null,
+            ]),
+            raw: $product,
         );
     }
 
@@ -277,8 +286,15 @@ class PrestaShopDataSource extends HttpDataSource
                     unitPrice: $unitWithoutTax,
                     taxAmount: round(($unitWithTax - $unitWithoutTax) * $quantity, 2),
                     totalAmount: round($unitWithTax * $quantity, 2),
+                    raw: $row,
                 );
             }, $order['associations']['order_rows'] ?? []),
+            subtotal: isset($order['total_products']) ? (float) $order['total_products'] : null,
+            shippingTotal: isset($order['total_shipping']) ? (float) $order['total_shipping'] : null,
+            discountTotal: isset($order['total_discounts']) ? (float) $order['total_discounts'] : null,
+            paymentMethod: filled($order['payment'] ?? null) ? (string) $order['payment'] : null,
+            details: array_filter(['Updated on PrestaShop' => $order['date_upd'] ?? null]),
+            raw: $order,
         );
     }
 }

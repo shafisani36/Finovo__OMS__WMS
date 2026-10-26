@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\PickTask;
+use App\Services\AccessControl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -20,7 +21,7 @@ class PickingController extends Controller
 
         // With ?store_id= only pick tasks for that store's orders are listed and counted.
         // Shipped and cancelled orders have left picking, so they are not listed.
-        $scoped = fn () => PickTask::where('organization_id', $org->id)
+        $scoped = fn () => $this->inUserWarehouses(PickTask::where('organization_id', $org->id), $request)
             ->whereNotIn('status', PickTask::CLOSED)
             ->when($request->integer('store_id'), fn ($q, $storeId) => $q->whereHas('order', fn ($o) => $o->where('store_id', $storeId)));
 
@@ -144,7 +145,7 @@ class PickingController extends Controller
             'status' => ['required', Rule::in(PickTask::STATUSES)],
         ]);
 
-        $tasks = PickTask::where('organization_id', $org->id)
+        $tasks = $this->inUserWarehouses(PickTask::where('organization_id', $org->id), $request)
             ->whereIn('id', $validated['task_ids'])
             ->whereNotIn('status', PickTask::CLOSED)
             ->get();
@@ -160,5 +161,6 @@ class PickingController extends Controller
     private function authorizeTask(Request $request, PickTask $pickTask): void
     {
         abort_unless($pickTask->organization_id === $request->user()->currentOrganization()->id, 404);
+        abort_unless($pickTask->warehouse_id === null || app(AccessControl::class)->canAccessWarehouse($request->user(), $pickTask->warehouse_id), 403, 'You are not assigned to this warehouse.');
     }
 }

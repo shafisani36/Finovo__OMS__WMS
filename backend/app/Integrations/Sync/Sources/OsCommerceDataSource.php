@@ -311,7 +311,10 @@ class OsCommerceDataSource implements StoreDataSource
                 unitPrice: round((float) $line['final_price'] * $rate, 2),
                 taxAmount: round((float) $line['final_price'] * (int) $line['products_quantity'] * (float) $line['products_tax'] / 100 * $rate, 2),
                 totalAmount: round($lineTotal($line) * $rate, 2),
+                raw: $line,
             ), $lines),
+            paymentMethod: filled($order['payment_method'] ?? null) ? (string) $order['payment_method'] : null,
+            raw: [...$order, 'products' => $lines],
         );
     }
 }

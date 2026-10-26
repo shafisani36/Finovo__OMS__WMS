@@ -15,14 +15,19 @@ class OrderItem extends Model
         'product_variant_id',
         'external_sku',
         'product_name',
+        'image_url',
         'quantity',
         'unit_price',
         'tax_amount',
+        'discount_amount',
         'total_amount',
         'allocated_warehouse_id',
         'fulfilled_quantity',
         'status',
+        'platform_data',
     ];
+
+    protected $hidden = ['platform_data'];
 
     protected function casts(): array
     {
@@ -31,7 +36,9 @@ class OrderItem extends Model
             'fulfilled_quantity' => 'integer',
             'unit_price' => 'decimal:2',
             'tax_amount' => 'decimal:2',
+            'discount_amount' => 'decimal:2',
             'total_amount' => 'decimal:2',
+            'platform_data' => 'array',
         ];
     }
 

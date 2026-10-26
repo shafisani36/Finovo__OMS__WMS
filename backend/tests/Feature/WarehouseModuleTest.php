@@ -289,9 +289,9 @@ class WarehouseModuleTest extends TestCase
         $removeRes = $this->deleteJson("/api/v1/warehouses/{$warehouse->id}/staff/{$membershipId}");
         $removeRes->assertStatus(200);
 
-        $this->assertDatabaseMissing('warehouse_memberships', [
-            'id' => $membershipId,
-        ]);
+        // The assignment is kept as history but no longer gives access.
+        $this->assertDatabaseHas('warehouse_memberships', ['id' => $membershipId, 'status' => 'revoked']);
+        $this->assertCount(0, $this->getJson("/api/v1/warehouses/{$warehouse->id}/staff")->json('data.assigned_staff'));
     }
 
     public function test_opening_stock_preview_and_atomic_commit(): void
@@ -380,12 +380,64 @@ class WarehouseModuleTest extends TestCase
             'available' => 50,
         ]);
 
-        // Verify double-entry ledger entry
-        $this->assertDatabaseHas('inventory_ledger_entries', [
-            'warehouse_id' => $warehouse->id,
+        // Received into the chosen bin, with its lot, and recorded in the ledger
+        $this->assertDatabaseHas('inventory_location_balances', [
+            'warehouse_location_id' => $location->id,
             'product_variant_id' => $variant->id,
-            'movement_type' => 'adjustment',
+            'lot_number' => 'LOT-2026-001',
             'quantity' => 50,
         ]);
+        $this->assertDatabaseHas('inventory_ledger_entries', [
+            'warehouse_id' => $warehouse->id,
+            'warehouse_location_id' => $location->id,
+            'product_variant_id' => $variant->id,
+            'movement_type' => 'receipt',
+            'quantity' => 50,
+        ]);
+
+        // The overview and the activity log read the same stock
+        $this->getJson("/api/v1/warehouses/{$warehouse->id}/overview")
+            ->assertOk()
+            ->assertJsonPath('data.kpis.on_hand', 50)
+            ->assertJsonPath('data.kpis.total_skus', 1)
+            ->assertJsonPath('data.capacity.total', 1)
+            ->assertJsonPath('data.capacity.occupied', 1)
+            ->assertJsonPath('data.capacity.percent', 100)
+            ->assertJsonPath('data.zones.0.code', 'Bins without a zone')
+            ->assertJsonPath('data.zones.0.bins.0.code', 'BIN-A1')
+            ->assertJsonPath('data.zones.0.bins.0.state', 'partial');
+
+        $this->getJson("/api/v1/warehouses/{$warehouse->id}/activity?type=stock")
+            ->assertOk()
+            ->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('data.0.kind', 'stock')
+            ->assertJsonPath('data.0.text', 'Received 50 units of Ergonomic Keyboard into BIN-A1 (OPENING-STOCK).');
+        $this->getJson("/api/v1/warehouses/{$warehouse->id}/activity?type=setup")
+            ->assertOk()
+            ->assertJsonPath('data.0.kind', 'setup');
+    }
+
+    public function test_overview_groups_bins_under_their_top_level_zone(): void
+    {
+        $warehouse = Warehouse::create([
+            'organization_id' => $this->org->id,
+            'name' => 'Layout Facility',
+            'code' => 'WH-LAYOUT',
+            'timezone' => 'UTC',
+            'status' => 'draft',
+            'is_active' => true,
+        ]);
+
+        $this->postJson("/api/v1/warehouses/{$warehouse->id}/locations/starter-layout", [
+            'preview' => false, 'aisles_count' => 1, 'racks_per_aisle' => 1, 'shelves_per_rack' => 1, 'bins_per_shelf' => 2,
+        ])->assertOk();
+
+        $zones = collect($this->getJson("/api/v1/warehouses/{$warehouse->id}/overview")->assertOk()->json('data.zones'))->keyBy('code');
+
+        $this->assertSame(2, $zones['Z-PICK']['bins_total']);
+        $this->assertSame('A01', $zones['Z-PICK']['aisles']);
+        $this->assertSame('A01-R01', $zones['Z-PICK']['bins'][0]['group']);
+        $this->assertSame('S1-B01', $zones['Z-PICK']['bins'][0]['label']);
+        $this->assertNull($zones['Z-RCV']['percent'], 'areas without bins have no bin usage');
     }
 }

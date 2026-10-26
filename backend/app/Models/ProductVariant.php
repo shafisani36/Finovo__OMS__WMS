@@ -18,6 +18,7 @@ class ProductVariant extends Model
         'barcode',
         'option_name',
         'option_value',
+        'image_url',
         'price',
         'cost_price',
         'is_active',

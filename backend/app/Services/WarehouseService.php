@@ -21,10 +21,14 @@ class WarehouseService
 
     /**
      * List warehouses for organization with search, status filters, and aggregated KPIs.
+     * $filters['ids'] limits the list (and its KPIs) to the warehouses an employee works in.
      */
     public function listWarehouses(int $organizationId, array $filters = [], int $perPage = 10): array
     {
-        $query = Warehouse::where('organization_id', $organizationId)
+        $visible = fn () => Warehouse::where('organization_id', $organizationId)
+            ->when(isset($filters['ids']), fn ($q) => $q->whereIn('id', $filters['ids']));
+
+        $query = $visible()
             ->withCount(['locations', 'balances', 'memberships'])
             ->with(['parentWarehouse:id,name,code']);
 
@@ -63,7 +67,7 @@ class WarehouseService
         $paginated = $query->paginate($perPage);
 
         // Aggregated KPIs
-        $all = Warehouse::where('organization_id', $organizationId)->get();
+        $all = $visible()->get();
         $total = $all->count();
         $active = $all->where('status', Warehouse::STATUS_ACTIVE)->count();
         $draft = $all->whereIn('status', [Warehouse::STATUS_DRAFT, Warehouse::STATUS_SETUP_INCOMPLETE])->count();
@@ -421,6 +425,11 @@ class WarehouseService
      */
     public function assignStaff(Warehouse $warehouse, array $data, int $assignedByUserId): WarehouseMembership
     {
+        return DB::transaction(fn () => $this->saveAssignment($warehouse, $data, $assignedByUserId));
+    }
+
+    private function saveAssignment(Warehouse $warehouse, array $data, int $assignedByUserId): WarehouseMembership
+    {
         $userId = (int) $data['user_id'];
         $user = User::findOrFail($userId);
 
@@ -432,17 +441,22 @@ class WarehouseService
             ]);
         }
 
-        // Prevent duplicate active assignment
+        // One row per employee and warehouse: assigning again re-activates it (locked, so two admins
+        // assigning at the same moment cannot create a duplicate).
         $existing = WarehouseMembership::where('warehouse_id', $warehouse->id)
             ->where('user_id', $userId)
+            ->lockForUpdate()
             ->first();
 
         if ($existing) {
             $existing->update([
                 'role' => $data['role'] ?? 'operator',
-                'status' => 'active',
+                'status' => WarehouseMembership::STATUS_ACTIVE,
                 'permissions' => $data['permissions'] ?? null,
                 'expires_at' => $data['expires_at'] ?? null,
+                'assigned_by' => $existing->status === WarehouseMembership::STATUS_ACTIVE ? $existing->assigned_by : $assignedByUserId,
+                'assigned_at' => $existing->status === WarehouseMembership::STATUS_ACTIVE ? $existing->assigned_at : now(),
+                'revoked_at' => null,
             ]);
 
             WarehouseAuditLog::create([
@@ -461,8 +475,9 @@ class WarehouseService
             'warehouse_id' => $warehouse->id,
             'user_id' => $userId,
             'role' => $data['role'] ?? 'operator',
-            'status' => 'active',
+            'status' => WarehouseMembership::STATUS_ACTIVE,
             'permissions' => $data['permissions'] ?? null,
+            'assigned_by' => $assignedByUserId,
             'assigned_at' => now(),
             'expires_at' => $data['expires_at'] ?? null,
         ]);
@@ -479,14 +494,15 @@ class WarehouseService
     }
 
     /**
-     * Remove staff member from warehouse.
+     * Take an employee off a warehouse. The assignment is kept as history (who worked where and when);
+     * access to the warehouse ends with the next request.
      */
     public function removeStaff(Warehouse $warehouse, int $membershipId, int $removedByUserId): void
     {
-        $membership = WarehouseMembership::where('warehouse_id', $warehouse->id)->findOrFail($membershipId);
+        $membership = WarehouseMembership::where('warehouse_id', $warehouse->id)->current()->findOrFail($membershipId);
         $user = $membership->user;
 
-        $membership->delete();
+        $membership->update(['status' => WarehouseMembership::STATUS_REVOKED, 'revoked_at' => now()]);
 
         WarehouseAuditLog::create([
             'organization_id' => $warehouse->organization_id,

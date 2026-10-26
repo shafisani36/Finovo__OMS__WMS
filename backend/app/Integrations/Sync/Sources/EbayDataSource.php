@@ -115,6 +115,13 @@ class EbayDataSource extends HttpDataSource
             description: self::plainText($product['description'] ?? null),
             category: null,
             imageUrl: $product['imageUrls'][0] ?? null,
+            images: array_values($product['imageUrls'] ?? []),
+            details: array_filter([
+                'Brand' => $product['brand'] ?? null,
+                'Condition' => $product['condition'] ?? null,
+                'Aspects' => isset($product['aspects']) ? collect($product['aspects'])->map(fn ($values, $name) => $name.': '.implode(', ', (array) $values))->values()->all() : null,
+            ]),
+            raw: $product,
             isActive: true,
             variants: [new VariantData(
                 externalId: $sku,
@@ -180,7 +187,14 @@ class EbayDataSource extends HttpDataSource
                 unitPrice: (int) ($line['quantity'] ?? 0) > 0 ? round((float) ($line['lineItemCost']['value'] ?? 0) / (int) $line['quantity'], 2) : 0.0,
                 taxAmount: array_sum(array_map(fn (array $tax) => (float) ($tax['amount']['value'] ?? 0), $line['taxes'] ?? [])),
                 totalAmount: (float) ($line['total']['value'] ?? $line['lineItemCost']['value'] ?? 0),
+                raw: $line,
             ), $order['lineItems'] ?? []),
+            subtotal: isset($order['pricingSummary']['priceSubtotal']['value']) ? (float) $order['pricingSummary']['priceSubtotal']['value'] : null,
+            shippingTotal: isset($order['pricingSummary']['deliveryCost']['value']) ? (float) $order['pricingSummary']['deliveryCost']['value'] : null,
+            taxTotal: isset($order['pricingSummary']['tax']['value']) ? (float) $order['pricingSummary']['tax']['value'] : null,
+            discountTotal: isset($order['pricingSummary']['priceDiscount']['value']) ? abs((float) $order['pricingSummary']['priceDiscount']['value']) : null,
+            paymentMethod: $order['paymentSummary']['payments'][0]['paymentMethod'] ?? null,
+            raw: $order,
         );
     }
 }

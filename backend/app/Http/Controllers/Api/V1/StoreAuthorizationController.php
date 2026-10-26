@@ -10,6 +10,7 @@ use App\Integrations\Authorization\EbayAuthorization;
 use App\Integrations\Authorization\ModulePackage;
 use App\Integrations\Authorization\ShopifyAuthorization;
 use App\Integrations\Authorization\WixAuthorization;
+use App\Integrations\ConnectorErrors;
 use App\Models\Store;
 use App\Services\StoreConnectionService;
 use Illuminate\Http\JsonResponse;
@@ -19,6 +20,7 @@ use Illuminate\Http\Response;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Cookie;
+use Throwable;
 
 /**
  * Public endpoints the platforms call after a merchant approves Finovo's access.
@@ -29,16 +31,20 @@ class StoreAuthorizationController extends Controller
     public function __construct(
         protected StoreConnectionService $connections,
         protected AuthorizationState $state,
+        protected ConnectorErrors $errors,
     ) {}
 
     public function shopifyCallback(Request $request, ShopifyAuthorization $shopify): RedirectResponse
     {
+        $store = null;
+
         try {
+            // The store first, so even a failed check sends the merchant back to their own portal.
+            $store = $this->state->resolve($request->query('state'), StorePlatform::SHOPIFY);
+
             if (! $shopify->hasValidSignature($request->query())) {
                 throw new RuntimeException('Shopify signature check failed.');
             }
-
-            $store = $this->state->resolve($request->query('state'), StorePlatform::SHOPIFY);
             $shop = ShopifyAuthorization::normalizeShopDomain((string) $request->query('shop'));
 
             if ($shop === null || $shop !== $store->external_reference) {
@@ -47,11 +53,11 @@ class StoreAuthorizationController extends Controller
 
             $token = $shopify->exchangeCode($shop, (string) $request->query('code'));
             $result = $this->connections->completeAuthorization($store, ['access_token' => $token]);
-        } catch (RuntimeException $e) {
-            return $this->backToStores(StorePlatform::SHOPIFY, $e->getMessage());
+        } catch (Throwable $e) {
+            return $this->backToStores(StorePlatform::SHOPIFY, $this->failure(StorePlatform::SHOPIFY, $e, $store), $store);
         }
 
-        return $this->backToStores(StorePlatform::SHOPIFY, $result->successful ? null : $result->message);
+        return $this->backToStores(StorePlatform::SHOPIFY, $result->successful ? null : $result->message, $store);
     }
 
     /**
@@ -66,8 +72,8 @@ class StoreAuthorizationController extends Controller
 
         try {
             $store = $this->state->resolve($request->query('state'), StorePlatform::WOOCOMMERCE);
-        } catch (RuntimeException $e) {
-            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 403);
+        } catch (Throwable $e) {
+            return response()->json(['status' => 'error', 'message' => $this->failure(StorePlatform::WOOCOMMERCE, $e)], 403);
         }
 
         $result = $this->connections->completeAuthorization($store, [
@@ -86,8 +92,8 @@ class StoreAuthorizationController extends Controller
     {
         try {
             $this->state->resolve($request->query('state'), StorePlatform::BIGCOMMERCE);
-        } catch (RuntimeException $e) {
-            return $this->backToStores(StorePlatform::BIGCOMMERCE, $e->getMessage());
+        } catch (Throwable $e) {
+            return $this->backToStores(StorePlatform::BIGCOMMERCE, $this->failure(StorePlatform::BIGCOMMERCE, $e));
         }
 
         $secure = $request->isSecure();
@@ -113,6 +119,7 @@ class StoreAuthorizationController extends Controller
     public function bigCommerceCallback(Request $request, BigCommerceAuthorization $bigCommerce): Response
     {
         $externalInstall = $request->has('external_install');
+        $store = null;
 
         try {
             $grant = $bigCommerce->exchangeCode(
@@ -127,12 +134,12 @@ class StoreAuthorizationController extends Controller
             if (! $result->successful) {
                 throw new RuntimeException($result->message);
             }
-        } catch (RuntimeException $e) {
+        } catch (Throwable $e) {
             if ($externalInstall && $bigCommerce->supportsOneClickInstall()) {
                 rescue(fn () => $bigCommerce->reportExternalInstall(false), report: true);
             }
 
-            return $this->connectionPage(StorePlatform::BIGCOMMERCE, $e->getMessage())
+            return $this->connectionPage(StorePlatform::BIGCOMMERCE, $this->failure(StorePlatform::BIGCOMMERCE, $e, $store), store: $store)
                 ->withoutCookie(BigCommerceAuthorization::INSTALL_COOKIE, '/api/v1/integrations/bigcommerce');
         }
 
@@ -140,7 +147,7 @@ class StoreAuthorizationController extends Controller
             rescue(fn () => $bigCommerce->reportExternalInstall(true), report: true);
         }
 
-        return $this->connectionPage(StorePlatform::BIGCOMMERCE, null, $store->name)
+        return $this->connectionPage(StorePlatform::BIGCOMMERCE, null, $store->name, $store)
             ->withoutCookie(BigCommerceAuthorization::INSTALL_COOKIE, '/api/v1/integrations/bigcommerce');
     }
 
@@ -197,6 +204,8 @@ class StoreAuthorizationController extends Controller
      */
     public function wixCallback(Request $request, WixAuthorization $wix): RedirectResponse
     {
+        $store = null;
+
         try {
             $store = $this->state->resolve($request->query('state'), StorePlatform::WIX);
             $instanceId = $wix->instanceIdFromSignedInstance((string) $request->query('signedInstance'));
@@ -209,11 +218,11 @@ class StoreAuthorizationController extends Controller
             $this->ensureNotLinkedToAnotherStore($store, $siteId);
 
             $result = $this->connections->completeAuthorization($store, ['instance_id' => $instanceId], $siteId);
-        } catch (RuntimeException $e) {
-            return $this->backToStores(StorePlatform::WIX, $e->getMessage());
+        } catch (Throwable $e) {
+            return $this->backToStores(StorePlatform::WIX, $this->failure(StorePlatform::WIX, $e, $store), $store);
         }
 
-        return $this->backToStores(StorePlatform::WIX, $result->successful ? null : $result->message);
+        return $this->backToStores(StorePlatform::WIX, $result->successful ? null : $result->message, $store);
     }
 
     /**
@@ -274,8 +283,8 @@ class StoreAuthorizationController extends Controller
             $store = $this->state->resolve($validated['state'], $platform);
             $shopUrl = rtrim($validated['shop_url'], '/');
             $this->ensureNotLinkedToAnotherStore($store, $shopUrl);
-        } catch (RuntimeException $e) {
-            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 403);
+        } catch (Throwable $e) {
+            return response()->json(['status' => 'error', 'message' => $this->failure($platform, $e)], 403);
         }
 
         $result = $this->connections->completeAuthorization($store, $credentials, $shopUrl);
@@ -288,6 +297,8 @@ class StoreAuthorizationController extends Controller
 
     public function ebayCallback(Request $request, EbayAuthorization $ebay): RedirectResponse
     {
+        $store = null;
+
         try {
             $store = $this->state->resolve($request->query('state'), StorePlatform::EBAY);
 
@@ -296,11 +307,11 @@ class StoreAuthorizationController extends Controller
             }
 
             $result = $this->connections->completeAuthorization($store, $ebay->exchangeCode((string) $request->query('code')));
-        } catch (RuntimeException $e) {
-            return $this->backToStores(StorePlatform::EBAY, $e->getMessage());
+        } catch (Throwable $e) {
+            return $this->backToStores(StorePlatform::EBAY, $this->failure(StorePlatform::EBAY, $e, $store), $store);
         }
 
-        return $this->backToStores(StorePlatform::EBAY, $result->successful ? null : $result->message);
+        return $this->backToStores(StorePlatform::EBAY, $result->successful ? null : $result->message, $store);
     }
 
     /**
@@ -324,22 +335,37 @@ class StoreAuthorizationController extends Controller
     /**
      * Small result page for callbacks that open inside the platform's own window.
      */
-    private function connectionPage(StorePlatform $platform, ?string $error, ?string $storeName = null): Response
+    private function connectionPage(StorePlatform $platform, ?string $error, ?string $storeName = null, ?Store $store = null): Response
     {
         return response()->view('integrations.connection-result', [
             'platform' => $platform->label(),
             'error' => $error,
             'storeName' => $storeName,
-            'storesUrl' => config('app.frontend_url').'/stores',
+            'storesUrl' => $store?->portalUrl('/stores') ?? config('app.frontend_url').'/stores',
         ], $error === null ? 200 : 422);
     }
 
-    private function backToStores(StorePlatform $platform, ?string $error): RedirectResponse
+    /**
+     * The merchant goes back to the Stores page of the portal they started from, which plays the connecting
+     * animation and then shows the result.
+     */
+    private function backToStores(StorePlatform $platform, ?string $error, ?Store $store = null): RedirectResponse
     {
-        $query = $error === null
-            ? ['connected' => $platform->value]
-            : ['connection_error' => $error];
+        $query = array_filter([
+            'connected' => $error === null ? $platform->value : null,
+            'connection_error' => $error,
+            'platform' => $platform->value,
+            'store' => $store?->name,
+        ]);
 
-        return redirect()->away(config('app.frontend_url').'/stores?'.http_build_query($query));
+        return redirect()->away(($store?->portalUrl('/stores') ?? config('app.frontend_url').'/stores').'?'.http_build_query($query));
+    }
+
+    /**
+     * Readable reason for a failed callback, kept against the store when it is known (any platform, any error).
+     */
+    private function failure(StorePlatform $platform, Throwable $e, ?Store $store = null): string
+    {
+        return $store ? $this->errors->record($store, 'authorize', $e) : $this->errors->reason($e, $platform->label());
     }
 }

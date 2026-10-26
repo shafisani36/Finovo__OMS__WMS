@@ -20,7 +20,7 @@ class ReplenishmentController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $rules = ReorderRule::where('organization_id', $org->id)
+        $rules = $this->inUserWarehouses(ReorderRule::where('organization_id', $org->id), $request)
             ->with(['warehouse', 'variant.product'])
             ->get()
             ->map(function ($r) {
@@ -55,7 +55,7 @@ class ReplenishmentController extends Controller
         $org = $request->user()->currentOrganization();
 
         $validated = $request->validate([
-            'warehouse_id' => ['required', 'exists:warehouses,id'],
+            'warehouse_id' => ['required', $this->accessibleWarehouse($request)],
             'product_variant_id' => ['required', 'exists:product_variants,id'],
             'min_quantity' => ['required', 'integer', 'min:0'],
             'reorder_point' => ['required', 'integer', 'min:1'],
@@ -101,8 +101,7 @@ class ReplenishmentController extends Controller
         $orgId = $request->user()->currentOrganization()->id;
         $limit = 50;
 
-        $lowBalances = InventoryBalance::query()
-            ->from('inventory_balances as b')
+        $lowBalances = $this->inUserWarehouses(InventoryBalance::query()->from('inventory_balances as b'), $request, 'b.warehouse_id')
             ->leftJoin('reorder_rules as r', fn ($join) => $join
                 ->on('r.warehouse_id', '=', 'b.warehouse_id')
                 ->on('r.product_variant_id', '=', 'b.product_variant_id')
@@ -114,7 +113,7 @@ class ReplenishmentController extends Controller
             ->select('b.warehouse_id', 'b.product_variant_id', 'b.available', 'r.reorder_point');
 
         // A reorder rule for an item the warehouse has never held is an empty shelf too.
-        $neverStocked = ReorderRule::where('organization_id', $orgId)
+        $neverStocked = $this->inUserWarehouses(ReorderRule::where('organization_id', $orgId), $request)
             ->where('is_active', true)
             ->whereNotExists(fn ($q) => $q->from('inventory_balances')
                 ->whereColumn('inventory_balances.warehouse_id', 'reorder_rules.warehouse_id')
@@ -165,7 +164,7 @@ class ReplenishmentController extends Controller
         $org = $request->user()->currentOrganization();
         $warehouseId = $request->query('warehouse_id');
 
-        $rulesQuery = ReorderRule::where('organization_id', $org->id)->where('is_active', true)->with(['warehouse', 'variant.product']);
+        $rulesQuery = $this->inUserWarehouses(ReorderRule::where('organization_id', $org->id), $request)->where('is_active', true)->with(['warehouse', 'variant.product']);
         if ($warehouseId) {
             $rulesQuery->where('warehouse_id', $warehouseId);
         }
@@ -174,7 +173,7 @@ class ReplenishmentController extends Controller
         $recommendations = [];
 
         foreach ($rules as $r) {
-            $balance = InventoryBalance::where('organization_id', $org->id)
+            $balance = $this->inUserWarehouses(InventoryBalance::where('organization_id', $org->id), $request)
                 ->where('warehouse_id', $r->warehouse_id)
                 ->where('product_variant_id', $r->product_variant_id)
                 ->first();

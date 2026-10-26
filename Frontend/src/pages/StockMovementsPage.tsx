@@ -20,6 +20,7 @@ import CustomDropdown from '../components/common/CustomDropdown';
 import omsService from '../services/omsService';
 import { useActiveStore } from '../hooks/useActiveStore';
 import { useConfirmDialog } from '../components/common/ConfirmDialog';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import type {
   StockMovementItem,
   WarehouseModel,
@@ -58,6 +59,8 @@ export const StockMovementsPage: React.FC = () => {
   const [total, setTotal] = useState(0);
   const [lastPage, setLastPage] = useState(1);
   const [search, setSearch] = useState('');
+  // Live search: the list reloads 300 ms after typing stops.
+  const debouncedSearch = useDebouncedValue(search.trim());
   const [typeFilter, setTypeFilter] = useState('');
 
   // Transfer Form State
@@ -83,7 +86,7 @@ export const StockMovementsPage: React.FC = () => {
       setLoading(true);
       const res = await omsService.getStockMovements({
         store_id: activeStore?.id,
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         type: typeFilter || undefined,
         page,
         per_page: perPage,
@@ -127,7 +130,7 @@ export const StockMovementsPage: React.FC = () => {
 
   useEffect(() => {
     fetchMovements();
-  }, [page, perPage, typeFilter, activeStore?.id]);
+  }, [page, perPage, typeFilter, activeStore?.id, debouncedSearch]);
 
   // Update availability when product or source warehouse changes
   useEffect(() => {
@@ -211,11 +214,10 @@ export const StockMovementsPage: React.FC = () => {
     }
   };
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setPage(1);
-    fetchMovements();
-  };
+  const handleSearchSubmit = (e: React.FormEvent) => e.preventDefault();
+
+  // A new search starts from the first page.
+  useEffect(() => setPage(1), [debouncedSearch]);
 
   const columns: Column<StockMovementItem>[] = [
     {

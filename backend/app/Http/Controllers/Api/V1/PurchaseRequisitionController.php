@@ -26,7 +26,7 @@ class PurchaseRequisitionController extends Controller
         $org = $request->user()->currentOrganization();
 
         // With ?store_id= only that store's requisitions are listed and counted.
-        $scoped = fn () => PurchaseRequisition::where('organization_id', $org->id)
+        $scoped = fn () => $this->inUserWarehouses(PurchaseRequisition::where('organization_id', $org->id), $request)
             ->when($request->integer('store_id'), fn ($q, $storeId) => $q->where('store_id', $storeId));
 
         $requisitions = $scoped()
@@ -68,7 +68,7 @@ class PurchaseRequisitionController extends Controller
     {
         $validated = $request->validate([
             'store_id' => ['nullable', 'integer', $this->inOrganization($request, 'stores')],
-            'warehouse_id' => ['required', 'integer', $this->inOrganization($request, 'warehouses')],
+            'warehouse_id' => ['required', 'integer', $this->accessibleWarehouse($request)],
             // The delivery bin must be inside the requisition's warehouse.
             'delivery_location_id' => ['nullable', 'integer', $this->inOrganization($request, 'warehouse_locations')->where('warehouse_id', $request->integer('warehouse_id'))],
             'department' => 'nullable|string|max:100',
@@ -106,7 +106,7 @@ class PurchaseRequisitionController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $requisition = PurchaseRequisition::where('organization_id', $org->id)
+        $requisition = $this->inUserWarehouses(PurchaseRequisition::where('organization_id', $org->id), $request)
             ->with(['requester', 'approver', 'warehouse', 'deliveryLocation', 'approvals.user', 'items.variant.product', 'purchaseOrders'])
             ->findOrFail($id);
 
@@ -140,7 +140,7 @@ class PurchaseRequisitionController extends Controller
     public function submit(Request $request, int $id): JsonResponse
     {
         $org = $request->user()->currentOrganization();
-        $requisition = PurchaseRequisition::where('organization_id', $org->id)->findOrFail($id);
+        $requisition = $this->inUserWarehouses(PurchaseRequisition::where('organization_id', $org->id), $request)->findOrFail($id);
         $request->validate(['comments' => 'nullable|string|max:1000']);
 
         $updated = $this->requisitionService->submitRequisition($requisition, $request->user(), $request->input('comments'));
@@ -158,7 +158,7 @@ class PurchaseRequisitionController extends Controller
     public function approve(Request $request, int $id): JsonResponse
     {
         $org = $request->user()->currentOrganization();
-        $requisition = PurchaseRequisition::where('organization_id', $org->id)->findOrFail($id);
+        $requisition = $this->inUserWarehouses(PurchaseRequisition::where('organization_id', $org->id), $request)->findOrFail($id);
 
         $request->validate([
             'approved_quantities' => 'nullable|array', // [requisition item ID => quantity]
@@ -181,7 +181,7 @@ class PurchaseRequisitionController extends Controller
     public function reject(Request $request, int $id): JsonResponse
     {
         $org = $request->user()->currentOrganization();
-        $requisition = PurchaseRequisition::where('organization_id', $org->id)->findOrFail($id);
+        $requisition = $this->inUserWarehouses(PurchaseRequisition::where('organization_id', $org->id), $request)->findOrFail($id);
 
         $request->validate([
             'reason' => 'required|string|min:3|max:1000',
@@ -208,13 +208,13 @@ class PurchaseRequisitionController extends Controller
     public function convertToPo(Request $request, int $id): JsonResponse
     {
         $org = $request->user()->currentOrganization();
-        $requisition = PurchaseRequisition::where('organization_id', $org->id)->findOrFail($id);
+        $requisition = $this->inUserWarehouses(PurchaseRequisition::where('organization_id', $org->id), $request)->findOrFail($id);
 
         $validated = $request->validate([
             'supplier_name' => 'required|string|max:255',
             'supplier_email' => 'nullable|email|max:255',
             'supplier_contact' => 'nullable|string|max:100',
-            'warehouse_id' => ['nullable', 'integer', $this->inOrganization($request, 'warehouses')],
+            'warehouse_id' => ['nullable', 'integer', $this->accessibleWarehouse($request)],
             'order_date' => 'nullable|date',
             'expected_delivery_date' => 'nullable|date|after_or_equal:'.($request->input('order_date') ?: 'today'),
             'payment_terms' => 'nullable|string|max:100',
@@ -244,7 +244,7 @@ class PurchaseRequisitionController extends Controller
     {
         $org = $request->user()->currentOrganization();
         $validated = $request->validate([
-            'warehouse_id' => ['required', 'integer', $this->inOrganization($request, 'warehouses')],
+            'warehouse_id' => ['required', 'integer', $this->accessibleWarehouse($request)],
             'variant_id' => ['required', 'integer', $this->inOrganization($request, 'product_variants')],
         ]);
 
@@ -262,7 +262,7 @@ class PurchaseRequisitionController extends Controller
     public function downloadPdf(Request $request, int $id): Response
     {
         $org = $request->user()->currentOrganization();
-        $requisition = PurchaseRequisition::where('organization_id', $org->id)->findOrFail($id);
+        $requisition = $this->inUserWarehouses(PurchaseRequisition::where('organization_id', $org->id), $request)->findOrFail($id);
 
         return $this->pdfService->streamPrPdf($requisition);
     }

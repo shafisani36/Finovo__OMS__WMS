@@ -13,5 +13,9 @@ final readonly class OrderLineData
         public float $unitPrice,
         public float $taxAmount,
         public float $totalAmount,
+        public float $discountAmount = 0.0,
+        public ?string $imageUrl = null,
+        /** The platform's complete line record, kept as received. */
+        public array $raw = [],
     ) {}
 }

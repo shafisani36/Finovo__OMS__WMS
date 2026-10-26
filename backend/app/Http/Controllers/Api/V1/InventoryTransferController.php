@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\InventoryTransfer;
 use App\Models\Product;
 use App\Models\Warehouse;
+use App\Services\AccessControl;
 use App\Services\InventoryEngine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -23,7 +24,9 @@ class InventoryTransferController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
+        $ids = app(AccessControl::class)->warehouseIds($request->user());
         $query = InventoryTransfer::where('organization_id', $org->id)
+            ->when($ids !== null, fn ($q) => $q->where(fn ($q) => $q->whereIn('from_warehouse_id', $ids)->orWhereIn('to_warehouse_id', $ids)))
             ->with(['fromWarehouse', 'toWarehouse', 'fromLocation', 'toLocation', 'variant.product', 'user', 'receivedBy']);
 
         if ($status = $request->query('status')) {
@@ -90,8 +93,8 @@ class InventoryTransferController extends Controller
         $org = $request->user()->currentOrganization();
 
         $validated = $request->validate([
-            'from_warehouse_id' => ['required', 'exists:warehouses,id'],
-            'to_warehouse_id' => ['required', 'exists:warehouses,id', 'different:from_warehouse_id'],
+            'from_warehouse_id' => ['required', $this->accessibleWarehouse($request)],
+            'to_warehouse_id' => ['required', $this->accessibleWarehouse($request), 'different:from_warehouse_id'],
             'product_id' => ['nullable', 'exists:products,id'],
             'product_variant_id' => ['nullable', 'exists:product_variants,id'],
             'from_location_id' => ['nullable', 'exists:warehouse_locations,id'],
@@ -167,6 +170,8 @@ class InventoryTransferController extends Controller
         $org = $request->user()->currentOrganization();
 
         $transfer = InventoryTransfer::where('organization_id', $org->id)->findOrFail($transferId);
+        // Received by staff of the destination warehouse.
+        abort_unless(app(AccessControl::class)->canAccessWarehouse($request->user(), (int) $transfer->to_warehouse_id), 403, 'You are not assigned to the receiving warehouse.');
 
         $validated = $request->validate([
             'received_quantity' => ['required', 'integer', 'min:0', "max:{$transfer->quantity}"],

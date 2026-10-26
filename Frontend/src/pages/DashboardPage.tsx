@@ -11,6 +11,7 @@ import {
   Server
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { can } from '../types/auth';
 import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import omsService from '../services/omsService';
@@ -30,20 +31,21 @@ export const DashboardPage: React.FC = () => {
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
+        // Counts for areas the user cannot open stay at zero instead of failing the whole dashboard.
         const [storesRes, whRes, prodRes, ordRes, pickRes] = await Promise.all([
           omsService.getStores(),
           omsService.getWarehouses(),
-          omsService.getProducts({ per_page: 1, store_id: activeStore?.id }),
-          omsService.getOrders({ per_page: 1, store_id: activeStore?.id }),
-          omsService.getPickingTasks({ per_page: 1, store_id: activeStore?.id }),
+          can(user, 'products.view') ? omsService.getProducts({ per_page: 1, store_id: activeStore?.id }) : null,
+          can(user, 'orders.view') ? omsService.getOrders({ per_page: 1, store_id: activeStore?.id }) : null,
+          can(user, 'picking.view') ? omsService.getPickingTasks({ per_page: 1, store_id: activeStore?.id }) : null,
         ]);
 
         setStats({
           stores: storesRes.kpis.total_stores,
           warehouses: whRes.kpis.total_warehouses,
-          products: prodRes.meta.total,
-          orders: ordRes.meta.total,
-          pendingPicking: pickRes.kpis.pending_orders,
+          products: prodRes?.meta.total ?? 0,
+          orders: ordRes?.meta.total ?? 0,
+          pendingPicking: pickRes?.kpis.pending_orders ?? 0,
         });
       } catch (err) {
         console.error(err);
@@ -51,7 +53,7 @@ export const DashboardPage: React.FC = () => {
     };
 
     fetchDashboardData();
-  }, [activeStore?.id]);
+  }, [activeStore?.id, user]);
 
   return (
     <div className="page-container">
@@ -124,33 +126,37 @@ export const DashboardPage: React.FC = () => {
           </div>
         </NavLink>
 
-        <NavLink
-          to="/picking"
-          className="content-card"
-          style={{ padding: 20, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 16 }}
-        >
-          <div style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: '#eff6ff', color: '#1e56ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <CheckSquare size={22} />
-          </div>
-          <div>
-            <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#0f172a' }}>Picking & Packing</h4>
-            <p style={{ margin: '2px 0 0 0', fontSize: 12, color: '#64748b' }}>Process allocated order lines and fulfillment queues.</p>
-          </div>
-        </NavLink>
+        {can(user, 'picking.view') && (
+          <NavLink
+            to="/picking"
+            className="content-card"
+            style={{ padding: 20, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 16 }}
+          >
+            <div style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: '#eff6ff', color: '#1e56ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <CheckSquare size={22} />
+            </div>
+            <div>
+              <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#0f172a' }}>Picking & Packing</h4>
+              <p style={{ margin: '2px 0 0 0', fontSize: 12, color: '#64748b' }}>Process allocated order lines and fulfillment queues.</p>
+            </div>
+          </NavLink>
+        )}
 
-        <NavLink
-          to="/stock-movements"
-          className="content-card"
-          style={{ padding: 20, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 16 }}
-        >
-          <div style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: '#eff6ff', color: '#1e56ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <ArrowLeftRight size={22} />
-          </div>
-          <div>
-            <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#0f172a' }}>Stock Movements</h4>
-            <p style={{ margin: '2px 0 0 0', fontSize: 12, color: '#64748b' }}>Execute inter-warehouse transfers and adjustments.</p>
-          </div>
-        </NavLink>
+        {can(user, 'inventory.view') && (
+          <NavLink
+            to="/stock-movements"
+            className="content-card"
+            style={{ padding: 20, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 16 }}
+          >
+            <div style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: '#eff6ff', color: '#1e56ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <ArrowLeftRight size={22} />
+            </div>
+            <div>
+              <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#0f172a' }}>Stock Movements</h4>
+              <p style={{ margin: '2px 0 0 0', fontSize: 12, color: '#64748b' }}>Execute inter-warehouse transfers and adjustments.</p>
+            </div>
+          </NavLink>
+        )}
       </div>
 
       {/* System Integrity & Invariants Overview */}

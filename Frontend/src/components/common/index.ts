@@ -9,3 +9,4 @@ export { default as InfoCalloutCard } from './InfoCalloutCard';
 export * from './Button';
 export * from './Input';
 export * from './ConfirmDialog';
+export * from './AccessDenied';

@@ -154,6 +154,13 @@ class OpenCartDataSource extends HttpDataSource
             imageUrl: $imageBaseUrl && filled($product['image'] ?? null) ? rtrim($imageBaseUrl, '/').'/'.self::encodePath((string) $product['image']) : null,
             isActive: (bool) (int) $product['status'],
             variants: $variants,
+            details: array_filter([
+                'Model' => $product['model'] ?? null,
+                'Weight' => (float) ($product['weight'] ?? 0) > 0 ? $product['weight'] : null,
+                'Date added on OpenCart' => $product['date_added'] ?? null,
+                'Updated on OpenCart' => $product['date_modified'] ?? null,
+            ]),
+            raw: $product,
         );
     }
 
@@ -201,7 +208,14 @@ class OpenCartDataSource extends HttpDataSource
                 unitPrice: round((float) $line['price'] * $rate, 2),
                 taxAmount: round((float) $line['tax'] * (int) $line['quantity'] * $rate, 2),
                 totalAmount: round(((float) $line['total'] + (float) $line['tax'] * (int) $line['quantity']) * $rate, 2),
+                raw: $line,
             ), $lines),
+            paymentMethod: filled($order['payment_method'] ?? null) ? html_entity_decode((string) $order['payment_method'], ENT_QUOTES | ENT_HTML5) : null,
+            details: array_filter([
+                'Shipping method' => filled($order['shipping_method'] ?? null) ? html_entity_decode((string) $order['shipping_method'], ENT_QUOTES | ENT_HTML5) : null,
+                'Updated on OpenCart' => $order['date_modified'] ?? null,
+            ]),
+            raw: [...$order, 'products' => $lines],
         );
     }
 

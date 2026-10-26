@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\InventoryBalance;
+use App\Models\InventoryLocationBalance;
 use App\Models\Warehouse;
 use App\Models\WarehouseAuditLog;
 use App\Models\WarehouseLocation;
@@ -166,7 +167,15 @@ class WarehouseLayoutService
             ]);
         }
 
-        // 2. Prevent deletion if active stock exists
+        // 2. Stock sitting in this location would lose its place, so it must be moved out first.
+        $holdsStock = InventoryLocationBalance::where('warehouse_location_id', $location->id)->where('quantity', '>', 0)->exists();
+        if ($holdsStock) {
+            throw ValidationException::withMessages([
+                'location' => ["Cannot delete '{$location->code}' because it holds stock. Move the stock to another location first."],
+            ]);
+        }
+
+        // 3. Prevent deletion if active stock exists
         $hasStock = InventoryBalance::where('warehouse_id', $warehouse->id)
             ->where('on_hand', '>', 0)
             ->exists();

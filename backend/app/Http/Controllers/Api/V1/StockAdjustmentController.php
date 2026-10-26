@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Product;
-use App\Models\ProductVariant;
 use App\Models\StockAdjustment;
 use App\Models\Warehouse;
 use App\Services\InventoryEngine;
@@ -24,7 +23,7 @@ class StockAdjustmentController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $query = StockAdjustment::where('organization_id', $org->id)
+        $query = $this->inUserWarehouses(StockAdjustment::where('organization_id', $org->id), $request)
             ->with(['warehouse', 'location', 'variant.product', 'user', 'approvedBy']);
 
         if ($warehouseId = $request->query('warehouse_id')) {
@@ -93,7 +92,7 @@ class StockAdjustmentController extends Controller
         $org = $request->user()->currentOrganization();
 
         $validated = $request->validate([
-            'warehouse_id' => ['required', 'exists:warehouses,id'],
+            'warehouse_id' => ['required', $this->accessibleWarehouse($request)],
             'product_id' => ['nullable', 'exists:products,id'],
             'product_variant_id' => ['nullable', 'exists:product_variants,id'],
             'warehouse_location_id' => ['nullable', 'exists:warehouse_locations,id'],
@@ -159,7 +158,7 @@ class StockAdjustmentController extends Controller
 
             return response()->json([
                 'status' => 'success',
-                'message' => "Stock adjustment submitted for supervisor approval.",
+                'message' => 'Stock adjustment submitted for supervisor approval.',
                 'data' => $adjustment->load(['warehouse', 'variant.product']),
             ], 201);
         }
@@ -199,7 +198,7 @@ class StockAdjustmentController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $adjustment = StockAdjustment::where('organization_id', $org->id)->findOrFail($adjustmentId);
+        $adjustment = $this->inUserWarehouses(StockAdjustment::where('organization_id', $org->id), $request)->findOrFail($adjustmentId);
 
         if ($adjustment->status !== 'pending_approval') {
             return response()->json([
@@ -251,7 +250,7 @@ class StockAdjustmentController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $adjustment = StockAdjustment::where('organization_id', $org->id)->findOrFail($adjustmentId);
+        $adjustment = $this->inUserWarehouses(StockAdjustment::where('organization_id', $org->id), $request)->findOrFail($adjustmentId);
 
         if ($adjustment->status !== 'pending_approval') {
             return response()->json([

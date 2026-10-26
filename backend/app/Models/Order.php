@@ -3,7 +3,9 @@
 namespace App\Models;
 
 use App\Observers\OrderObserver;
+use App\Services\OrderAllocationEngine;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -23,6 +25,7 @@ class Order extends Model
     protected $fillable = [
         'organization_id',
         'store_id',
+        'created_by',
         'customer_id',
         'order_number',
         'invoice_number',
@@ -31,20 +34,38 @@ class Order extends Model
         'customer_email',
         'customer_phone',
         'shipping_address',
+        'billing_address',
         'order_status',
         'payment_status',
         'fulfillment_status',
+        'subtotal_amount',
+        'shipping_amount',
+        'tax_amount',
+        'discount_amount',
+        'payment_method',
         'total_amount',
         'currency',
         'notes',
+        'details',
+        'platform_data',
         'placed_at',
         'invoiced_at',
     ];
+
+    /** The store's original record is large; detail screens load it on purpose. */
+    protected $hidden = ['platform_data'];
 
     protected function casts(): array
     {
         return [
             'shipping_address' => 'array',
+            'billing_address' => 'array',
+            'subtotal_amount' => 'decimal:2',
+            'shipping_amount' => 'decimal:2',
+            'tax_amount' => 'decimal:2',
+            'discount_amount' => 'decimal:2',
+            'details' => 'array',
+            'platform_data' => 'array',
             'total_amount' => 'decimal:2',
             'placed_at' => 'datetime',
             'invoiced_at' => 'datetime',
@@ -59,6 +80,12 @@ class Order extends Model
     public function store(): BelongsTo
     {
         return $this->belongsTo(Store::class);
+    }
+
+    /** Who created the order by hand in Finovo (null for imported orders). */
+    public function creator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'created_by');
     }
 
     public function customer(): BelongsTo
@@ -92,10 +119,24 @@ class Order extends Model
      *
      * @return array<string, mixed>
      */
+    /**
+     * Orders sent to a warehouse: stock reserved there or picked there.
+     *
+     * @param  Builder<Order>  $query
+     */
+    public function scopeAssignedToWarehouse(Builder $query, int $warehouseId): void
+    {
+        $query->where(fn ($q) => $q
+            ->whereHas('items', fn ($q) => $q->where('allocated_warehouse_id', $warehouseId))
+            ->orWhereHas('pickTasks', fn ($q) => $q->where('warehouse_id', $warehouseId)));
+    }
+
     public function fulfillmentSummary(): array
     {
-        $this->loadMissing(['store', 'items', 'pickTasks', 'shipments']);
+        $this->loadMissing(['store', 'items.allocatedWarehouse', 'pickTasks.warehouse', 'shipments']);
         $task = $this->pickTasks->first();
+        $canAllocate = in_array($this->order_status, self::ALLOCATABLE_STATUSES, true);
+        $warehouse = $task?->warehouse ?? $this->items->firstWhere('allocatedWarehouse')?->allocatedWarehouse;
         $shipment = $this->shipments->sortByDesc('id')->first();
 
         return [
@@ -115,7 +156,10 @@ class Order extends Model
                 'sku' => $item->external_sku,
                 'quantity' => $item->quantity,
             ]),
-            'can_allocate' => in_array($this->order_status, self::ALLOCATABLE_STATUSES, true),
+            'warehouse' => $warehouse ? ['id' => $warehouse->id, 'name' => $warehouse->name] : null,
+            'can_allocate' => $canAllocate,
+            // Where the order can be sent next, and whether each warehouse has the stock for it.
+            'warehouse_options' => $canAllocate ? app(OrderAllocationEngine::class)->warehouseOptions($this) : [],
             'can_cancel' => $this->order_status !== 'cancelled' && ! in_array($this->order_status, self::SHIPPED_STATUSES, true),
             // The picking step can still be changed only while the order has not left the warehouse.
             'pick_task' => $task && ! in_array($task->status, PickTask::CLOSED, true)

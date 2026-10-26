@@ -67,6 +67,11 @@ class ShopifyStoreSyncTest extends TestCase
             'displayFulfillmentStatus' => 'UNFULFILLED',
             'note' => 'Leave at the door',
             'currentTotalPriceSet' => ['shopMoney' => ['amount' => '59.00', 'currencyCode' => 'PKR']],
+            'currentSubtotalPriceSet' => ['shopMoney' => ['amount' => '50.00']],
+            'totalShippingPriceSet' => ['shopMoney' => ['amount' => '5.00']],
+            'currentTotalTaxSet' => ['shopMoney' => ['amount' => '4.00']],
+            'paymentGatewayNames' => ['Cash on Delivery (COD)'],
+            'tags' => ['vip'],
             'email' => 'sara@example.com',
             'phone' => null,
             'customer' => ['firstName' => 'Sara', 'lastName' => 'Khan', 'email' => 'sara@example.com', 'phone' => '+923001234567'],
@@ -78,6 +83,7 @@ class ShopifyStoreSyncTest extends TestCase
                 'variant' => ['legacyResourceId' => '9001'],
                 'originalUnitPriceSet' => ['shopMoney' => ['amount' => '25.00']],
                 'discountedTotalSet' => ['shopMoney' => ['amount' => '50.00']],
+                'image' => ['url' => 'https://cdn.shopify.com/tee-red.jpg'],
                 'taxLines' => [['priceSet' => ['shopMoney' => ['amount' => '4.00']]]],
             ]]],
         ];
@@ -98,6 +104,12 @@ class ShopifyStoreSyncTest extends TestCase
         $this->assertSame('Classic Tee', $product->name);
         $this->assertSame('https://cdn.shopify.com/tee.jpg', $product->image_url);
         $this->assertSame('Apparel', $product->category);
+        // Everything Shopify sent is kept: all photos, other facts, and the original record for this store.
+        $this->assertSame(['https://cdn.shopify.com/tee.jpg', 'https://cdn.shopify.com/tee-back.jpg'], $product->images);
+        $this->assertSame('Finovo Apparel', $product->details['Vendor']);
+        $this->assertSame(['cotton', 'summer'], $product->details['Tags']);
+        $this->assertSame('7001', $product->platform_data[(string) $this->store->id]['legacyResourceId']);
+        $this->assertCount(2, $product->platform_data[(string) $this->store->id]['variants']);
 
         $variant = ProductVariant::where('sku', 'TEE-M-RED')->sole();
         $this->assertSame('Size / Color', $variant->option_name);
@@ -120,6 +132,13 @@ class ShopifyStoreSyncTest extends TestCase
         $this->assertSame('pending', $order->payment_status);
         $this->assertSame($variant->id, $order->items->sole()->product_variant_id);
         $this->assertEquals(4.00, $order->items->sole()->tax_amount);
+        $this->assertEquals(50.00, $order->subtotal_amount);
+        $this->assertEquals(5.00, $order->shipping_amount);
+        $this->assertSame('Cash on Delivery (COD)', $order->payment_method);
+        $this->assertSame(['vip'], $order->details['Tags']);
+        $this->assertSame('5001', $order->platform_data['legacyResourceId']);
+        $this->assertSame('https://cdn.shopify.com/tee-red.jpg', $order->items->sole()->image_url);
+        $this->assertArrayNotHasKey('platform_data', $order->toArray(), 'the original record stays out of lists');
 
         $this->assertNotNull($this->store->fresh()->last_sync_at);
         $this->assertDatabaseHas('integration_jobs', ['store_id' => $this->store->id, 'job_type' => 'store_sync', 'status' => 'succeeded']);
@@ -179,7 +198,7 @@ class ShopifyStoreSyncTest extends TestCase
 
         $this->actingAs($this->admin)->postJson("/api/v1/stores/{$this->store->id}/sync")
             ->assertUnprocessable()
-            ->assertJsonPath('message', "Sync failed: Shopify rejected Finovo's access (HTTP 401). Check the store's permissions or connect it again.");
+            ->assertJsonPath('message', "Shopify rejected Finovo's access (HTTP 401). Check the store's permissions or connect it again.");
 
         $this->assertSame('sync_issues', $this->store->fresh()->sync_status);
         $this->assertDatabaseHas('integration_jobs', ['store_id' => $this->store->id, 'status' => 'failed']);
@@ -241,6 +260,11 @@ class ShopifyStoreSyncTest extends TestCase
                         'productType' => 'Apparel',
                         'status' => 'ACTIVE',
                         'featuredMedia' => ['preview' => ['image' => ['url' => 'https://cdn.shopify.com/tee.jpg']]],
+                        'media' => ['nodes' => [['preview' => ['image' => ['url' => 'https://cdn.shopify.com/tee.jpg']]], ['preview' => ['image' => ['url' => 'https://cdn.shopify.com/tee-back.jpg']]]]],
+                        'vendor' => 'Finovo Apparel',
+                        'tags' => ['cotton', 'summer'],
+                        'totalInventory' => 12,
+                        'createdAt' => '2026-10-01T09:00:00Z',
                         'variants' => [
                             'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
                             'nodes' => [

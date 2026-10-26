@@ -10,8 +10,11 @@ import { Alert } from '../components/common/Alert';
 import { useConfirmDialog } from '../components/common/ConfirmDialog';
 import { useActiveStore } from '../hooks/useActiveStore';
 import omsService from '../services/omsService';
+import { useAuth } from '../hooks/useAuth';
+import { can } from '../types/auth';
 import type { ShipmentKpis, ShipmentModel } from '../services/omsService';
 import { formatDate } from '../utils/format';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 const CARRIERS = ['TCS', 'Leopards Courier', 'M&P', 'PostEx', 'Trax', 'BlueEx', 'DHL', 'FedEx', 'UPS', 'Other'];
 
@@ -31,6 +34,8 @@ const STATUS_LABELS: Record<ShipmentModel['status'], string> = {
 const errorMessage = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
 
 export const ShipmentsPage: React.FC = () => {
+  const { user } = useAuth();
+  const canDispatch = can(user, 'shipments.dispatch');
   const { activeStore } = useActiveStore();
   const { confirm, dialog } = useConfirmDialog();
 
@@ -39,7 +44,8 @@ export const ShipmentsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
-  const [appliedSearch, setAppliedSearch] = useState('');
+  // Live search: the list reloads 300 ms after typing stops.
+  const appliedSearch = useDebouncedValue(search.trim());
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
   const [meta, setMeta] = useState({ total: 0, last_page: 1 });
@@ -54,6 +60,9 @@ export const ShipmentsPage: React.FC = () => {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deliveringId, setDeliveringId] = useState<number | null>(null);
+
+  // A new search starts from the first page.
+  useEffect(() => setPage(1), [appliedSearch]);
 
   const fetchShipments = useCallback(async () => {
     try {
@@ -218,6 +227,9 @@ export const ShipmentsPage: React.FC = () => {
       width: '13%',
       align: 'center',
       render: (row) => {
+        if (!canDispatch && row.status !== 'delivered') {
+          return <span style={{ fontSize: 12, color: '#94a3b8' }}>{row.status === 'pending' ? 'Awaiting dispatch' : 'In transit'}</span>;
+        }
         if (row.status === 'pending') {
           return (
             <button type="button" className="table-action-primary" onClick={() => openDispatch(row)}>
@@ -303,8 +315,6 @@ export const ShipmentsPage: React.FC = () => {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              setPage(1);
-              setAppliedSearch(search.trim());
             }}
           >
             <div className="topbar-search-input" style={{ width: '100%', boxSizing: 'border-box' }}>

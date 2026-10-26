@@ -4,14 +4,15 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ConnectStoreRequest;
+use App\Integrations\ConnectorErrors;
 use App\Jobs\SyncStoreJob;
 use App\Models\Store;
 use App\Services\EmailService;
 use App\Services\StoreConnectionService;
 use App\Services\StoreSyncService;
+use App\Services\StoreWebhookService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use RuntimeException;
 
 class StoreController extends Controller
 {
@@ -19,6 +20,8 @@ class StoreController extends Controller
         protected StoreConnectionService $connections,
         protected EmailService $emails,
         protected StoreSyncService $syncService,
+        protected ConnectorErrors $errors,
+        protected StoreWebhookService $webhooks,
     ) {}
 
     /**
@@ -39,9 +42,11 @@ class StoreController extends Controller
             });
         }
 
-        // Status filter
+        // Status filter: the connection states shown on the page (Connected, Awaiting Authorization...)
         if ($status = $request->query('status')) {
-            $query->where('status', $status);
+            array_key_exists($status, Store::CONNECTION_STATES)
+                ? $query->inConnectionState($status)
+                : $query->where('status', $status);
         }
 
         // Platform filter
@@ -73,6 +78,7 @@ class StoreController extends Controller
                 'sync_issues' => $syncIssues,
                 'orders_awaiting_sync' => $ordersAwaitingSync,
             ],
+            'connection_states' => collect(Store::CONNECTION_STATES)->map(fn ($label, $value) => ['value' => $value, 'label' => $label])->values(),
         ]);
     }
 
@@ -81,8 +87,20 @@ class StoreController extends Controller
      */
     public function store(ConnectStoreRequest $request): JsonResponse
     {
-        $result = $this->connections->connect($request->validated(), $request->user());
+        $result = $this->connections->connect($request->validated(), $request->user(), $this->portalUrl($request));
         $store = $result['store'];
+
+        if ($result['reused']) {
+            return response()->json([
+                'status' => 'success',
+                'message' => $result['next_action']
+                    ? "{$store->name} was already added and is waiting for authorization. Finish authorizing it on {$store->platform->label()}."
+                    : ($result['connection']?->message ?? "{$store->name} was updated."),
+                'data' => $store,
+                'next_action' => $result['next_action'],
+                'credentials' => $result['credentials'],
+            ]);
+        }
 
         $this->emails->sendActivityEmail(EmailService::STORE_CREATED, $store->organization, [
             'name' => $store->name,
@@ -121,7 +139,7 @@ class StoreController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'next_action' => $this->connections->authorizationAction($store),
+            'next_action' => $this->errors->run($store, 'authorize', fn () => $this->connections->authorizationAction($store, $this->portalUrl($request))),
         ]);
     }
 
@@ -182,11 +200,7 @@ class StoreController extends Controller
             ], 202);
         }
 
-        try {
-            $result = $this->syncService->sync($store);
-        } catch (RuntimeException $e) {
-            return response()->json(['status' => 'error', 'message' => 'Sync failed: '.$e->getMessage()], 422);
-        }
+        $result = $this->errors->run($store, 'sync', fn () => $this->syncService->sync($store));
 
         return response()->json([
             'status' => 'success',
@@ -194,6 +208,24 @@ class StoreController extends Controller
             'data' => $store->fresh(),
             'result' => $result->toArray(),
         ]);
+    }
+
+    /**
+     * Switch on (or check again) automatic import for a store: Finovo subscribes to its order and product
+     * notifications, so new orders arrive without pressing Sync.
+     */
+    public function enableWebhooks(Request $request, Store $store): JsonResponse
+    {
+        $this->ensureSameOrganization($request, $store);
+        abort_unless($store->isConnected(), 422, 'Connect the store first.');
+
+        $outcome = $this->webhooks->register($store);
+
+        return response()->json([
+            'status' => $outcome['status'] === 'active' ? 'success' : 'error',
+            'message' => $outcome['message'],
+            'data' => $store->fresh(),
+        ], $outcome['status'] === 'active' ? 200 : 422);
     }
 
     /**
@@ -208,6 +240,7 @@ class StoreController extends Controller
             'Linked warehouses' => $store->warehouses()->pluck('name')->implode(', '),
         ];
 
+        $this->webhooks->unregister($store);
         $store->delete();
 
         $this->emails->sendActivityEmail(EmailService::STORE_DELETED, $request->user()->currentOrganization(), [
@@ -220,6 +253,28 @@ class StoreController extends Controller
             'status' => 'success',
             'message' => 'Store disconnected successfully.',
         ]);
+    }
+
+    /**
+     * The Finovo address the request came from (scheme, host and port), so a platform's approval page sends
+     * the merchant back to the same portal. Only the configured frontend host and local addresses are trusted.
+     */
+    private function portalUrl(Request $request): ?string
+    {
+        $source = $request->headers->get('origin') ?: $request->headers->get('referer');
+        $parts = $source ? parse_url($source) : false;
+
+        if (! $parts || ! in_array($parts['scheme'] ?? null, ['http', 'https'], true) || empty($parts['host'])) {
+            return null;
+        }
+
+        $trustedHosts = array_filter([parse_url((string) config('app.frontend_url'), PHP_URL_HOST), 'localhost', '127.0.0.1']);
+
+        if (! in_array($parts['host'], $trustedHosts, true)) {
+            return null;
+        }
+
+        return "{$parts['scheme']}://{$parts['host']}".(isset($parts['port']) ? ":{$parts['port']}" : '');
     }
 
     private function ensureSameOrganization(Request $request, Store $store): void

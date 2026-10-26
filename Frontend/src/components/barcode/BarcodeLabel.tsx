@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Barcode from 'react-barcode';
+import { QRCodeSVG } from 'qrcode.react';
 import { Loader2, Printer, X } from 'lucide-react';
 import CustomDropdown from '../common/CustomDropdown';
 import { Alert } from '../common/Alert';
@@ -14,6 +15,7 @@ export const DEFAULT_BARCODE_SETTINGS: BarcodeSettings = {
   display_value: true,
   font_size: 14,
   margin: 5,
+  embed_details: true,
 };
 
 const FORMAT_OPTIONS: { value: BarcodeSettings['format']; label: string; description: string }[] = [
@@ -84,8 +86,17 @@ const fitsFormat = (value: string, format: BarcodeSettings['format']): boolean =
   }
 };
 
+/**
+ * Text inside the label's QR code: the code on the first line (the scan screen reads it), then the details,
+ * one per line, so a phone camera shows e.g. the product name, price and stock as plain text.
+ */
+const qrText = (code: string, details: (string | null | undefined)[]): string =>
+  [code, ...details.map((detail) => detail?.trim()).filter(Boolean)].join('\n');
+
 interface BarcodeLabelProps {
   value: string;
+  /** Product or order facts put in the label's QR code (when enabled in settings), shown by phone cameras. */
+  details?: (string | null | undefined)[];
   /** Text printed under the barcode on the label, e.g. the product name. */
   caption?: string;
   printable?: boolean;
@@ -95,11 +106,15 @@ interface BarcodeLabelProps {
   settings?: BarcodeSettings;
 }
 
-/** On-screen size of compact labels, so long codes stay readable inside cards. */
-const COMPACT_SIZE = { width: 1.4, height: 48, font_size: 12, margin: 2 };
+/** On-screen size of compact labels: shorter bars, same crisp bar width. */
+const COMPACT_SIZE = { height: 44, font_size: 12, margin: 4 };
 
-/** A scannable barcode for a SKU, order number or tracking ID, drawn with the organization's label settings. */
-export const BarcodeLabel: React.FC<BarcodeLabelProps> = ({ value, caption, printable = false, compact = false, settings }) => {
+/**
+ * A label for a SKU, order number or tracking ID, drawn with the organization's label settings.
+ * The barcode carries only the code, so it stays short and any scanner reads it first time; when details
+ * are enabled, a QR code next to it carries the code and the details for phone cameras.
+ */
+export const BarcodeLabel: React.FC<BarcodeLabelProps> = ({ value, details, caption, printable = false, compact = false, settings }) => {
   const { settings: saved } = useBarcodeSettings();
   const labelRef = useRef<HTMLDivElement>(null);
   const code = value?.trim();
@@ -108,16 +123,19 @@ export const BarcodeLabel: React.FC<BarcodeLabelProps> = ({ value, caption, prin
 
   const config = settings ?? saved;
   const format = fitsFormat(code, config.format) ? config.format : 'CODE128';
+  const qr = config.embed_details && details?.some((detail) => detail?.trim()) ? qrText(code, details) : null;
 
   const print = () => {
-    const svg = labelRef.current?.querySelector('svg')?.outerHTML;
-    const win = window.open('', '_blank', 'width=420,height=320');
-    if (!svg || !win) return;
+    const label = labelRef.current?.innerHTML;
+    const win = window.open('', '_blank', 'width=520,height=360');
+    if (!label || !win) return;
 
     const doc = win.document;
     doc.title = code;
     doc.body.style.cssText = 'margin:0;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif';
-    doc.body.innerHTML = svg;
+    doc.body.innerHTML = `<div style="display:flex;align-items:center;gap:16px">${label}</div>`;
+    // On paper the label may be scaled down to fit the page; printers keep thin bars sharp.
+    doc.querySelectorAll('svg').forEach((svg) => svg.setAttribute('style', 'max-width:100%;height:auto'));
     if (caption) {
       const text = doc.createElement('div');
       text.textContent = caption;
@@ -142,17 +160,26 @@ export const BarcodeLabel: React.FC<BarcodeLabelProps> = ({ value, caption, prin
     />
   );
 
+  const qrCode = (size: number) => (qr ? <QRCodeSVG value={qr} size={size} level="M" marginSize={1} title={`${code} details`} /> : null);
+
   return (
     <div className={`barcode-label ${compact ? 'barcode-label--compact' : ''}`}>
-      {/* Compact labels are drawn smaller on screen; the print copy always uses the saved label settings. */}
-      <div className="barcode-label-code">{barcode(compact ? COMPACT_SIZE : config)}</div>
+      {/*
+        On screen the bars are drawn at a whole-pixel width and never shrunk, because blurred bars cannot be
+        scanned off a screen. Compact labels are only shorter. Printing always uses the saved settings.
+      */}
+      <div className="barcode-label-row">
+        <div className="barcode-label-code">{barcode({ ...config, ...(compact ? COMPACT_SIZE : {}), width: Math.max(1, Math.round(config.width)) })}</div>
+        {qr && <div className="barcode-label-qr">{qrCode(compact ? 72 : 96)}</div>}
+      </div>
       {printable && (
         <div ref={labelRef} hidden>
           {barcode(config)}
+          {qrCode(120)}
         </div>
       )}
       {caption && <div className="barcode-label-caption">{caption}</div>}
-      {format !== config.format && <div className="barcode-label-note">Printed as Code 128: this value does not fit {config.format}.</div>}
+      {format !== config.format && <div className="barcode-label-note">{`Printed as Code 128: this value does not fit ${config.format}.`}</div>}
       {printable && (
         <button type="button" className="btn-finovo-secondary barcode-label-print" onClick={print}>
           <Printer size={14} />
@@ -227,7 +254,7 @@ export const BarcodeSettingsDialog: React.FC<{ onClose: () => void }> = ({ onClo
           {message && <Alert type={message.type} message={message.text} />}
 
           <div className="barcode-settings-preview">
-            <BarcodeLabel value={PREVIEW_VALUES[draft.format]} settings={draft} />
+            <BarcodeLabel value={PREVIEW_VALUES[draft.format]} details={['Brown bear cushion', 'Price 1890.00']} settings={draft} />
           </div>
 
           <div>
@@ -245,6 +272,11 @@ export const BarcodeSettingsDialog: React.FC<{ onClose: () => void }> = ({ onClo
           <label className="barcode-settings-toggle">
             <input type="checkbox" checked={draft.display_value} onChange={(e) => set('display_value', e.target.checked)} />
             <span>Print the code as text under the bars</span>
+          </label>
+
+          <label className="barcode-settings-toggle">
+            <input type="checkbox" checked={draft.embed_details} onChange={(e) => set('embed_details', e.target.checked)} />
+            <span>Add a QR code with the product or order details, so a phone camera shows them as text</span>
           </label>
         </div>
 

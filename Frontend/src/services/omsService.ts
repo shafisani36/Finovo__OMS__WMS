@@ -1,4 +1,5 @@
 import apiClient, { getAuthToken } from './apiClient';
+import type { Permission, UserRole } from '../types/auth';
 
 export type StorePlatform =
   | 'shopify'
@@ -19,6 +20,8 @@ export interface StoreModel {
   code: string;
   platform: StorePlatform;
   status: 'active' | 'setup_incomplete' | 'disconnected';
+  /** What the Stores page shows: connected, awaiting_authorization, setup_incomplete or disconnected. */
+  connection_state: StoreConnectionState;
   sync_status: 'healthy' | 'sync_issues';
   orders_awaiting_sync: number;
   external_reference: string | null;
@@ -26,7 +29,16 @@ export interface StoreModel {
   connected_at: string | null;
   last_sync_at: string | null;
   warehouses: WarehouseModel[];
+  settings?: {
+    /** Automatic import (webhooks): whether the store notifies Finovo of new orders and product changes. */
+    webhooks?: { status: 'active' | 'needs_public_url' | 'failed' | 'unsupported'; message: string; checked_at?: string };
+  } | null;
 }
+
+/** Store platforms Finovo can write products and orders to (and receive automatic imports from). */
+export const WRITABLE_PLATFORMS: StorePlatform[] = ['shopify', 'woocommerce'];
+
+export type StoreConnectionState = 'connected' | 'awaiting_authorization' | 'setup_incomplete' | 'disconnected';
 
 export interface ConnectStorePayload {
   name: string;
@@ -49,7 +61,19 @@ export interface ConnectStoreResponse {
 }
 
 export type WarehouseStatus = 'draft' | 'setup_incomplete' | 'ready_for_activation' | 'active' | 'inactive' | 'closing' | 'closed';
-export type WarehouseType = 'distribution_center' | 'fulfillment_hub' | 'retail_backroom' | 'cross_dock' | 'quarantine_zone' | 'third_party_3pl';
+/** Facility types, the same list the backend accepts (Warehouse::TYPE_*). */
+export const WAREHOUSE_TYPES = [
+  { value: 'distribution_center', label: 'Distribution Center', description: 'Large regional storage and distribution hub' },
+  { value: 'fulfillment_center', label: 'Fulfillment Center', description: 'High-velocity e-commerce picking and packing' },
+  { value: 'storage_warehouse', label: 'Storage Warehouse', description: 'Long-term bulk inventory holding' },
+  { value: 'retail_store', label: 'Retail Store / Showroom', description: 'Customer-facing store with backroom storage' },
+  { value: 'manufacturing', label: 'Manufacturing Facility', description: 'Raw materials and production staging' },
+  { value: 'cross_dock', label: 'Cross-Docking Facility', description: 'Inbound goods go straight to outbound' },
+  { value: '3pl', label: 'Third-Party Logistics (3PL)', description: 'Partner-managed external fulfillment' },
+  { value: 'quarantine', label: 'Returns & Quarantine', description: 'Inspection, quarantine and returns triage' },
+] as const;
+
+export type WarehouseType = (typeof WAREHOUSE_TYPES)[number]['value'];
 
 export interface WarehouseLocationModel {
   id: number;
@@ -58,7 +82,8 @@ export interface WarehouseLocationModel {
   parent_id?: number | null;
   code: string;
   name?: string;
-  location_type: 'zone' | 'aisle' | 'rack' | 'shelf' | 'bin';
+  /** zone, aisle, rack, shelf, bin, or a top-level area type such as receiving or picking. */
+  location_type: string;
   barcode?: string;
   picking_eligible: boolean;
   putaway_eligible: boolean;
@@ -73,34 +98,67 @@ export interface WarehouseLocationModel {
 
 export interface WarehouseStaffModel {
   id: number;
-  warehouse_id: number;
   user_id: number;
+  /** Role in this warehouse (picker, packer, manager...). */
   role: string;
-  permissions?: string[];
-  is_active: boolean;
-  user?: {
-    id: number;
-    name: string;
-    email: string;
-  };
+  status: 'active' | 'revoked';
+  assigned_at: string | null;
+  expires_at: string | null;
+  assigned_by: string | null;
+  user: { id: number; name: string; email: string; role_label: string | null } | null;
 }
 
-export interface WarehouseAuditLogModel {
+export interface WarehouseBin {
   id: number;
-  warehouse_id: number;
-  user_id?: number;
-  action: string;
-  changes?: {
-    before?: Record<string, any>;
-    after?: Record<string, any>;
+  code: string;
+  /** Short code shown on the map inside its group (rack). */
+  label: string;
+  group: string | null;
+  units: number;
+  capacity: number | null;
+  state: 'empty' | 'partial' | 'full';
+  picking: boolean;
+  putaway: boolean;
+}
+
+export interface WarehouseZone {
+  id: number | null;
+  code: string;
+  type: string | null;
+  aisles: string | null;
+  main_category: string | null;
+  units: number;
+  bins_total: number;
+  bins_free: number;
+  /** Share of bins in use; null for zones without bins. */
+  percent: number | null;
+  bins: WarehouseBin[];
+}
+
+export interface WarehouseOverview {
+  kpis: {
+    total_skus: number;
+    on_hand: number;
+    reserved: number;
+    available: number;
+    low_stock: number;
+    out_of_stock: number;
+    capacity_percent: number;
+    empty_bins: number;
   };
-  ip_address?: string;
-  created_at: string;
-  user?: {
-    id: number;
-    name: string;
-    email: string;
-  };
+  categories: { total: number; items: { name: string; units: number; percent: number }[] };
+  capacity: { total: number; occupied: number; empty: number; percent: number };
+  zones: WarehouseZone[];
+}
+
+export type WarehouseActivityType = 'all' | 'stock' | 'orders' | 'setup';
+
+export interface WarehouseActivityItem {
+  id: string;
+  kind: 'stock' | 'orders' | 'setup' | 'staff';
+  who: string;
+  text: string;
+  at: string | null;
 }
 
 export interface WarehouseReadinessIssue {
@@ -123,13 +181,13 @@ export interface WarehouseModel {
   id: number;
   name: string;
   code: string;
-  type?: WarehouseType;
+  warehouse_type?: WarehouseType;
   status: WarehouseStatus;
   is_default: boolean;
   priority: number;
   is_active: boolean;
-  address_line1?: string;
-  address_line2?: string;
+  address?: string;
+  address_line_2?: string;
   city?: string;
   state?: string;
   postal_code?: string;
@@ -244,6 +302,135 @@ export interface ReturnableOrder {
   items: { id: number; product_name: string; sku: string | null; shipped_quantity: number; returnable_quantity: number }[];
 }
 
+export type EmployeeRole = UserRole;
+export type EmployeeStatus = 'active' | 'suspended';
+/** all: every warehouse of the company. assigned: only the warehouses picked for the employee. */
+export type WarehouseAccess = 'all' | 'assigned';
+
+export interface EmployeeModel {
+  id: number;
+  name: string;
+  email: string;
+  role: EmployeeRole;
+  role_label: string;
+  status: EmployeeStatus;
+  warehouse_access: WarehouseAccess;
+  warehouses: { id: number; name: string }[];
+  /** How many actions were allowed or denied for this employee alone. */
+  custom_permissions: number;
+  last_login_at: string | null;
+  created_at: string | null;
+  /** The signed-in user's own account. */
+  is_you: boolean;
+}
+
+export interface EmployeeKpis {
+  total: number;
+  active: number;
+  suspended: number;
+  admins: number;
+}
+
+export interface EmployeePayload {
+  name: string;
+  email: string;
+  role: EmployeeRole;
+  password?: string;
+  password_confirmation?: string;
+  warehouse_access: WarehouseAccess;
+  /** Sent only with "assigned" access; left out, current assignments are kept. */
+  warehouse_ids?: number[];
+}
+
+export interface EmployeeOptions {
+  roles: { value: EmployeeRole; label: string; description: string }[];
+  warehouses: { id: number; name: string; code: string | null }[];
+}
+
+export type PermissionEffect = 'allow' | 'deny' | 'inherit';
+
+export interface PermissionRow {
+  key: Permission;
+  label: string;
+  /** People-and-access actions only an administrator can hand out. */
+  sensitive: boolean;
+  role_default: boolean;
+  override: 'allow' | 'deny' | null;
+  effective: boolean;
+  can_change: boolean;
+}
+
+export interface PermissionSheet {
+  employee: { id: number; name: string; role: EmployeeRole; role_label: string };
+  /** Changes when anyone saves; sent back so a stale screen cannot overwrite newer changes. */
+  version: number;
+  editable: boolean;
+  modules: { module: string; permissions: PermissionRow[] }[];
+}
+
+export interface StockLevels {
+  on_hand: number;
+  reserved: number;
+  available: number;
+  damaged: number;
+  in_transit: number;
+}
+
+/** A value the store platform gave about a product or order: text, number, a list (e.g. tags) or a link. */
+export type PlatformDetail = string | number | boolean | null | (string | number)[];
+
+/** Everything known about one product, for its page. */
+export interface ProductDetail {
+  id: number;
+  name: string;
+  sku: string;
+  barcode: string | null;
+  category: string | null;
+  description: string | null;
+  is_active: boolean;
+  image_url: string | null;
+  images: string[];
+  details: Record<string, PlatformDetail>;
+  created_at: string | null;
+  updated_at: string | null;
+  stock: StockLevels;
+  warehouses: ({ id: number; name: string | null; code: string | null } & StockLevels)[];
+  variants: {
+    id: number;
+    sku: string;
+    barcode: string | null;
+    option_name: string | null;
+    option_value: string | null;
+    image_url: string | null;
+    price: number;
+    cost_price: number | null;
+    is_active: boolean;
+    stock: StockLevels;
+    warehouses: ({ id: number; name: string | null } & StockLevels)[];
+  }[];
+  stores: {
+    id: number;
+    name: string | null;
+    platform: StorePlatform | null;
+    listings: { external_id: string; external_sku: string | null; external_name: string | null }[];
+    /** The store's complete original product record, as it sent it. */
+    platform_data: Record<string, unknown> | null;
+  }[];
+  /** Every store the product is on (used to preselect stores when editing). */
+  store_ids: number[];
+  sales: { orders: number; units: number };
+  recent_movements: {
+    id: number;
+    type: string;
+    quantity: number;
+    balance_after: number | null;
+    warehouse: string | null;
+    reference: string | null;
+    reason: string | null;
+    created_at: string | null;
+  }[];
+}
+
 export interface BarcodeSettings {
   format: 'CODE128' | 'CODE39' | 'EAN13' | 'UPC';
   width: number;
@@ -251,6 +438,8 @@ export interface BarcodeSettings {
   display_value: boolean;
   font_size: number;
   margin: number;
+  /** Store product/order details inside the barcode so phone scanners show them as text. */
+  embed_details: boolean;
 }
 
 /** An order with its fulfillment state and the next steps it allows. */
@@ -267,7 +456,11 @@ export interface OrderFulfillment {
   currency: string | null;
   placed_at: string | null;
   items: { product_name: string; sku: string | null; quantity: number }[];
+  /** The warehouse the order was sent to. */
+  warehouse: { id: number; name: string } | null;
   can_allocate: boolean;
+  /** Warehouses the order can be sent to, and whether each has the stock for it. */
+  warehouse_options: { id: number; name: string; code: string | null; can_fulfil: boolean }[];
   can_cancel: boolean;
   pick_task: { id: number; status: 'not_started' | 'in_progress' | 'picked' | 'packed' } | null;
   shipment: { id: number; status: 'pending' | 'shipped' | 'delivered'; carrier: string | null; tracking_number: string | null; tracking_url: string | null } | null;
@@ -300,6 +493,36 @@ export interface ProductVariantModel {
   cost_price?: number | null;
   is_active?: boolean;
   stock?: { on_hand: number; reserved: number; available: number };
+}
+
+export interface ProductVariantPayload {
+  id?: number;
+  sku: string;
+  option_name?: string | null;
+  option_value?: string | null;
+  barcode?: string | null;
+  price: number;
+  cost_price?: number | null;
+  is_active?: boolean;
+}
+
+export interface ProductPayload {
+  name: string;
+  sku: string;
+  category?: string | null;
+  description?: string | null;
+  image_url?: string | null;
+  is_active?: boolean;
+  variants: ProductVariantPayload[];
+  /** Stores to add the product to; stores it is already on always get the change. */
+  store_ids?: number[];
+}
+
+/** What happened on each store after a change was sent to the connected stores. */
+export interface PushReport {
+  saved: string[];
+  failed: Record<string, string>;
+  skipped: string[];
 }
 
 export interface ProductModel {
@@ -568,9 +791,12 @@ export interface OrderItemModel {
   id: number;
   product_name: string;
   external_sku: string;
+  /** Photo the store sent with this line, e.g. the chosen colour. */
+  image_url?: string | null;
   quantity: number;
   unit_price: string;
   tax_amount?: string;
+  discount_amount?: string;
   total_amount?: string;
   status: string;
   variant?: {
@@ -582,21 +808,61 @@ export interface OrderItemModel {
   } | null;
 }
 
+export interface OrderAddress {
+  name?: string;
+  company?: string;
+  address1?: string;
+  address2?: string;
+  city?: string;
+  province?: string;
+  zip?: string;
+  country_code?: string;
+  phone?: string;
+}
+
+export interface OrderPayload {
+  store_id?: number | null;
+  customer_name: string;
+  customer_email?: string | null;
+  customer_phone?: string | null;
+  shipping_address?: OrderAddress | null;
+  payment_status: 'pending' | 'paid';
+  payment_method?: string | null;
+  currency: string;
+  notes?: string | null;
+  shipping_amount?: number;
+  discount_amount?: number;
+  tax_amount?: number;
+  /** Left out when editing an order whose lines do not change. */
+  items?: { product_variant_id: number; quantity: number; unit_price: number }[];
+}
+
 export interface OrderModel {
   id: number;
   order_number: string;
   invoice_number?: string | null;
-  external_order_id: string;
+  /** The store's ID for the order; empty for an order that exists only in Finovo. */
+  external_order_id: string | null;
+  /** Who created the order by hand in Finovo (empty for imported orders). */
+  created_by?: number | null;
   customer_name: string;
   customer_email?: string;
   customer_phone?: string | null;
   shipping_address?: Record<string, string> | null;
+  billing_address?: Record<string, string> | null;
   order_status: string;
   payment_status: string;
   fulfillment_status: string;
+  subtotal_amount?: string | null;
+  shipping_amount?: string | null;
+  tax_amount?: string | null;
+  discount_amount?: string | null;
+  payment_method?: string | null;
   total_amount: string;
   currency: string;
   notes?: string | null;
+  /** Other facts the store gave (tags, sales channel...), by label. */
+  details?: Record<string, PlatformDetail> | null;
   placed_at: string;
   store?: { id: number; name: string; platform: StorePlatform } | null;
   items?: OrderItemModel[];
@@ -714,6 +980,12 @@ export const omsService = {
     return data;
   },
 
+  /** Switch on (or check again) automatic import of the store's orders and products. */
+  async enableStoreWebhooks(storeId: number): Promise<{ message: string; data: StoreModel }> {
+    const { data } = await apiClient.post(`/stores/${storeId}/webhooks`);
+    return data;
+  },
+
   async createStore(payload: ConnectStorePayload): Promise<ConnectStoreResponse> {
     const { data } = await apiClient.post('/stores', payload);
     return data;
@@ -791,7 +1063,7 @@ export const omsService = {
   },
 
   // Physical Layout & Locations
-  async getWarehouseLocations(warehouseId: number, params?: { parent_id?: number; location_type?: string }) {
+  async getWarehouseLocations(warehouseId: number, params?: { parent_id?: number; location_type?: string; per_page?: number }) {
     const { data } = await apiClient.get(`/warehouses/${warehouseId}/locations`, { params });
     return data;
   },
@@ -824,7 +1096,9 @@ export const omsService = {
   },
 
   // Staff & Access
-  async getWarehouseStaff(warehouseId: number) {
+  async getWarehouseStaff(warehouseId: number): Promise<{
+    data: { assigned_staff: WarehouseStaffModel[]; eligible_users: { id: number; name: string; email: string; role: string }[] };
+  }> {
     const { data } = await apiClient.get(`/warehouses/${warehouseId}/staff`);
     return data;
   },
@@ -865,9 +1139,16 @@ export const omsService = {
     return data;
   },
 
-  // Audit Logs
-  async getWarehouseAuditLogs(warehouseId: number) {
-    const { data } = await apiClient.get(`/warehouses/${warehouseId}/audit-logs`);
+  async getWarehouseOverview(warehouseId: number): Promise<{ data: WarehouseOverview }> {
+    const { data } = await apiClient.get(`/warehouses/${warehouseId}/overview`);
+    return data;
+  },
+
+  async getWarehouseActivity(
+    warehouseId: number,
+    params: { type?: WarehouseActivityType; page?: number; per_page?: number }
+  ): Promise<{ data: WarehouseActivityItem[]; meta: { current_page: number; last_page: number; per_page: number; total: number } }> {
+    const { data } = await apiClient.get(`/warehouses/${warehouseId}/activity`, { params });
     return data;
   },
 
@@ -1156,6 +1437,55 @@ export const omsService = {
     return data;
   },
 
+  // Employees
+  async getEmployees(params?: { search?: string; role?: string; status?: string; page?: number; per_page?: number }): Promise<{
+    data: EmployeeModel[];
+    meta: { current_page: number; last_page: number; per_page: number; total: number };
+    kpis: EmployeeKpis;
+    options: EmployeeOptions;
+  }> {
+    const { data } = await apiClient.get('/employees', { params });
+    return data;
+  },
+
+  async createEmployee(payload: EmployeePayload): Promise<{ message: string; data: EmployeeModel }> {
+    const { data } = await apiClient.post('/employees', payload);
+    return data;
+  },
+
+  async updateEmployee(id: number, payload: EmployeePayload): Promise<{ message: string; data: EmployeeModel }> {
+    const { data } = await apiClient.put(`/employees/${id}`, payload);
+    return data;
+  },
+
+  async setEmployeeStatus(id: number, status: EmployeeStatus): Promise<{ message: string; data: EmployeeModel }> {
+    const { data } = await apiClient.put(`/employees/${id}/status`, { status });
+    return data;
+  },
+
+  async resetEmployeePassword(id: number, password: string, password_confirmation: string): Promise<{ message: string }> {
+    const { data } = await apiClient.post(`/employees/${id}/reset-password`, { password, password_confirmation });
+    return data;
+  },
+
+  async deleteEmployee(id: number): Promise<{ message: string }> {
+    const { data } = await apiClient.delete(`/employees/${id}`);
+    return data;
+  },
+
+  async getEmployeePermissions(id: number): Promise<{ data: PermissionSheet }> {
+    const { data } = await apiClient.get(`/employees/${id}/permissions`);
+    return data;
+  },
+
+  async updateEmployeePermissions(
+    id: number,
+    payload: { expected_version: number; overrides: { permission: Permission; effect: PermissionEffect }[] }
+  ): Promise<{ message: string; data: PermissionSheet }> {
+    const { data } = await apiClient.put(`/employees/${id}/permissions`, payload);
+    return data;
+  },
+
   // Barcodes
   async getBarcodeSettings(): Promise<{ data: BarcodeSettings }> {
     const { data } = await apiClient.get('/barcode/settings');
@@ -1184,7 +1514,7 @@ export const omsService = {
   },
 
   // Orders
-  async getOrders(params?: { search?: string; status?: string; store_id?: number; page?: number; per_page?: number }) {
+  async getOrders(params?: { search?: string; status?: string; store_id?: number; warehouse_id?: number; page?: number; per_page?: number }) {
     const { data } = await apiClient.get('/orders', { params });
     return data;
   },
@@ -1212,8 +1542,9 @@ export const omsService = {
     window.URL.revokeObjectURL(url);
   },
 
-  async allocateOrder(orderId: number) {
-    const { data } = await apiClient.post(`/orders/${orderId}/allocate`);
+  /** Reserves stock for the order; without a warehouse the best-stocked linked warehouse is used. */
+  async allocateOrder(orderId: number, warehouseId?: number) {
+    const { data } = await apiClient.post(`/orders/${orderId}/allocate`, warehouseId ? { warehouse_id: warehouseId } : undefined);
     return data;
   },
 
@@ -1222,14 +1553,49 @@ export const omsService = {
     return data;
   },
 
-  async cancelOrder(orderId: number) {
+  async cancelOrder(orderId: number): Promise<{ message: string; push?: PushReport }> {
     const { data } = await apiClient.post(`/orders/${orderId}/cancel`);
+    return data;
+  },
+
+  async createOrder(payload: OrderPayload): Promise<{ message: string; data: OrderModel; push: PushReport }> {
+    const { data } = await apiClient.post('/orders', payload);
+    return data;
+  },
+
+  async updateOrder(orderId: number, payload: OrderPayload): Promise<{ message: string; data: OrderModel; push: PushReport }> {
+    const { data } = await apiClient.put(`/orders/${orderId}`, payload);
+    return data;
+  },
+
+  async deleteOrder(orderId: number): Promise<{ message: string }> {
+    const { data } = await apiClient.delete(`/orders/${orderId}`);
     return data;
   },
 
   // Products
   async getProducts(params?: { search?: string; category?: string; store_id?: number; page?: number; per_page?: number }) {
     const { data } = await apiClient.get('/products', { params });
+    return data;
+  },
+
+  async getProduct(productId: number): Promise<{ data: ProductDetail }> {
+    const { data } = await apiClient.get(`/products/${productId}`);
+    return data;
+  },
+
+  async createProduct(payload: ProductPayload): Promise<{ message: string; data: { id: number }; push: PushReport }> {
+    const { data } = await apiClient.post('/products', payload);
+    return data;
+  },
+
+  async updateProduct(productId: number, payload: ProductPayload): Promise<{ message: string; data: { id: number }; push: PushReport }> {
+    const { data } = await apiClient.put(`/products/${productId}`, payload);
+    return data;
+  },
+
+  async deleteProduct(productId: number): Promise<{ message: string; push: PushReport }> {
+    const { data } = await apiClient.delete(`/products/${productId}`);
     return data;
   },
 

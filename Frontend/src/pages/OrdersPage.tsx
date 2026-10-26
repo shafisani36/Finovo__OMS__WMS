@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { FileText, CheckCircle, AlertCircle, Eye } from 'lucide-react';
+import { FileText, CheckCircle, AlertCircle, Eye, Plus } from 'lucide-react';
 import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import DataTable from '../components/common/DataTable';
 import type { Column } from '../components/common/DataTable';
 import omsService from '../services/omsService';
+import { useAuth } from '../hooks/useAuth';
+import { can } from '../types/auth';
 import { useConfirmDialog } from '../components/common/ConfirmDialog';
 import { useActiveStore } from '../hooks/useActiveStore';
 import type { OrderModel } from '../services/omsService';
@@ -13,6 +15,8 @@ import ProductThumb from '../components/catalog/ProductThumb';
 import StatusPill from '../components/common/StatusPill';
 import { formatMoney, variantNote } from '../utils/format';
 import OrderDetailModal from '../components/catalog/OrderDetailModal';
+import OrderFormModal from '../components/catalog/OrderFormModal';
+import { Alert } from '../components/common/Alert';
 import '../components/catalog/DetailModal.css';
 
 /** Same rules as the backend's Order::ALLOCATABLE_STATUSES and Order::SHIPPED_STATUSES. */
@@ -20,6 +24,9 @@ const ALLOCATABLE_STATUSES = ['imported', 'pending', 'partially_allocated', 'exc
 const SHIPPED_STATUSES = ['partially_shipped', 'shipped', 'delivered', 'returned'];
 
 export const OrdersPage: React.FC = () => {
+  const { user } = useAuth();
+  const canAllocate = can(user, 'orders.allocate');
+  const canCancel = can(user, 'orders.cancel');
   const { confirm, notify, dialog } = useConfirmDialog();
   const { activeStore } = useActiveStore();
   const [orders, setOrders] = useState<OrderModel[]>([]);
@@ -39,6 +46,8 @@ export const OrdersPage: React.FC = () => {
   const [debouncedSearch, setDebouncedSearch] = useState(search.trim());
   const [statusFilter] = useState('');
   const [viewOrder, setViewOrder] = useState<OrderModel | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [banner, setBanner] = useState<string | null>(null);
 
 
   const fetchOrders = async () => {
@@ -187,7 +196,7 @@ export const OrdersPage: React.FC = () => {
             <Eye size={13} />
             <span>Manage</span>
           </button>
-          {ALLOCATABLE_STATUSES.includes(row.order_status) ? (
+          {canAllocate && ALLOCATABLE_STATUSES.includes(row.order_status) ? (
             <button
               onClick={() => handleAllocate(row.id)}
               className="btn-finovo-primary"
@@ -196,7 +205,7 @@ export const OrdersPage: React.FC = () => {
               Allocate
             </button>
           ) : null}
-          {row.order_status !== 'cancelled' && !SHIPPED_STATUSES.includes(row.order_status) && (
+          {canCancel && row.order_status !== 'cancelled' && !SHIPPED_STATUSES.includes(row.order_status) && (
             <button
               onClick={() => handleCancel(row.id)}
               className="btn-finovo-secondary"
@@ -232,11 +241,19 @@ export const OrdersPage: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <InfoCalloutCard
             title="Multichannel Order Flow"
-            description="Orders imported from connected stores are automatically validated and assigned to fulfillment hubs."
+            description="New store orders arrive automatically; orders created here are also created on their store."
             icon={<FileText size={18} />}
           />
+          {can(user, 'orders.manage') && (
+            <button type="button" className="btn-finovo-primary" style={{ height: 42 }} onClick={() => setCreating(true)}>
+              <Plus size={16} />
+              <span>Create Order</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {banner && <Alert type="success" message={banner} className="page-banner" />}
 
       <div className="kpi-grid">
         <MetricCard title="Total Orders" value={kpis.total_orders} icon={<FileText size={20} />} pillText="All Channels" />
@@ -277,7 +294,27 @@ export const OrdersPage: React.FC = () => {
         />
       </div>
 
-      {viewOrder && <OrderDetailModal order={viewOrder} onClose={() => setViewOrder(null)} onChanged={fetchOrders} />}
+      {viewOrder && (
+        <OrderDetailModal
+          order={viewOrder}
+          onClose={() => setViewOrder(null)}
+          onChanged={(message) => {
+            if (message) setBanner(message);
+            fetchOrders();
+          }}
+        />
+      )}
+      {creating && (
+        <OrderFormModal
+          onClose={() => setCreating(false)}
+          onSaved={(message) => {
+            setCreating(false);
+            setBanner(message);
+            setPage(1);
+            fetchOrders();
+          }}
+        />
+      )}
       {dialog}
     </div>
   );

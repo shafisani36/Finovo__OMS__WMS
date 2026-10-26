@@ -20,9 +20,9 @@ class BarcodeTest extends TestCase
     {
         $admin = User::factory()->create(['status' => 'active', 'role' => UserRole::ADMIN]);
         $operator = User::factory()->create(['status' => 'active', 'role' => UserRole::OPERATOR]);
-        $settings = ['format' => 'CODE39', 'width' => 1.5, 'height' => 80, 'display_value' => false, 'font_size' => 12, 'margin' => 8];
+        $settings = ['format' => 'CODE39', 'width' => 1.5, 'height' => 80, 'display_value' => false, 'font_size' => 12, 'margin' => 8, 'embed_details' => false];
 
-        $this->actingAs($admin)->getJson('/api/v1/barcode/settings')->assertOk()->assertJsonPath('data.format', 'CODE128')->assertJsonPath('data.height', 60);
+        $this->actingAs($admin)->getJson('/api/v1/barcode/settings')->assertOk()->assertJsonPath('data.format', 'CODE128')->assertJsonPath('data.height', 60)->assertJsonPath('data.embed_details', true);
 
         $this->putJson('/api/v1/barcode/settings', [...$settings, 'format' => 'QR'])->assertUnprocessable()->assertJsonValidationErrors('format');
         $this->putJson('/api/v1/barcode/settings', $settings)->assertOk();
@@ -67,6 +67,11 @@ class BarcodeTest extends TestCase
             ->assertJsonPath('type', 'product')
             ->assertJsonPath('data.sku', 'M-1')
             ->assertJsonPath('data.stock.on_hand', 8);
+
+        // A label carrying details after the code ("M-1 | Mouse | Price 10.00") still finds the product.
+        $this->getJson('/api/v1/barcode/scan?code='.urlencode('M-1 | Mouse | Price 10.00'))->assertOk()->assertJsonPath('data.sku', 'M-1');
+        // So does a label's QR code: the code on the first line, details below.
+        $this->getJson('/api/v1/barcode/scan?code='.urlencode("M-1\nMouse\nPrice 10.00\nIn stock 10"))->assertOk()->assertJsonPath('data.sku', 'M-1');
 
         $this->getJson('/api/v1/barcode/scan?code=NOPE')->assertNotFound();
         $this->assertSame('shipped', PickTask::find($taskId)->status);

@@ -10,6 +10,7 @@ use App\Models\InventoryReservation;
 use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Models\Warehouse;
+use App\Services\AccessControl;
 use App\Services\InventoryEngine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -27,7 +28,7 @@ class InventoryController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $query = InventoryBalance::where('organization_id', $org->id)
+        $query = $this->inUserWarehouses(InventoryBalance::where('organization_id', $org->id), $request)
             ->with(['warehouse', 'variant.product']);
 
         // Search by SKU, product name, or barcode
@@ -144,7 +145,7 @@ class InventoryController extends Controller
         // With ?store_id= the figures cover only products sold in that store, like the stock table.
         $storeId = $request->integer('store_id');
 
-        $query = InventoryBalance::where('organization_id', $org->id)
+        $query = $this->inUserWarehouses(InventoryBalance::where('organization_id', $org->id), $request)
             ->when($storeId, fn ($q) => $q->whereHas('variant.skuMappings', fn ($m) => $m->where('store_id', $storeId)));
         if ($warehouseId) {
             $query->where('warehouse_id', $warehouseId);
@@ -202,7 +203,11 @@ class InventoryController extends Controller
         $org = $request->user()->currentOrganization();
 
         $variant = ProductVariant::where('organization_id', $org->id)
-            ->with(['product', 'balances.warehouse', 'locationBalances.location'])
+            ->with([
+                'product',
+                'balances' => fn ($q) => $this->inUserWarehouses($q->with('warehouse'), $request),
+                'locationBalances' => fn ($q) => $this->inUserWarehouses($q->with('location'), $request),
+            ])
             ->findOrFail($variantId);
 
         $balances = $variant->balances->map(function ($b) {
@@ -234,7 +239,7 @@ class InventoryController extends Controller
             ];
         });
 
-        $recentMovements = InventoryLedgerEntry::where('organization_id', $org->id)
+        $recentMovements = $this->inUserWarehouses(InventoryLedgerEntry::where('organization_id', $org->id), $request)
             ->where('product_variant_id', $variantId)
             ->with(['warehouse', 'location', 'user'])
             ->latest('id')
@@ -256,7 +261,7 @@ class InventoryController extends Controller
                 ];
             });
 
-        $reservations = InventoryReservation::where('organization_id', $org->id)
+        $reservations = $this->inUserWarehouses(InventoryReservation::where('organization_id', $org->id), $request)
             ->where('product_variant_id', $variantId)
             ->where('status', 'active')
             ->with('warehouse')
@@ -302,9 +307,12 @@ class InventoryController extends Controller
     public function reconcile(Request $request): JsonResponse
     {
         $org = $request->user()->currentOrganization();
-        $warehouseId = $request->query('warehouse_id') ? (int) $request->query('warehouse_id') : null;
+        $warehouseId = $request->validate(['warehouse_id' => ['nullable', 'integer', $this->accessibleWarehouse($request)]])['warehouse_id'] ?? null;
 
-        $result = $this->inventoryEngine->reconcileLedgerWithBalances($org->id, $warehouseId);
+        // Employees limited to some warehouses must name one of them.
+        abort_if($warehouseId === null && app(AccessControl::class)->warehouseIds($request->user()) !== null, 422, 'Choose one of your warehouses to reconcile.');
+
+        $result = $this->inventoryEngine->reconcileLedgerWithBalances($org->id, $warehouseId ? (int) $warehouseId : null);
 
         return response()->json([
             'status' => 'success',

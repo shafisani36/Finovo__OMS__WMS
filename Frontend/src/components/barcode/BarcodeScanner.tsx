@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ExternalLink, Loader2, ScanLine, X } from 'lucide-react';
+import { Camera, CameraOff, ExternalLink, Loader2, ScanLine, X } from 'lucide-react';
 import StatusPill from '../common/StatusPill';
 import { Alert } from '../common/Alert';
 import ProductThumb from '../catalog/ProductThumb';
@@ -13,6 +13,71 @@ import { formatMoney } from '../../utils/format';
 import './Barcode.css';
 
 const errorText = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
+
+/**
+ * Live camera preview that reads barcodes and QR codes (phone back camera, or a laptop webcam).
+ * The decoder is loaded only when the camera is opened. Browsers allow the camera on HTTPS or localhost.
+ */
+const CameraScanner: React.FC<{ onDetected: (text: string) => void }> = ({ onDetected }) => {
+  const video = useRef<HTMLVideoElement>(null);
+  const detected = useRef(onDetected);
+  detected.current = onDetected;
+  const [error, setError] = useState<string | null>(null);
+  const [starting, setStarting] = useState(true);
+
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    let cancelled = false;
+
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      setError('The camera works only on a secure address (https:// or localhost). Use a USB scanner or type the code.');
+      setStarting(false);
+      return;
+    }
+
+    import('@zxing/browser')
+      .then(({ BrowserMultiFormatReader }) =>
+        new BrowserMultiFormatReader().decodeFromConstraints({ video: { facingMode: 'environment' } }, video.current!, (result, _error, controls) => {
+          if (result) {
+            controls.stop();
+            detected.current(result.getText());
+          }
+        })
+      )
+      .then((controls) => {
+        stop = () => controls.stop();
+        if (cancelled) stop();
+        setStarting(false);
+      })
+      .catch((err: unknown) => {
+        setStarting(false);
+        setError(
+          err instanceof DOMException && err.name === 'NotAllowedError'
+            ? 'Camera access was blocked. Allow the camera for this site in the browser settings and try again.'
+            : 'No camera could be opened on this device. Use a USB scanner or type the code.'
+        );
+      });
+
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, []);
+
+  if (error) return <Alert type="error" message={error} />;
+
+  return (
+    <div className="scanner-camera">
+      <video ref={video} muted playsInline />
+      <span className="scanner-camera-frame" aria-hidden="true" />
+      {starting && (
+        <span className="scanner-camera-status">
+          <Loader2 size={16} className="animate-spin" /> Opening camera…
+        </span>
+      )}
+    </div>
+  );
+};
 
 /**
  * Top-bar scan button. A USB or Bluetooth scanner types the code and presses Enter, so the popup works with
@@ -27,10 +92,14 @@ export const BarcodeScanner: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [camera, setCamera] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setCamera(false);
+      return;
+    }
     inputRef.current?.focus();
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
@@ -138,11 +207,16 @@ export const BarcodeScanner: React.FC = () => {
         </div>
       )}
 
-      <BarcodeLabel value={product.sku} caption={product.name} printable />
+      <BarcodeLabel
+        value={product.sku}
+        details={[product.name, product.variant, `Price ${(Number(product.price) || 0).toFixed(2)}`, `Available ${product.stock.available} of ${product.stock.on_hand}`]}
+        caption={product.name}
+        printable
+      />
 
-      <button type="button" className="btn-finovo-secondary" style={{ alignSelf: 'flex-start' }} onClick={() => go(`/products?search=${encodeURIComponent(product.sku)}`)}>
+      <button type="button" className="btn-finovo-secondary" style={{ alignSelf: 'flex-start' }} onClick={() => go(`/products/${product.product_id}`)}>
         <ExternalLink size={14} />
-        <span>Open in Products</span>
+        <span>Open Product</span>
       </button>
     </div>
   );
@@ -185,14 +259,36 @@ export const BarcodeScanner: React.FC = () => {
                     aria-label="Barcode"
                     autoComplete="off"
                   />
+                  <button
+                    type="button"
+                    className="scanner-camera-toggle"
+                    onClick={() => setCamera((on) => !on)}
+                    title={camera ? 'Close camera' : 'Scan with the camera'}
+                    aria-label={camera ? 'Close camera' : 'Scan with the camera'}
+                    aria-pressed={camera}
+                  >
+                    {camera ? <CameraOff size={18} /> : <Camera size={18} />}
+                  </button>
                 </form>
+
+                {camera && (
+                  <CameraScanner
+                    onDetected={(text) => {
+                      setCamera(false);
+                      setNotice(null);
+                      lookUp(text);
+                    }}
+                  />
+                )}
 
                 {notice && <Alert type="success" message={notice} />}
                 {error && <Alert type="error" message={error} />}
 
                 {result?.type === 'order' && renderOrder(result.data)}
                 {result?.type === 'product' && renderProduct(result.data)}
-                {!result && !error && <p className="scanner-hint">Point the scanner at a label. Each scan replaces the result, so you can scan one parcel after another.</p>}
+                {!result && !error && !camera && (
+                  <p className="scanner-hint">Point a USB scanner at a label, or tap the camera to scan with this device. Each scan replaces the result, so you can scan one parcel after another.</p>
+                )}
               </div>
             </div>
           </div>,

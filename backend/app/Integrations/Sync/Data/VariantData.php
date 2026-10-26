@@ -19,5 +19,7 @@ final readonly class VariantData
         public ?float $costPrice,
         /** Units the store reports in stock; used once as opening stock in the store's warehouse. */
         public ?int $stockQuantity,
+        /** Photo of this variant when it has its own (e.g. the red one). */
+        public ?string $imageUrl = null,
     ) {}
 }

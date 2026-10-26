@@ -179,7 +179,20 @@ class MagentoDataSource extends HttpDataSource
                 unitPrice: (float) ($item['price'] ?? 0),
                 taxAmount: (float) ($item['tax_amount'] ?? 0),
                 totalAmount: (float) ($item['row_total_incl_tax'] ?? 0),
+                discountAmount: (float) ($item['discount_amount'] ?? 0),
+                raw: $item,
             ), array_filter($order['items'] ?? [], fn (array $item) => empty($item['parent_item_id'])))),
+            subtotal: isset($order['subtotal']) ? (float) $order['subtotal'] : null,
+            shippingTotal: isset($order['shipping_amount']) ? (float) $order['shipping_amount'] : null,
+            taxTotal: isset($order['tax_amount']) ? (float) $order['tax_amount'] : null,
+            discountTotal: isset($order['discount_amount']) ? abs((float) $order['discount_amount']) : null,
+            paymentMethod: $order['payment']['additional_information'][0] ?? $order['payment']['method'] ?? null,
+            details: array_filter([
+                'Status on Magento' => $order['status'] ?? null,
+                'Shipping method' => $order['shipping_description'] ?? null,
+                'Updated on Magento' => $order['updated_at'] ?? null,
+            ]),
+            raw: $order,
         );
     }
 }

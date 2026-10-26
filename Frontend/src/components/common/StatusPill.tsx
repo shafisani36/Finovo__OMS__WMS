@@ -32,6 +32,7 @@ const TONES: Record<string, Tone> = {
   refunded: 'red',
   returned: 'red',
   exception: 'red',
+  suspended: 'red',
 };
 
 /** Coloured pill for an order, payment or fulfillment status. */

@@ -16,7 +16,7 @@ class WooCommerceAuthorization
             'app_name' => config('app.name'),
             'scope' => 'read_write',
             'user_id' => $store->id,
-            'return_url' => config('app.frontend_url').'/stores?connected=woocommerce',
+            'return_url' => $store->portalUrl('/stores?'.http_build_query(['connected' => 'woocommerce', 'platform' => 'woocommerce', 'store' => $store->name])),
             'callback_url' => route('integrations.woocommerce.callback', ['state' => $state]),
         ]);
     }

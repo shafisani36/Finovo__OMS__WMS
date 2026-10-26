@@ -127,7 +127,21 @@ class BigCommerceDataSource extends HttpDataSource
                     'product' => count($variants) === 1 ? (int) ($product['inventory_level'] ?? 0) : null,
                     default => null,
                 },
+                imageUrl: ($variant['image_url'] ?? null) ?: null,
             ), $variants),
+            images: array_values(array_filter(array_map(fn (array $image) => $image['url_zoom'] ?? $image['url_standard'] ?? null, $images))),
+            details: array_filter([
+                'Product type' => isset($product['type']) ? ucfirst((string) $product['type']) : null,
+                'Weight' => $product['weight'] ?? null,
+                'Dimensions' => implode(' × ', array_filter([$product['width'] ?? null, $product['depth'] ?? null, $product['height'] ?? null])) ?: null,
+                'Condition' => $product['condition'] ?? null,
+                'Availability' => $product['availability'] ?? null,
+                'Search keywords' => $product['search_keywords'] ?? null,
+                'Store page' => $product['custom_url']['url'] ?? null,
+                'Created on BigCommerce' => $product['date_created'] ?? null,
+                'Updated on BigCommerce' => $product['date_modified'] ?? null,
+            ], fn ($value) => $value !== null && $value !== '' && $value !== [] && $value !== 0),
+            raw: $product,
         );
     }
 
@@ -184,7 +198,20 @@ class BigCommerceDataSource extends HttpDataSource
                 unitPrice: (float) ($line['price_ex_tax'] ?? $line['base_price'] ?? 0),
                 taxAmount: (float) ($line['total_tax'] ?? 0),
                 totalAmount: (float) ($line['total_inc_tax'] ?? 0),
+                discountAmount: array_sum(array_map(fn (array $discount) => (float) ($discount['amount'] ?? 0), $line['applied_discounts'] ?? [])),
+                raw: $line,
             ), $lines),
+            subtotal: isset($order['subtotal_ex_tax']) ? (float) $order['subtotal_ex_tax'] : null,
+            shippingTotal: isset($order['shipping_cost_inc_tax']) ? (float) $order['shipping_cost_inc_tax'] : null,
+            taxTotal: isset($order['total_tax']) ? (float) $order['total_tax'] : null,
+            discountTotal: isset($order['discount_amount']) ? (float) $order['discount_amount'] : null,
+            paymentMethod: filled($order['payment_method'] ?? null) ? $order['payment_method'] : null,
+            details: array_filter([
+                'Status on BigCommerce' => $order['status'] ?? null,
+                'Order source' => $order['order_source'] ?? null,
+                'Updated on BigCommerce' => $order['date_modified'] ?? null,
+            ]),
+            raw: [...$order, 'products' => $lines, 'shipping_address' => $shipping],
         );
     }
 }

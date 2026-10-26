@@ -225,7 +225,7 @@
 
 .order-labels {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: 1fr;
   gap: 12px;
 }
 
@@ -498,4 +498,11 @@
   .ow-shipment {
     grid-template-columns: 1fr;
   }
+}
+
+.ow-next-locked {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: #b45309;
 }

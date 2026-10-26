@@ -11,6 +11,8 @@ interface ConnectStoreModalProps {
   onClose: () => void;
   /** Called after a store is saved and needs no further step in this dialog. */
   onConnected: (message: string) => void;
+  /** Called when the merchant must approve Finovo on the platform's own page (the parent animates, then goes there). */
+  onRedirect: (url: string, storeName: string, platform: StorePlatform) => void;
 }
 
 type ResultStep =
@@ -20,7 +22,7 @@ type ResultStep =
 
 const EMPTY_FORM = { name: '', platform: 'shopify' as StorePlatform, warehouseId: null as number | null };
 
-export const ConnectStoreModal: React.FC<ConnectStoreModalProps> = ({ warehouses, onClose, onConnected }) => {
+export const ConnectStoreModal: React.FC<ConnectStoreModalProps> = ({ warehouses, onClose, onConnected, onRedirect }) => {
   const [form, setForm] = useState(EMPTY_FORM);
   const [credentials, setCredentials] = useState<Record<string, string>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -57,7 +59,7 @@ export const ConnectStoreModal: React.FC<ConnectStoreModalProps> = ({ warehouses
 
   const handleResponse = (response: ConnectStoreResponse) => {
     if (response.next_action?.type === 'redirect') {
-      window.location.assign(response.next_action.url);
+      onRedirect(response.next_action.url, response.data.name, response.data.platform);
       return;
     }
     if (response.next_action?.type === 'install_app') {

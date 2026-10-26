@@ -24,13 +24,22 @@ class Product extends Model
         'tracking_type',
         'image_url',
         'image_path',
+        'images',
+        'details',
+        'platform_data',
         'is_active',
     ];
+
+    /** Each connected store's original product record, by store ID; large, so detail screens load it on purpose. */
+    protected $hidden = ['platform_data'];
 
     protected function casts(): array
     {
         return [
             'is_active' => 'boolean',
+            'images' => 'array',
+            'details' => 'array',
+            'platform_data' => 'array',
         ];
     }
 

@@ -13,6 +13,7 @@ use App\Models\Store;
 use App\Models\User;
 use App\Models\Warehouse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\URL;
@@ -183,7 +184,7 @@ class StoreConnectionTest extends TestCase
         $query['hmac'] = hash_hmac('sha256', urldecode(http_build_query($query)), 'shopify-secret');
 
         $this->get('/api/v1/integrations/shopify/callback?'.http_build_query($query))
-            ->assertRedirect('http://localhost:3000/stores?connected=shopify');
+            ->assertRedirectContains('http://localhost:3000/stores?connected=shopify&platform=shopify');
 
         $store = Store::first();
         $this->assertSame(Store::STATUS_ACTIVE, $store->status);
@@ -393,7 +394,7 @@ class StoreConnectionTest extends TestCase
             'state' => $callback['state'],
             'instanceId' => 'instance-1',
             'signedInstance' => $this->signedWixInstance('instance-1', 'wix-secret'),
-        ]))->assertRedirect('http://localhost:3000/stores?connected=wix');
+        ]))->assertRedirectContains('http://localhost:3000/stores?connected=wix&platform=wix');
 
         $store = Store::sole();
         $this->assertSame(Store::STATUS_ACTIVE, $store->status);
@@ -542,7 +543,7 @@ class StoreConnectionTest extends TestCase
         ]);
 
         $this->get('/api/v1/integrations/ebay/callback?'.http_build_query(['code' => 'c', 'state' => $authorize['state']]))
-            ->assertRedirect('http://localhost:3000/stores?connected=ebay');
+            ->assertRedirectContains('http://localhost:3000/stores?connected=ebay&platform=ebay');
 
         $store = Store::first();
         $this->assertSame(Store::STATUS_ACTIVE, $store->status);
@@ -597,5 +598,93 @@ class StoreConnectionTest extends TestCase
         foreach (StorePlatform::cases() as $platform) {
             $this->assertInstanceOf(StoreConnector::class, app(StoreConnectorFactory::class)->for($platform));
         }
+    }
+
+    public function test_adding_a_store_that_is_awaiting_authorization_continues_with_it(): void
+    {
+        $payload = ['name' => 'Shopify Store', 'platform' => 'shopify', 'credentials' => ['shop_domain' => 'finovo-demo.myshopify.com']];
+        $first = $this->connect($payload)->assertCreated()->json('data.id');
+
+        // The same shop again: no duplicate, the waiting store is reused and sent to Shopify's approval page.
+        $this->connect([...$payload, 'name' => 'Main Shopify'])
+            ->assertOk()
+            ->assertJsonPath('data.id', $first)
+            ->assertJsonPath('data.name', 'Main Shopify')
+            ->assertJsonPath('data.connection_state', 'awaiting_authorization')
+            ->assertJsonPath('next_action.type', 'redirect');
+        $this->assertDatabaseCount('stores', 1);
+
+        // Its Connect button goes to the same approval page.
+        $this->getJson("/api/v1/stores/{$first}/authorization")
+            ->assertOk()
+            ->assertJsonPath('next_action.type', 'redirect');
+
+        // Once connected, adding it again is refused.
+        Store::find($first)->update(['status' => Store::STATUS_ACTIVE]);
+        $this->connect($payload)->assertUnprocessable()->assertJsonValidationErrors('credentials');
+    }
+
+    public function test_platform_sends_the_merchant_back_to_the_portal_they_started_from(): void
+    {
+        $id = $this->connect(['name' => 'Shopify Store', 'platform' => 'shopify', 'credentials' => ['shop_domain' => 'finovo-demo.myshopify.com']])->json('data.id');
+
+        $this->withHeader('Referer', 'http://localhost:3001/stores')->getJson("/api/v1/stores/{$id}/authorization")->assertOk();
+        $this->assertSame('http://localhost:3001/stores', Store::find($id)->portalUrl('/stores'));
+
+        // An address outside the portal's hosts is never trusted.
+        $this->withHeader('Referer', 'https://evil.example/stores')->getJson("/api/v1/stores/{$id}/authorization")->assertOk();
+        $this->assertSame('http://localhost:3001/stores', Store::find($id)->portalUrl('/stores'));
+
+        $state = app(AuthorizationState::class)->issue(Store::find($id));
+        $this->get('/api/v1/integrations/ebay/callback?state='.urlencode($state))->assertRedirectContains('http://localhost:3000/stores?connection_error=');
+        $this->get('/api/v1/integrations/shopify/callback?shop=finovo-demo.myshopify.com&state='.urlencode($state))
+            ->assertRedirectContains('http://localhost:3001/stores?connection_error=');
+    }
+
+    public function test_stores_filter_by_the_status_shown_on_the_page(): void
+    {
+        $make = fn (string $name, string $platform, string $status, ?string $error = null) => Store::create([
+            'organization_id' => $this->org->id, 'name' => $name, 'code' => $name, 'platform' => $platform, 'status' => $status, 'connection_error' => $error,
+        ]);
+        $make('Live', 'manual', Store::STATUS_ACTIVE);
+        $make('Waiting', 'shopify', Store::STATUS_SETUP_INCOMPLETE);
+        $make('Failed', 'shopify', Store::STATUS_SETUP_INCOMPLETE, 'Shopify rejected the credentials.');
+        $make('Bridge', 'custom_bridge', Store::STATUS_SETUP_INCOMPLETE);
+        $make('Gone', 'bigcommerce', Store::STATUS_DISCONNECTED);
+
+        $names = fn (string $state) => collect($this->actingAs($this->admin)->getJson("/api/v1/stores?status={$state}")->assertOk()->json('data'))->pluck('name')->sort()->values()->all();
+
+        $this->assertSame(['Live'], $names('connected'));
+        $this->assertSame(['Waiting'], $names('awaiting_authorization'));
+        $this->assertSame(['Bridge', 'Failed'], $names('setup_incomplete'));
+        $this->assertSame(['Gone'], $names('disconnected'));
+        $this->getJson('/api/v1/stores')->assertJsonPath('connection_states.1.label', 'Awaiting Authorization');
+    }
+
+    public function test_an_unexpected_platform_error_is_recorded_and_never_crashes_the_portal(): void
+    {
+        $store = Store::create([
+            'organization_id' => $this->org->id, 'name' => 'Shop', 'code' => 'shop', 'platform' => 'shopify',
+            'status' => Store::STATUS_ACTIVE, 'external_reference' => 'finovo-demo.myshopify.com', 'credentials' => ['access_token' => 'shpat'],
+        ]);
+        Http::fake(fn () => throw new ConnectionException('cURL error 28: Operation timed out'));
+
+        $message = $this->actingAs($this->admin)->postJson("/api/v1/stores/{$store->id}/sync")->assertUnprocessable()->json('message');
+        $this->assertStringStartsWith('Shopify took too long to answer.', $message);
+        $this->assertSame('sync_issues', $store->fresh()->sync_status);
+        $this->assertDatabaseHas('integration_errors', ['store_id' => $store->id, 'error_code' => 'sync.RuntimeException']);
+
+        // A failure Finovo did not expect (here a bug in a connector) is logged and still answered with a readable message.
+        $this->app->instance(StoreConnectorFactory::class, new class extends StoreConnectorFactory
+        {
+            public function for(StorePlatform $platform): StoreConnector
+            {
+                throw new \TypeError('Argument #1 must be of type string, null given');
+            }
+        });
+        $this->postJson("/api/v1/stores/{$store->id}/test-connection")
+            ->assertUnprocessable()
+            ->assertJsonPath('message', 'Something went wrong while working with Shopify. The error was logged; try again in a few minutes.');
+        $this->assertDatabaseHas('integration_errors', ['store_id' => $store->id, 'error_code' => 'test.TypeError']);
     }
 }

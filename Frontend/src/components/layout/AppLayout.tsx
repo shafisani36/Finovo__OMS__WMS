@@ -13,6 +13,7 @@ import {
   ArrowLeftRight,
   RotateCcw,
   Users,
+  UserCog,
   Search,
   Bell,
   HelpCircle,
@@ -22,7 +23,10 @@ import {
   ChevronRight,
   LogOut,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+import { can } from '../../types/auth';
+import type { Permission } from '../../types/auth';
 import { useActiveStore } from '../../hooks/useActiveStore';
 import Logo from '../common/Logo';
 import { platformLabel } from '../stores/storePlatforms';
@@ -33,6 +37,38 @@ import type { CustomerModel, OrderModel, ProductModel, StockAlert, StockAlertsRe
 import { STOCK_ALERTS_ON_LOGIN_KEY } from '../../context/AuthContext';
 
 const STOCK_ALERTS_REFRESH_MS = 5 * 60 * 1000;
+
+
+type NavItem = { to: string; label: string; icon: LucideIcon; permission: Permission };
+
+/** Sidebar sections and the permission each page needs; sections with no allowed page are hidden. */
+const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
+  {
+    title: 'GENERAL',
+    items: [
+      { to: '/warehouses', label: 'Warehouses', icon: Warehouse, permission: 'warehouses.view' },
+      { to: '/stores', label: 'Stores', icon: StoreIcon, permission: 'stores.view' },
+    ],
+  },
+  {
+    title: 'STORE MANAGEMENT',
+    items: [
+      { to: '/orders', label: 'Orders', icon: FileText, permission: 'orders.view' },
+      { to: '/products', label: 'Products', icon: Package, permission: 'products.view' },
+      { to: '/inventory', label: 'Inventory Engine', icon: Boxes, permission: 'inventory.view' },
+      { to: '/shipments', label: 'Shipments', icon: Truck, permission: 'shipments.view' },
+      { to: '/picking', label: 'Picking', icon: CheckSquare, permission: 'picking.view' },
+      { to: '/purchase-orders', label: 'Purchase Orders', icon: FileSpreadsheet, permission: 'purchasing.view' },
+      { to: '/stock-movements', label: 'Stock Movements', icon: ArrowLeftRight, permission: 'inventory.view' },
+      { to: '/returns', label: 'Returns', icon: RotateCcw, permission: 'returns.view' },
+      { to: '/customers', label: 'Customers', icon: Users, permission: 'customers.view' },
+    ],
+  },
+  {
+    title: 'ADMINISTRATION',
+    items: [{ to: '/employees', label: 'Employees', icon: UserCog, permission: 'employees.view' }],
+  },
+];
 
 /**
  * Notification bell with out-of-stock and low-stock items. It refreshes every few minutes and when the tab
@@ -160,6 +196,7 @@ interface SearchResults {
  */
 const GlobalSearch: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { activeStore } = useActiveStore();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResults | null>(null);
@@ -179,10 +216,12 @@ const GlobalSearch: React.FC = () => {
       setLoading(true);
       try {
         const params = { search: term, store_id: activeStore?.id, per_page: 5 };
+        // Only the areas this user may open are searched.
+        const none = { data: [] };
         const [orders, products, customers] = await Promise.all([
-          omsService.getOrders(params),
-          omsService.getProducts(params),
-          omsService.getCustomers(params),
+          can(user, 'orders.view') ? omsService.getOrders(params) : none,
+          can(user, 'products.view') ? omsService.getProducts(params) : none,
+          can(user, 'customers.view') ? omsService.getCustomers(params) : none,
         ]);
         if (!cancelled) setResults({ orders: orders.data, products: products.data, customers: customers.data });
       } catch {
@@ -196,7 +235,7 @@ const GlobalSearch: React.FC = () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query, activeStore?.id]);
+  }, [query, activeStore?.id, user]);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -258,7 +297,7 @@ const GlobalSearch: React.FC = () => {
             <div className="global-search-group">
               <div className="global-search-heading">Products</div>
               {results.products.map((p) => (
-                <button key={`p${p.id}`} type="button" className="global-search-item" onClick={() => go(`/products?search=${encodeURIComponent(p.sku)}`)}>
+                <button key={`p${p.id}`} type="button" className="global-search-item" onClick={() => go(`/products/${p.id}`)}>
                   <Package size={15} />
                   <span className="global-search-title">{p.name}</span>
                   <span className="global-search-meta">{p.sku}</span>
@@ -287,6 +326,9 @@ const GlobalSearch: React.FC = () => {
 
 export const AppLayout: React.FC = () => {
   const { user, logout } = useAuth();
+  const navSections = NAV_SECTIONS.map((section) => ({ ...section, items: section.items.filter((item) => can(user, item.permission)) })).filter(
+    (section) => section.items.length > 0
+  );
   const { activeStore } = useActiveStore();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -335,8 +377,8 @@ export const AppLayout: React.FC = () => {
             <span style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
               {user?.name || 'Admin User'}
             </span>
-            <span style={{ fontSize: 11, color: '#94a3b8', textTransform: 'capitalize' }}>
-              {user?.role || 'Admin'}
+            <span style={{ fontSize: 11, color: '#94a3b8' }}>
+              {user?.role_label ?? user?.role}
             </span>
           </div>
         </div>
@@ -386,100 +428,23 @@ export const AppLayout: React.FC = () => {
             <span>Dashboard</span>
           </NavLink>
 
-          {/* GENERAL */}
-          <div className="sidebar-nav-section-title">GENERAL</div>
-          <NavLink
-            to="/warehouses"
-            className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
-            onClick={() => setMobileMenuOpen(false)}
-          >
-            <Warehouse size={18} />
-            <span>Warehouses</span>
-          </NavLink>
-          <NavLink
-            to="/stores"
-            className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
-            onClick={() => setMobileMenuOpen(false)}
-          >
-            <StoreIcon size={18} />
-            <span>Stores</span>
-          </NavLink>
-
-          {/* STORE MANAGEMENT */}
-          <div className="sidebar-nav-section-title">STORE MANAGEMENT</div>
-          <NavLink
-            to="/orders"
-            className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
-            onClick={() => setMobileMenuOpen(false)}
-          >
-            <FileText size={18} />
-            <span>Orders</span>
-          </NavLink>
-
-          <NavLink
-            to="/products"
-            className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
-            onClick={() => setMobileMenuOpen(false)}
-          >
-            <Package size={18} />
-            <span>Products</span>
-          </NavLink>
-          <NavLink
-            to="/inventory"
-            className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
-            onClick={() => setMobileMenuOpen(false)}
-          >
-            <Boxes size={18} />
-            <span>Inventory Engine</span>
-          </NavLink>
-          <NavLink
-            to="/shipments"
-            className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
-            onClick={() => setMobileMenuOpen(false)}
-          >
-            <Truck size={18} />
-            <span>Shipments</span>
-          </NavLink>
-          <NavLink
-            to="/picking"
-            className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
-            onClick={() => setMobileMenuOpen(false)}
-          >
-            <CheckSquare size={18} />
-            <span>Picking</span>
-          </NavLink>
-          <NavLink
-            to="/purchase-orders"
-            className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
-            onClick={() => setMobileMenuOpen(false)}
-          >
-            <FileSpreadsheet size={18} />
-            <span>Purchase Orders</span>
-          </NavLink>
-          <NavLink
-            to="/stock-movements"
-            className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
-            onClick={() => setMobileMenuOpen(false)}
-          >
-            <ArrowLeftRight size={18} />
-            <span>Stock Movements</span>
-          </NavLink>
-          <NavLink
-            to="/returns"
-            className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
-            onClick={() => setMobileMenuOpen(false)}
-          >
-            <RotateCcw size={18} />
-            <span>Returns</span>
-          </NavLink>
-          <NavLink
-            to="/customers"
-            className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
-            onClick={() => setMobileMenuOpen(false)}
-          >
-            <Users size={18} />
-            <span>Customers</span>
-          </NavLink>
+          {/* Sections and pages the user may open (NAV_SECTIONS) */}
+          {navSections.map((section) => (
+            <React.Fragment key={section.title}>
+              <div className="sidebar-nav-section-title">{section.title}</div>
+              {section.items.map(({ to, label, icon: Icon }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`}
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  <Icon size={18} />
+                  <span>{label}</span>
+                </NavLink>
+              ))}
+            </React.Fragment>
+          ))}
         </div>
 
         {/* Need Help Card (Bottom) */}
@@ -515,7 +480,7 @@ export const AppLayout: React.FC = () => {
           {/* Right Controls */}
           <div className="topbar-right-controls">
             <BarcodeScanner />
-            <StockAlertsBell />
+            {can(user, 'inventory.view') && <StockAlertsBell />}
 
             {/* User Profile Pill & Dropdown */}
             <div style={{ position: 'relative' }}>
@@ -542,7 +507,7 @@ export const AppLayout: React.FC = () => {
                     {user?.name || 'Admin user'}
                   </span>
                   <span style={{ fontSize: 11, color: '#94a3b8' }}>
-                    {user?.role_label || (user?.role === 'admin' ? 'Administrator' : 'Operator')}
+                    {user?.role_label ?? user?.role}
                   </span>
                 </div>
               </div>

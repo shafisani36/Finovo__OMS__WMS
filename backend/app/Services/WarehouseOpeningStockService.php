@@ -27,6 +27,9 @@ class WarehouseOpeningStockService
 
         foreach ($rows as $index => $row) {
             $rowNum = $index + 1;
+            // Reset per row, so a row never shows the product or bin found for the row before it.
+            $variant = null;
+            $location = null;
             $sku = trim((string) ($row['sku'] ?? ''));
             $locationCode = strtoupper(trim((string) ($row['location_code'] ?? '')));
             $quantity = (int) ($row['quantity'] ?? 0);
@@ -91,8 +94,8 @@ class WarehouseOpeningStockService
             $previewRows[] = [
                 'row' => $rowNum,
                 'sku' => $sku,
-                'product_name' => isset($variant) ? $variant->product->name : null,
-                'variant_title' => isset($variant) ? $variant->title : null,
+                'product_name' => $variant?->product?->name,
+                'variant_title' => $variant?->option_value,
                 'location_code' => $locationCode,
                 'quantity' => $quantity,
                 'lot_number' => $lotNumber ?: null,
@@ -137,29 +140,26 @@ class WarehouseOpeningStockService
             $totalUnits = 0;
 
             foreach ($rows as $index => $row) {
-                $sku = trim((string) $row['sku']);
                 $quantity = (int) $row['quantity'];
-                $notes = 'Opening Stock: '.($row['location_code'] ?? 'Default');
-                if (! empty($row['lot_number'])) {
-                    $notes .= " | Lot: {$row['lot_number']}";
-                }
-
                 $variant = ProductVariant::where('organization_id', $warehouse->organization_id)
-                    ->where('sku', $sku)
+                    ->where('sku', trim((string) $row['sku']))
+                    ->firstOrFail();
+                $location = WarehouseLocation::where('warehouse_id', $warehouse->id)
+                    ->where('code', strtoupper(trim((string) $row['location_code'])))
                     ->firstOrFail();
 
-                $lineIdempotency = $idempotencyKey ? "{$idempotencyKey}-line-{$index}" : null;
-
-                $this->inventoryEngine->adjustStock(
+                // Received into the chosen location, so the stock is on the right shelf with its lot and expiry.
+                $this->inventoryEngine->receiveStock(
                     organizationId: $warehouse->organization_id,
                     warehouseId: $warehouse->id,
                     productVariantId: $variant->id,
-                    adjustmentType: 'add',
                     quantity: $quantity,
-                    reason: 'opening_stock',
-                    notes: $notes,
+                    locationId: $location->id,
+                    lotNumber: trim((string) ($row['lot_number'] ?? '')) ?: null,
+                    expiryDate: $row['expiry_date'] ?? null,
+                    referenceDoc: 'OPENING-STOCK',
                     userId: $userId,
-                    idempotencyKey: $lineIdempotency
+                    idempotencyKey: $idempotencyKey ? "{$idempotencyKey}-line-{$index}" : null,
                 );
 
                 $committedLines++;

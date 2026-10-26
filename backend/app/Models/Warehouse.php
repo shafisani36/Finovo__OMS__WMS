@@ -29,6 +29,11 @@ class Warehouse extends Model
 
     public const TYPE_QUARANTINE = 'quarantine';
 
+    public const TYPES = [
+        self::TYPE_DISTRIBUTION_CENTER, self::TYPE_FULFILLMENT_CENTER, self::TYPE_STORAGE, self::TYPE_RETAIL_STORE,
+        self::TYPE_MANUFACTURING, self::TYPE_CROSS_DOCK, self::TYPE_3PL, self::TYPE_QUARANTINE,
+    ];
+
     // Lifecycle States
     public const STATUS_DRAFT = 'draft';
 
@@ -131,9 +136,12 @@ class Warehouse extends Model
         return $this->hasMany(WarehouseLocation::class);
     }
 
+    /**
+     * Staff currently assigned to work here (revoked and expired assignments are kept only as history).
+     */
     public function memberships(): HasMany
     {
-        return $this->hasMany(WarehouseMembership::class);
+        return $this->hasMany(WarehouseMembership::class)->current();
     }
 
     public function users(): BelongsToMany

@@ -132,6 +132,15 @@ class WixDataSource extends HttpDataSource
             description: self::plainText($product['plainDescription'] ?? null),
             category: null,
             imageUrl: $product['media']['main']['image']['url'] ?? null,
+            images: array_values(array_filter(array_map(fn (array $item) => $item['image']['url'] ?? null, $product['media']['items'] ?? []))),
+            details: array_filter([
+                'Brand' => $product['brand']['name'] ?? null,
+                'Product type' => $product['productType'] ?? null,
+                'Ribbon' => $product['ribbon']['name'] ?? null,
+                'Created on Wix' => $product['createdDate'] ?? null,
+                'Updated on Wix' => $product['updatedDate'] ?? null,
+            ]),
+            raw: $product,
             isActive: (bool) ($product['visible'] ?? true),
             variants: array_map(function (array $variant) use ($stock) {
                 $choices = array_filter(array_column($variant['choices'] ?? [], 'optionChoiceNames'));
@@ -201,7 +210,20 @@ class WixDataSource extends HttpDataSource
                 unitPrice: (float) ($line['price']['amount'] ?? 0),
                 taxAmount: (float) ($line['taxDetails']['totalTax']['amount'] ?? 0),
                 totalAmount: (float) ($line['totalPriceAfterTax']['amount'] ?? 0),
+                discountAmount: (float) ($line['totalDiscount']['amount'] ?? 0),
+                imageUrl: $line['image']['url'] ?? null,
+                raw: $line,
             ), $order['lineItems'] ?? []),
+            subtotal: isset($order['priceSummary']['subtotal']['amount']) ? (float) $order['priceSummary']['subtotal']['amount'] : null,
+            shippingTotal: isset($order['priceSummary']['shipping']['amount']) ? (float) $order['priceSummary']['shipping']['amount'] : null,
+            taxTotal: isset($order['priceSummary']['tax']['amount']) ? (float) $order['priceSummary']['tax']['amount'] : null,
+            discountTotal: isset($order['priceSummary']['discount']['amount']) ? (float) $order['priceSummary']['discount']['amount'] : null,
+            details: array_filter([
+                'Status on Wix' => $order['status'] ?? null,
+                'Shipping method' => $order['shippingInfo']['title'] ?? null,
+                'Updated on Wix' => $order['updatedDate'] ?? null,
+            ]),
+            raw: $order,
         );
     }
 }

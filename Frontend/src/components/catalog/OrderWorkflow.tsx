@@ -5,6 +5,9 @@ import { Alert } from '../common/Alert';
 import { useConfirmDialog } from '../common/ConfirmDialog';
 import omsService from '../../services/omsService';
 import type { OrderFulfillment } from '../../services/omsService';
+import { useAuth } from '../../hooks/useAuth';
+import { can } from '../../types/auth';
+import type { Permission } from '../../types/auth';
 import './DetailModal.css';
 
 type PickStatus = NonNullable<OrderFulfillment['pick_task']>['status'];
@@ -41,10 +44,13 @@ interface OrderWorkflowProps {
  * (a unique tracking ID is generated) or mark delivered. Used on the order screen and after a barcode scan.
  */
 export const OrderWorkflow: React.FC<OrderWorkflowProps> = ({ order, onChanged }) => {
+  const { user } = useAuth();
   const { confirm, dialog } = useConfirmDialog();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [carrier, setCarrier] = useState(CARRIERS[0]);
+  // 0 = let the system pick the best-stocked linked warehouse.
+  const [warehouseId, setWarehouseId] = useState(0);
 
   const run = async (action: () => Promise<{ message: string }>) => {
     try {
@@ -92,29 +98,57 @@ export const OrderWorkflow: React.FC<OrderWorkflowProps> = ({ order, onChanged }
   const cancelled = order.order_status === 'cancelled';
   const spinner = busy ? <Loader2 size={15} className="animate-spin" /> : null;
 
-  /** The card describing the next step and its controls. */
-  const nextStep = (): { title: string; text: string; body?: React.ReactNode } => {
+  /** The card describing the next step, its controls and the permission they need. */
+  const nextStep = (): { title: string; text: string; body?: React.ReactNode; permission?: Permission } => {
     if (cancelled) return { title: 'Order cancelled', text: 'This order was cancelled and its reserved stock was released.' };
 
     if (order.can_allocate) {
+      const options = order.warehouse_options;
       return {
-        title: 'Reserve stock',
+        permission: 'orders.allocate',
+        title: 'Send to a warehouse',
         text:
           order.order_status === 'exception'
-            ? 'Stock could not be reserved last time. Try again once stock has arrived in the linked warehouse.'
-            : 'Reserve stock in the linked warehouse to send this order to the picking list.',
+            ? 'Stock could not be reserved last time. Choose a warehouse that has the stock, or try again once stock arrives.'
+            : 'Choose the warehouse that fulfils this order. Its stock is reserved and the order appears on that warehouse\'s Orders tab and the picking list.',
         body: (
-          <button type="button" className="btn-finovo-primary" disabled={busy} onClick={() => run(() => omsService.allocateOrder(order.id))}>
-            {spinner ?? <PackageCheck size={15} />}
-            <span>Allocate Stock</span>
-          </button>
+          <div className="ow-inline">
+            {options.length > 1 && (
+              <div className="ow-inline-grow">
+                <CustomDropdown
+                  value={warehouseId}
+                  onChange={(val) => setWarehouseId(Number(val))}
+                  searchable={false}
+                  options={[
+                    { value: 0, label: 'Automatic', description: 'Best-stocked linked warehouse' },
+                    ...options.map((w) => ({
+                      value: w.id,
+                      label: w.name,
+                      description: w.can_fulfil ? 'Has stock for every item' : 'Not enough stock',
+                      disabled: !w.can_fulfil,
+                    })),
+                  ]}
+                />
+              </div>
+            )}
+            <button
+              type="button"
+              className="btn-finovo-primary"
+              disabled={busy}
+              onClick={() => run(() => omsService.allocateOrder(order.id, warehouseId || undefined))}
+            >
+              {spinner ?? <PackageCheck size={15} />}
+              <span>Allocate Stock</span>
+            </button>
+          </div>
         ),
       };
     }
 
     if (order.pick_task && order.pick_task.status !== 'packed') {
       return {
-        title: 'Pick and pack',
+        permission: 'picking.update',
+        title: order.warehouse ? `Pick and pack at ${order.warehouse.name}` : 'Pick and pack',
         text: 'Update the picking status as the order is collected. Marking it Packed sends it to Shipments for dispatch.',
         body: (
           <div className="ow-segmented" role="group" aria-label="Picking status">
@@ -136,6 +170,7 @@ export const OrderWorkflow: React.FC<OrderWorkflowProps> = ({ order, onChanged }
 
     if (shipment?.status === 'pending') {
       return {
+        permission: 'shipments.dispatch',
         title: 'Dispatch the parcel',
         text: 'Choose the courier. A unique tracking ID is generated and the customer is emailed the tracking details.',
         body: (
@@ -154,6 +189,7 @@ export const OrderWorkflow: React.FC<OrderWorkflowProps> = ({ order, onChanged }
 
     if (shipment?.status === 'shipped') {
       return {
+        permission: 'shipments.dispatch',
         title: 'In transit',
         text: `The parcel is with ${shipment.carrier}. Confirm delivery once the customer has received it.`,
         body: (
@@ -171,6 +207,7 @@ export const OrderWorkflow: React.FC<OrderWorkflowProps> = ({ order, onChanged }
   };
 
   const step = nextStep();
+  const allowed = !step.permission || can(user, step.permission);
 
   return (
     <div className="ow">
@@ -192,7 +229,7 @@ export const OrderWorkflow: React.FC<OrderWorkflowProps> = ({ order, onChanged }
           <div className="ow-next-title">{step.title}</div>
           <p className="ow-next-text">{step.text}</p>
         </div>
-        {step.body}
+        {allowed ? step.body : <p className="ow-next-locked">You do not have permission for this step. Ask an administrator for access.</p>}
       </div>
 
       {shipment && shipment.status !== 'pending' && (
@@ -220,7 +257,7 @@ export const OrderWorkflow: React.FC<OrderWorkflowProps> = ({ order, onChanged }
         </dl>
       )}
 
-      {order.can_cancel && (
+      {order.can_cancel && can(user, 'orders.cancel') && (
         <div className="ow-footer">
           <button type="button" className="ow-cancel" disabled={busy} onClick={cancel}>
             <Ban size={13} />

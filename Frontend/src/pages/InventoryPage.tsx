@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Boxes,
   Plus,
@@ -30,7 +30,10 @@ import {
 import { BarcodeLabel, BarcodeSettingsDialog } from '../components/barcode/BarcodeLabel';
 import MetricCard from '../components/common/MetricCard';
 import CustomDropdown from '../components/common/CustomDropdown';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import omsService from '../services/omsService';
+import { useAuth } from '../hooks/useAuth';
+import { can } from '../types/auth';
 import { useActiveStore } from '../hooks/useActiveStore';
 import type {
   InventoryItemModel,
@@ -48,6 +51,9 @@ import type {
 type TabKey = 'balances' | 'receipts' | 'transfers' | 'adjustments' | 'counts' | 'ledger' | 'replenishment';
 
 export const InventoryPage: React.FC = () => {
+  const { user } = useAuth();
+  const canAdjust = can(user, 'inventory.adjust');
+  const canTransfer = can(user, 'inventory.transfer');
   const { activeStore } = useActiveStore();
   const [activeTab, setActiveTab] = useState<TabKey>('balances');
   const [loading, setLoading] = useState(true);
@@ -75,6 +81,8 @@ export const InventoryPage: React.FC = () => {
   // Tab 1: Balances State
   const [balances, setBalances] = useState<InventoryItemModel[]>([]);
   const [balanceSearch, setBalanceSearch] = useState('');
+  // Live search: stock balances reload 300 ms after typing stops.
+  const balanceQuery = useDebouncedValue(balanceSearch.trim());
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_stock' | 'low_stock' | 'out_of_stock'>('all');
   const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({});
 
@@ -142,7 +150,7 @@ export const InventoryPage: React.FC = () => {
       setLoading(true);
       const whId = selectedWarehouseId !== 'all' ? Number(selectedWarehouseId) : undefined;
       const res = await omsService.getInventory({
-        search: balanceSearch || undefined,
+        search: balanceQuery || undefined,
         warehouse_id: whId,
         store_id: activeStore?.id,
         status: statusFilter !== 'all' ? statusFilter : undefined,
@@ -247,6 +255,16 @@ export const InventoryPage: React.FC = () => {
     else if (activeTab === 'ledger') fetchMovements();
     else if (activeTab === 'replenishment') fetchReplenishment();
   }, [activeTab, selectedWarehouseId, activeStore?.id]);
+
+  // Typing in the stock search reloads only the balances (the effect above loads them when the tab opens).
+  const searchedOnce = useRef(false);
+  useEffect(() => {
+    if (!searchedOnce.current) {
+      searchedOnce.current = true;
+      return;
+    }
+    if (activeTab === 'balances') fetchBalances();
+  }, [balanceQuery]);
 
   // SKU Detail Inspector
   const openSkuDetail = async (variantId: number) => {
@@ -681,16 +699,19 @@ export const InventoryPage: React.FC = () => {
           </div>
 
           <div className="inventory-header-btn-group">
-            <button
-              onClick={() => setShowBarcodeSettings(true)}
-              className="btn-finovo-secondary"
-              style={{ padding: '8px 10px' }}
-              title="Barcode settings"
-              aria-label="Barcode settings"
-            >
-              <Settings size={15} />
-            </button>
+            {can(user, 'settings.barcode') && (
+              <button
+                onClick={() => setShowBarcodeSettings(true)}
+                className="btn-finovo-secondary"
+                style={{ padding: '8px 10px' }}
+                title="Barcode settings"
+                aria-label="Barcode settings"
+              >
+                <Settings size={15} />
+              </button>
+            )}
 
+            {canAdjust && (
             <button
               onClick={() => setShowNewAdjustmentModal(true)}
               className="btn-finovo-secondary"
@@ -700,25 +721,30 @@ export const InventoryPage: React.FC = () => {
               <Plus size={14} />
               <span>Adjust Stock</span>
             </button>
+            )}
 
-            <button
-              onClick={() => setShowNewTransferModal(true)}
-              className="btn-finovo-secondary"
-              style={{ padding: '8px 12px', fontSize: 12 }}
-            >
-              <ArrowLeftRight size={14} />
-              <span>New Transfer</span>
-            </button>
+            {canTransfer && (
+              <button
+                onClick={() => setShowNewTransferModal(true)}
+                className="btn-finovo-secondary"
+                style={{ padding: '8px 12px', fontSize: 12 }}
+              >
+                <ArrowLeftRight size={14} />
+                <span>New Transfer</span>
+              </button>
+            )}
 
-            <button
-              onClick={handleRunReconciliation}
-              className="btn-finovo-secondary"
-              style={{ padding: '8px 12px', fontSize: 12 }}
-              title="Verify Ledger vs Materialized Balances"
-            >
-              <Sparkles size={14} color="#1e56ff" />
-              <span>Audit Ledger</span>
-            </button>
+            {canAdjust && (
+              <button
+                onClick={handleRunReconciliation}
+                className="btn-finovo-secondary"
+                style={{ padding: '8px 12px', fontSize: 12 }}
+                title="Verify Ledger vs Materialized Balances"
+              >
+                <Sparkles size={14} color="#1e56ff" />
+                <span>Audit Ledger</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1773,7 +1799,12 @@ export const InventoryPage: React.FC = () => {
             ) : skuDetail ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
                 <div className="barcode-panel" style={{ justifyContent: 'center' }}>
-                  <BarcodeLabel value={skuDetail.sku} caption={skuDetail.product_name} printable />
+                  <BarcodeLabel
+                    value={skuDetail.sku}
+                    details={[skuDetail.product_name, `Price ${(Number(skuDetail.price) || 0).toFixed(2)}`]}
+                    caption={skuDetail.product_name}
+                    printable
+                  />
                 </div>
 
                 {/* Metrics Row */}

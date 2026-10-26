@@ -4,8 +4,6 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\InventoryReceipt;
-use App\Models\InventoryReceiptItem;
-use App\Models\ProductVariant;
 use App\Models\Warehouse;
 use App\Models\WarehouseLocation;
 use App\Services\InventoryEngine;
@@ -26,7 +24,7 @@ class InventoryReceiptController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $query = InventoryReceipt::where('organization_id', $org->id)
+        $query = $this->inUserWarehouses(InventoryReceipt::where('organization_id', $org->id), $request)
             ->with(['warehouse', 'receivingLocation', 'receivedBy', 'items.variant.product']);
 
         if ($warehouseId = $request->query('warehouse_id')) {
@@ -104,7 +102,7 @@ class InventoryReceiptController extends Controller
         $org = $request->user()->currentOrganization();
 
         $validated = $request->validate([
-            'warehouse_id' => ['required', 'exists:warehouses,id'],
+            'warehouse_id' => ['required', $this->accessibleWarehouse($request)],
             'supplier_name' => ['nullable', 'string', 'max:150'],
             'purchase_order_number' => ['nullable', 'string', 'max:100'],
             'receiving_location_id' => ['nullable', 'exists:warehouse_locations,id'],
@@ -163,7 +161,7 @@ class InventoryReceiptController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $receipt = InventoryReceipt::where('organization_id', $org->id)
+        $receipt = $this->inUserWarehouses(InventoryReceipt::where('organization_id', $org->id), $request)
             ->with('items')
             ->findOrFail($receiptId);
 
@@ -190,7 +188,7 @@ class InventoryReceiptController extends Controller
                 $receivedQty = (int) $itemInput['received_quantity'];
                 $locId = $itemInput['location_id'] ?? $receipt->receiving_location_id;
                 if (! $locId) {
-                    $dockLoc = \App\Models\WarehouseLocation::firstOrCreate(
+                    $dockLoc = WarehouseLocation::firstOrCreate(
                         [
                             'organization_id' => $receipt->organization_id,
                             'warehouse_id' => $receipt->warehouse_id,
@@ -255,7 +253,7 @@ class InventoryReceiptController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $receipt = InventoryReceipt::where('organization_id', $org->id)
+        $receipt = $this->inUserWarehouses(InventoryReceipt::where('organization_id', $org->id), $request)
             ->with('items')
             ->findOrFail($receiptId);
 
@@ -268,7 +266,7 @@ class InventoryReceiptController extends Controller
 
         $destLocId = $validated['destination_location_id'] ?? null;
         if (! $destLocId && ! empty($validated['destination_location_code'])) {
-            $destLoc = \App\Models\WarehouseLocation::firstOrCreate(
+            $destLoc = WarehouseLocation::firstOrCreate(
                 [
                     'organization_id' => $org->id,
                     'warehouse_id' => $receipt->warehouse_id,
@@ -296,7 +294,7 @@ class InventoryReceiptController extends Controller
         $fromLocId = $item->location_id ?: $receipt->receiving_location_id;
 
         if (! $fromLocId) {
-            $dockLoc = \App\Models\WarehouseLocation::firstOrCreate(
+            $dockLoc = WarehouseLocation::firstOrCreate(
                 [
                     'organization_id' => $org->id,
                     'warehouse_id' => $receipt->warehouse_id,

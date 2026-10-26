@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\ProductVariant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 /**
@@ -25,7 +26,11 @@ class BarcodeController extends Controller
         'display_value' => true,
         'font_size' => 14,
         'margin' => 5,
+        'embed_details' => true,
     ];
+
+    /** Labels can carry details after the code ("SKU-1 | Desk Lamp | Price 25.00"); lookups use the code. */
+    private const DETAILS_SEPARATOR = ' | ';
 
     public function settings(Request $request): JsonResponse
     {
@@ -41,6 +46,7 @@ class BarcodeController extends Controller
             'display_value' => 'required|boolean',
             'font_size' => 'required|integer|min:10|max:24',
             'margin' => 'required|integer|min:0|max:20',
+            'embed_details' => 'required|boolean',
         ]);
 
         $organization = $request->user()->currentOrganization();
@@ -59,7 +65,9 @@ class BarcodeController extends Controller
      */
     public function scan(Request $request): JsonResponse
     {
-        $code = trim((string) $request->validate(['code' => 'required|string|max:255'])['code']);
+        $scanned = (string) $request->validate(['code' => 'required|string|max:2000'])['code'];
+        // Label QR codes carry the code on the first line and details below; older labels used "CODE | details".
+        $code = trim(Str::before(strtok($scanned, "\r\n") ?: $scanned, self::DETAILS_SEPARATOR));
         $orgId = $request->user()->currentOrganization()->id;
 
         $order = Order::where('organization_id', $orgId)

@@ -11,6 +11,7 @@ use App\Integrations\Authorization\ShopifyAuthorization;
 use App\Integrations\Authorization\WixAuthorization;
 use App\Integrations\Authorization\WooCommerceAuthorization;
 use App\Integrations\ConnectionResult;
+use App\Integrations\ConnectorErrors;
 use App\Integrations\StoreConnectorFactory;
 use App\Models\Store;
 use App\Models\User;
@@ -18,6 +19,7 @@ use App\Models\Warehouse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 /**
  * Creates store connections, links them to a warehouse and keeps their connection status current.
@@ -34,6 +36,8 @@ class StoreConnectionService
         protected EbayAuthorization $ebay,
         protected ModulePackage $modules,
         protected AuditService $auditService,
+        protected ConnectorErrors $errors,
+        protected StoreWebhookService $webhooks,
     ) {}
 
     /**
@@ -42,10 +46,14 @@ class StoreConnectionService
      * Platforms with keys entered in Finovo are tested first and only saved when the test passes.
      * Platforms that authorize on their own site are saved as "setup_incomplete" and return a next step.
      *
+     * Adding a store that is already in Finovo but not connected yet (e.g. awaiting authorization) continues with
+     * that store instead of creating a duplicate; a store that is already connected is refused.
+     *
      * @param  array{name: string, platform: string, warehouse_id: int, credentials?: array<string, mixed>}  $data
-     * @return array{store: Store, connection: ConnectionResult|null, next_action: array<string, string>|null, credentials: array<string, string>|null}
+     * @param  string|null  $portalUrl  Finovo address the merchant is using, where the platform sends them back
+     * @return array{store: Store, reused: bool, connection: ConnectionResult|null, next_action: array<string, string>|null, credentials: array<string, string>|null}
      */
-    public function connect(array $data, User $user): array
+    public function connect(array $data, User $user, ?string $portalUrl = null): array
     {
         $organization = $user->currentOrganization();
         $platform = StorePlatform::from($data['platform']);
@@ -89,18 +97,26 @@ class StoreConnectionService
             throw ValidationException::withMessages(['warehouse_id' => 'Select a warehouse from your organization.']);
         }
 
-        $store = new Store([
+        $externalReference = $this->externalReference($platform, $input);
+        $existing = $this->existingStore($organization->id, $platform, $externalReference, $data['name']);
+
+        if ($existing?->isConnected()) {
+            throw ValidationException::withMessages(['credentials' => "This {$platform->label()} store is already connected as \"{$existing->name}\"."]);
+        }
+
+        $store = $existing ?? new Store([
             'organization_id' => $organization->id,
-            'name' => $data['name'],
             'code' => Str::slug($data['name']).'-'.Str::lower(Str::random(4)),
             'platform' => $platform,
-            'sync_status' => 'healthy',
             'orders_awaiting_sync' => 0,
-            'external_reference' => $this->externalReference($platform, $input),
-            'credentials' => $this->initialCredentials($platform, $input),
         ]);
-
-        $this->ensureNotAlreadyConnected($store);
+        $store->fill([
+            'name' => $data['name'],
+            'sync_status' => 'healthy',
+            'connection_error' => null,
+            'external_reference' => $externalReference ?? $store->external_reference,
+            'credentials' => $this->initialCredentials($platform, $input) ?? $store->credentials,
+        ]);
 
         $generated = null;
         if ($platform === StorePlatform::CUSTOM_BRIDGE) {
@@ -117,7 +133,7 @@ class StoreConnectionService
             // The website can only answer once the generated keys are installed on it.
             $store->status = Store::STATUS_SETUP_INCOMPLETE;
         } else {
-            $connection = $this->connectors->for($platform)->testConnection($store);
+            $connection = $this->errors->run($store, 'connect', fn () => $this->connectors->for($platform)->testConnection($store));
 
             if (! $connection->successful) {
                 throw ValidationException::withMessages(['credentials' => $connection->message]);
@@ -132,7 +148,11 @@ class StoreConnectionService
             $store->warehouses()->sync([$warehouse->id => ['is_default' => true, 'priority' => 1]]);
         });
 
-        $this->auditService->record('store.created', $user->id, [
+        if ($store->isConnected()) {
+            $this->enableAutomaticImport($store);
+        }
+
+        $this->auditService->record($existing ? 'store.connection_restarted' : 'store.created', $user->id, [
             'store_id' => $store->id,
             'platform' => $platform->value,
             'warehouse_id' => $warehouse->id,
@@ -140,19 +160,28 @@ class StoreConnectionService
 
         return [
             'store' => $store->load('warehouses'),
+            'reused' => $existing !== null,
             'connection' => $connection,
-            'next_action' => $authorizeOnPlatform ? $this->authorizationAction($store) : null,
+            'next_action' => $authorizeOnPlatform ? $this->authorizationAction($store, $portalUrl) : null,
             'credentials' => $generated,
         ];
     }
 
     /**
-     * What the merchant has to do next to authorize a redirect-based platform.
+     * What the merchant has to do next to authorize a redirect-based platform (the platform's approval page,
+     * or the app/module to install). Works the same for a new store and one already awaiting authorization.
      *
+     * @param  string|null  $portalUrl  Finovo address the merchant is using, where the platform sends them back
      * @return array<string, string>
      */
-    public function authorizationAction(Store $store): array
+    public function authorizationAction(Store $store, ?string $portalUrl = null): array
     {
+        $this->ensurePlatformConfigured($store->platform);
+
+        if ($portalUrl !== null) {
+            $store->forceFill(['settings' => [...($store->settings ?? []), 'portal_url' => $portalUrl]])->save();
+        }
+
         return match ($store->platform) {
             StorePlatform::SHOPIFY => ['type' => 'redirect', 'url' => $this->shopify->authorizationUrl($store, $this->state->issue($store))],
             StorePlatform::WOOCOMMERCE => ['type' => 'redirect', 'url' => $this->wooCommerce->authorizationUrl($store, $this->state->issue($store))],
@@ -203,7 +232,11 @@ class StoreConnectionService
      */
     public function test(Store $store): ConnectionResult
     {
-        $result = $this->connectors->for($store->platform)->testConnection($store);
+        try {
+            $result = $this->connectors->for($store->platform)->testConnection($store);
+        } catch (Throwable $e) {
+            $result = ConnectionResult::failure($this->errors->record($store, 'test', $e));
+        }
 
         $store->fill($result->successful
             ? [
@@ -219,7 +252,22 @@ class StoreConnectionService
             ]
         )->save();
 
+        if ($result->successful) {
+            $this->enableAutomaticImport($store);
+        }
+
         return $result;
+    }
+
+    /**
+     * Subscribe to the store's order and product notifications once the merchant has had their answer,
+     * so connecting never waits on the platform.
+     */
+    private function enableAutomaticImport(Store $store): void
+    {
+        if ($this->webhooks->supports($store->platform)) {
+            app()->terminating(fn () => $this->webhooks->register($store->fresh()));
+        }
     }
 
     /**
@@ -287,20 +335,21 @@ class StoreConnectionService
         };
     }
 
-    private function ensureNotAlreadyConnected(Store $store): void
+    /**
+     * The organization's store for the same platform store: matched by its address/ID, or, for platforms that
+     * only learn it during authorization (eBay, one-click BigCommerce/Wix...), an unconnected store with the same name.
+     */
+    private function existingStore(int $organizationId, StorePlatform $platform, ?string $externalReference, string $name): ?Store
     {
-        if ($store->external_reference === null) {
-            return;
+        $stores = Store::where('organization_id', $organizationId)->where('platform', $platform);
+
+        if ($externalReference !== null) {
+            return (clone $stores)->where('external_reference', $externalReference)->first()
+                ?? $stores->whereNull('external_reference')->where('status', '!=', Store::STATUS_ACTIVE)
+                    ->whereRaw('LOWER(name) = ?', [Str::lower($name)])->latest()->first();
         }
 
-        $exists = Store::where('organization_id', $store->organization_id)
-            ->where('platform', $store->platform)
-            ->where('external_reference', $store->external_reference)
-            ->exists();
-
-        if ($exists) {
-            throw ValidationException::withMessages(['credentials' => 'This '.$store->platform->label().' store is already connected.']);
-        }
+        return $stores->where('status', '!=', Store::STATUS_ACTIVE)->whereRaw('LOWER(name) = ?', [Str::lower($name)])->latest()->first();
     }
 
     private function ensurePlatformConfigured(StorePlatform $platform): void

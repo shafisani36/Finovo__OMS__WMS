@@ -28,7 +28,7 @@ class StockMovementController extends Controller
         $storeId = $request->integer('store_id');
         $inStore = fn ($q) => $q->when($storeId, fn ($q) => $q->whereHas('variant.skuMappings', fn ($m) => $m->where('store_id', $storeId)));
 
-        $query = InventoryLedgerEntry::where('organization_id', $org->id)
+        $query = $this->inUserWarehouses(InventoryLedgerEntry::where('organization_id', $org->id), $request)
             ->tap($inStore)
             ->with(['warehouse', 'variant.product', 'user']);
 
@@ -88,7 +88,7 @@ class StockMovementController extends Controller
             ->where('is_active', true)
             ->when($storeId, fn ($q) => $q->whereHas('variants.skuMappings', fn ($m) => $m->where('store_id', $storeId)))
             ->count();
-        $movementsThisMonth = InventoryLedgerEntry::where('organization_id', $org->id)
+        $movementsThisMonth = $this->inUserWarehouses(InventoryLedgerEntry::where('organization_id', $org->id), $request)
             ->tap($inStore)
             ->where('created_at', '>=', now()->startOfMonth())
             ->count();
@@ -119,8 +119,8 @@ class StockMovementController extends Controller
 
         $validated = $request->validate([
             'product_id' => ['required', 'exists:products,id'],
-            'from_warehouse_id' => ['required', 'exists:warehouses,id'],
-            'to_warehouse_id' => ['required', 'exists:warehouses,id', 'different:from_warehouse_id'],
+            'from_warehouse_id' => ['required', $this->accessibleWarehouse($request)],
+            'to_warehouse_id' => ['required', $this->accessibleWarehouse($request), 'different:from_warehouse_id'],
             'quantity' => ['required', 'integer', 'min:1'],
             'notes' => ['nullable', 'string', 'max:500'],
         ]);
@@ -169,7 +169,7 @@ class StockMovementController extends Controller
 
         $validated = $request->validate([
             'product_id' => ['required', 'exists:products,id'],
-            'warehouse_id' => ['required', 'exists:warehouses,id'],
+            'warehouse_id' => ['required', $this->accessibleWarehouse($request)],
             'adjustment_type' => ['required', 'string', 'in:add,subtract,recount'],
             'quantity' => ['required', 'integer', 'min:0'],
             'reason' => ['required', 'string', 'max:100'],
@@ -242,7 +242,7 @@ class StockMovementController extends Controller
         }
 
         // Sum across all warehouses
-        $balances = InventoryBalance::where('organization_id', $org->id)
+        $balances = $this->inUserWarehouses(InventoryBalance::where('organization_id', $org->id), $request)
             ->where('product_variant_id', $variant->id)
             ->get();
 

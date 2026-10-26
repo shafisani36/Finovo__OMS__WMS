@@ -66,7 +66,8 @@ export const ActiveStoreProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const refreshActiveStore = useCallback(async () => {
     try {
-      const res = await omsService.getStores({ per_page: 100 });
+      // Only a connected store can be managed; a store still awaiting authorization has no data yet.
+      const res = await omsService.getStores({ per_page: 100, status: 'connected' });
       const stores: StoreModel[] = res.data ?? [];
       const saved = readSaved(userId);
       const match = saved ? stores.find((s) => s.id === saved.id) : undefined;

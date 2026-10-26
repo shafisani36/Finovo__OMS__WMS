@@ -1,4 +1,53 @@
-export type UserRole = 'admin' | 'operator';
+export type UserRole = 'admin' | 'manager' | 'sales' | 'operator';
+
+/**
+ * Actions an employee can be allowed (same keys as the backend's App\Enums\Permission).
+ * The app hides what is not allowed; the server checks every request on its own.
+ */
+export type Permission =
+  | 'employees.view'
+  | 'employees.create'
+  | 'employees.update'
+  | 'employees.assign_role'
+  | 'employees.suspend'
+  | 'employees.reset_password'
+  | 'employees.delete'
+  | 'employees.manage_permissions'
+  | 'stores.view'
+  | 'stores.connect'
+  | 'stores.sync'
+  | 'stores.delete'
+  | 'warehouses.view'
+  | 'warehouses.manage'
+  | 'warehouses.delete'
+  | 'warehouse.employees.view'
+  | 'warehouse.employees.assign'
+  | 'orders.view'
+  | 'orders.allocate'
+  | 'orders.cancel'
+  | 'orders.manage'
+  | 'orders.delete'
+  | 'customers.view'
+  | 'products.view'
+  | 'products.manage'
+  | 'products.delete'
+  | 'inventory.view'
+  | 'inventory.receive'
+  | 'inventory.transfer'
+  | 'inventory.adjust'
+  | 'inventory.approve'
+  | 'picking.view'
+  | 'picking.update'
+  | 'shipments.view'
+  | 'shipments.dispatch'
+  | 'returns.view'
+  | 'returns.manage'
+  | 'purchasing.view'
+  | 'purchasing.request'
+  | 'purchasing.approve'
+  | 'purchasing.order'
+  | 'purchasing.receive'
+  | 'settings.barcode';
 
 export interface User {
   id: number;
@@ -8,9 +57,15 @@ export interface User {
   role_label: string;
   status: 'active' | 'suspended';
   current_organization_id?: number | null;
-  permissions: string[];
+  permissions: Permission[];
+  /** Warehouses the user works in; null means every warehouse of the company. */
+  warehouse_ids?: number[] | null;
   last_login_at: string | null;
 }
+
+/** Whether the signed-in user may perform an action. */
+export const can = (user: User | null | undefined, permission: Permission): boolean =>
+  user?.role === 'admin' || Boolean(user?.permissions?.includes(permission));
 
 export interface ApiResponse<T = unknown> {
   success: boolean;

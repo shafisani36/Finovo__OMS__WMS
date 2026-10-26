@@ -23,19 +23,38 @@ import type { Column } from '../components/common/DataTable';
 import { Alert } from '../components/common/Alert';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import ConnectStoreModal from '../components/stores/ConnectStoreModal';
+import StoreConnectingOverlay from '../components/stores/StoreConnectingOverlay';
+import type { ConnectingMode } from '../components/stores/StoreConnectingOverlay';
 import { STORE_PLATFORMS, platformLabel } from '../components/stores/storePlatforms';
 import CustomDropdown from '../components/common/CustomDropdown';
-import omsService from '../services/omsService';
-import type { StoreModel, WarehouseModel } from '../services/omsService';
+import omsService, { WRITABLE_PLATFORMS } from '../services/omsService';
+import type { StoreConnectionState, StoreModel, WarehouseModel } from '../services/omsService';
 import { useActiveStore } from '../hooks/useActiveStore';
+import { useAuth } from '../hooks/useAuth';
+import { can } from '../types/auth';
 
 /** Platforms whose products and orders Finovo can import. */
 const SYNC_SUPPORTED = ['shopify', 'woocommerce', 'bigcommerce', 'prestashop', 'wix', 'ebay', 'magento', 'opencart', 'oscommerce'];
 const AUTHORIZED_ON_PLATFORM = ['shopify', 'woocommerce', 'bigcommerce', 'wix', 'ebay', 'prestashop', 'opencart'];
 
+/** Labels and order of the statuses a store can show (the server sends the same list for the filter). */
+const CONNECTION_STATES: { value: StoreConnectionState; label: string }[] = [
+  { value: 'connected', label: 'Connected' },
+  { value: 'awaiting_authorization', label: 'Awaiting Authorization' },
+  { value: 'setup_incomplete', label: 'Setup Incomplete' },
+  { value: 'disconnected', label: 'Disconnected' },
+];
+
 type Notice = { type: 'success' | 'error' | 'info'; message: string } | null;
 
+/** The connecting animation on screen, and what happens when it ends. */
+type Connecting = { mode: ConnectingMode; platform: string; storeName?: string | null; message?: string | null; then: () => void } | null;
+
 export const StoresPage: React.FC = () => {
+  const { user } = useAuth();
+  const canConnect = can(user, 'stores.connect');
+  const canSync = can(user, 'stores.sync');
+  const canDelete = can(user, 'stores.delete');
   const [stores, setStores] = useState<StoreModel[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseModel[]>([]);
   const [kpis, setKpis] = useState({
@@ -50,6 +69,9 @@ export const StoresPage: React.FC = () => {
   const [total, setTotal] = useState(0);
   const [lastPage, setLastPage] = useState(1);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [connectionStates, setConnectionStates] = useState(CONNECTION_STATES);
+  const [connecting, setConnecting] = useState<Connecting>(null);
   const [statusFilter, setStatusFilter] = useState('');
   const [platformFilter, setPlatformFilter] = useState('');
   const [showAlert, setShowAlert] = useState(true);
@@ -65,7 +87,7 @@ export const StoresPage: React.FC = () => {
     try {
       setLoading(true);
       const res = await omsService.getStores({
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         status: statusFilter || undefined,
         platform: platformFilter || undefined,
         page,
@@ -73,6 +95,7 @@ export const StoresPage: React.FC = () => {
       });
       setStores(res.data);
       setKpis(res.kpis);
+      if (res.connection_states?.length) setConnectionStates(res.connection_states);
       setTotal(res.meta.total);
       setLastPage(res.meta.last_page);
     } catch (err: any) {
@@ -93,27 +116,47 @@ export const StoresPage: React.FC = () => {
 
   useEffect(() => {
     fetchStores();
-    fetchWarehouses();
-  }, [page, perPage, statusFilter, platformFilter]);
+  }, [page, perPage, statusFilter, platformFilter, debouncedSearch]);
 
-  // Shopify, BigCommerce and eBay send the merchant back here after the approval step.
+  useEffect(() => {
+    fetchWarehouses();
+  }, []);
+
+  // Live search: the list updates 300 ms after typing stops, from the first page.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // The platform sends the merchant back here after the approval step: play the connecting animation, then show the result.
   useEffect(() => {
     const connected = searchParams.get('connected');
     const error = searchParams.get('connection_error');
     if (!connected && !error) return;
 
-    setNotice(
-      error
-        ? { type: 'error', message: error }
-        : { type: 'success', message: `${platformLabel(connected as string)} store connected.` }
-    );
+    const platform = platformLabel(searchParams.get('platform') ?? connected ?? 'store');
+    const storeName = searchParams.get('store');
     setSearchParams({}, { replace: true });
+    setConnecting({
+      mode: error ? 'failed' : 'connected',
+      platform,
+      storeName,
+      message: error,
+      then: () => {
+        setNotice(error ? { type: 'error', message: error } : { type: 'success', message: `${storeName ?? `${platform} store`} is connected. Use Sync to import its products and orders.` });
+        fetchStores();
+        refreshActiveStore();
+      },
+    });
   }, [searchParams, setSearchParams]);
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setPage(1);
-    fetchStores();
+  /** Animate, then send the merchant to the platform's approval page. */
+  const goToPlatform = (url: string, storeName: string, platform: string) => {
+    setModalOpen(false);
+    setConnecting({ mode: 'redirecting', platform: platformLabel(platform), storeName, then: () => window.location.assign(url) });
   };
 
   const handleStoreConnected = (message: string) => {
@@ -133,7 +176,7 @@ export const StoresPage: React.FC = () => {
       setBusyStoreId(store.id);
       const { next_action } = await omsService.getStoreAuthorization(store.id);
       if (next_action.type === 'redirect') {
-        window.location.assign(next_action.url);
+        goToPlatform(next_action.url, store.name, store.platform);
         return;
       }
       if (next_action.type === 'install_module') {
@@ -155,6 +198,20 @@ export const StoresPage: React.FC = () => {
       setNotice({ type: 'success', message: res.message });
     } catch (err) {
       setNotice({ type: 'error', message: err instanceof Error ? err.message : 'Connection test failed.' });
+    } finally {
+      setBusyStoreId(null);
+      fetchStores();
+    }
+  };
+
+  /** Switch on automatic import: the store notifies Finovo of new orders and product changes. */
+  const handleAutoImport = async (store: StoreModel) => {
+    try {
+      setBusyStoreId(store.id);
+      const res = await omsService.enableStoreWebhooks(store.id);
+      setNotice({ type: 'success', message: res.message });
+    } catch (err) {
+      setNotice({ type: 'error', message: err instanceof Error ? err.message : 'Automatic import could not be switched on.' });
     } finally {
       setBusyStoreId(null);
       fetchStores();
@@ -272,14 +329,8 @@ export const StoresPage: React.FC = () => {
       key: 'status',
       header: 'Status',
       render: (row) => {
-        const isActive = row.status === 'active';
-        const label = isActive
-          ? 'Connected'
-          : row.status === 'disconnected'
-            ? 'Disconnected'
-            : AUTHORIZED_ON_PLATFORM.includes(row.platform) && !row.connection_error
-              ? 'Awaiting Authorization'
-              : 'Setup Incomplete';
+        const isActive = row.connection_state === 'connected';
+        const label = connectionStates.find((state) => state.value === row.connection_state)?.label ?? row.connection_state;
         return (
           <div>
             <div className={`status-dot-badge ${isActive ? 'status-active' : 'status-warning'}`}>
@@ -303,13 +354,32 @@ export const StoresPage: React.FC = () => {
       ),
     },
     {
-      key: 'orders_awaiting_sync',
-      header: 'Orders Awaiting Sync',
-      render: (row) => (
-        <span style={{ fontSize: 13, fontWeight: 600, color: row.orders_awaiting_sync > 0 ? '#d97706' : '#64748b' }}>
-          {row.orders_awaiting_sync}
-        </span>
-      ),
+      key: 'auto_import',
+      header: 'Auto Import',
+      render: (row) => {
+        if (row.connection_state !== 'connected' || !WRITABLE_PLATFORMS.includes(row.platform)) {
+          return <span style={{ fontSize: 12, color: '#94a3b8' }} title="New orders arrive with the scheduled sync">Scheduled sync</span>;
+        }
+        const webhooks = row.settings?.webhooks;
+        if (webhooks?.status === 'active') {
+          return <span className="kpi-pill kpi-pill-green" title={webhooks.message}>On</span>;
+        }
+        return canConnect ? (
+          <button
+            type="button"
+            className="btn-finovo-secondary"
+            style={{ padding: '4px 10px', fontSize: 11 }}
+            onClick={() => handleAutoImport(row)}
+            disabled={busyStoreId === row.id}
+            title={webhooks?.message ?? 'Import new orders and product changes the moment they happen'}
+          >
+            <PlugZap size={13} color="#1e56ff" />
+            <span>Turn on</span>
+          </button>
+        ) : (
+          <span style={{ fontSize: 12, color: '#94a3b8' }}>Off</span>
+        );
+      },
     },
     {
       key: 'actions',
@@ -319,7 +389,7 @@ export const StoresPage: React.FC = () => {
         const needsAuthorization = row.status !== 'active' && AUTHORIZED_ON_PLATFORM.includes(row.platform);
         return (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            {needsAuthorization ? (
+            {!canConnect ? null : needsAuthorization ? (
               <button
                 onClick={() => handleAuthorize(row)}
                 className="btn-finovo-primary"
@@ -342,7 +412,7 @@ export const StoresPage: React.FC = () => {
                 <span>Test</span>
               </button>
             )}
-            {row.status === 'active' && SYNC_SUPPORTED.includes(row.platform) && (
+            {canSync && row.status === 'active' && SYNC_SUPPORTED.includes(row.platform) && (
               <button
                 onClick={() => handleSync(row)}
                 className="btn-finovo-secondary"
@@ -354,26 +424,30 @@ export const StoresPage: React.FC = () => {
                 <span>Sync</span>
               </button>
             )}
-            <button
-              onClick={() => handleManage(row)}
-              className="btn-finovo-secondary"
-              style={{ padding: '6px 12px', fontSize: 12 }}
-              disabled={activeStore?.id === row.id}
-              title="Make this the store you are managing"
-            >
-              <Settings size={14} color="#1e56ff" />
-              <span>{activeStore?.id === row.id ? 'Managing' : 'Manage'}</span>
-            </button>
-            <button
-              onClick={() => setStoreToDelete(row)}
-              className="btn-finovo-secondary"
-              style={{ padding: '6px 10px', fontSize: 12, color: '#dc2626' }}
-              disabled={busy}
-              title="Delete this store"
-              aria-label={`Delete ${row.name}`}
-            >
-              <Trash2 size={14} />
-            </button>
+            {row.status === 'active' && (
+              <button
+                onClick={() => handleManage(row)}
+                className="btn-finovo-secondary"
+                style={{ padding: '6px 12px', fontSize: 12 }}
+                disabled={activeStore?.id === row.id}
+                title="Make this the store you are managing"
+              >
+                <Settings size={14} color="#1e56ff" />
+                <span>{activeStore?.id === row.id ? 'Managing' : 'Manage'}</span>
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={() => setStoreToDelete(row)}
+                className="btn-finovo-secondary"
+                style={{ padding: '6px 10px', fontSize: 12, color: '#dc2626' }}
+                disabled={busy}
+                title="Delete this store"
+                aria-label={`Delete ${row.name}`}
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
           </div>
         );
       },
@@ -406,14 +480,12 @@ export const StoresPage: React.FC = () => {
             icon={<StoreIcon size={18} />}
           />
 
-          <button
-            onClick={() => setModalOpen(true)}
-            className="btn-finovo-primary"
-            style={{ height: 42 }}
-          >
-            <Plus size={16} />
-            <span>Add Store</span>
-          </button>
+          {canConnect && (
+            <button onClick={() => setModalOpen(true)} className="btn-finovo-primary" style={{ height: 42 }}>
+              <Plus size={16} />
+              <span>Add Store</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -487,16 +559,15 @@ export const StoresPage: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <form onSubmit={handleSearchSubmit}>
-              <div className="topbar-search-input" style={{ width: 220 }}>
-                <input
-                  type="text"
-                  placeholder="Search stores..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
-            </form>
+            <div className="topbar-search-input" style={{ width: 220 }} role="search">
+              <input
+                type="search"
+                placeholder="Search stores..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                aria-label="Search stores"
+              />
+            </div>
 
             <div style={{ width: 170 }}>
               <CustomDropdown
@@ -505,12 +576,7 @@ export const StoresPage: React.FC = () => {
                   setStatusFilter(String(val));
                   setPage(1);
                 }}
-                options={[
-                  { value: '', label: 'All Statuses' },
-                  { value: 'active', label: 'Active' },
-                  { value: 'setup_incomplete', label: 'Setup Incomplete' },
-                  { value: 'disconnected', label: 'Disconnected' },
-                ]}
+                options={[{ value: '', label: 'All Statuses' }, ...connectionStates]}
                 searchable={false}
                 icon={<Filter size={14} />}
               />
@@ -555,6 +621,22 @@ export const StoresPage: React.FC = () => {
           warehouses={warehouses}
           onClose={() => setModalOpen(false)}
           onConnected={handleStoreConnected}
+          onRedirect={goToPlatform}
+        />
+      )}
+
+      {connecting && (
+        <StoreConnectingOverlay
+          mode={connecting.mode}
+          platform={connecting.platform}
+          storeName={connecting.storeName}
+          message={connecting.message}
+          onComplete={() => {
+            const then = connecting.then;
+            // Leaving for the platform keeps the overlay up until the browser navigates away.
+            if (connecting.mode !== 'redirecting') setConnecting(null);
+            then();
+          }}
         />
       )}
 

@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useActiveStore } from '../hooks/useActiveStore';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import omsService from '../services/omsService';
 import CustomDropdown from '../components/common/CustomDropdown';
 import MetricCard from '../components/common/MetricCard';
@@ -76,6 +77,8 @@ export const PurchaseOrdersPage: React.FC = () => {
   const [grns, setGrns] = useState<any[]>([]);
   const [grnKpis, setGrnKpis] = useState<any>({});
   const [grnSearch, setGrnSearch] = useState('');
+  // Live search: the open tab reloads 300 ms after typing stops in its search box.
+  const liveSearch = useDebouncedValue(`${poSearch}|${prSearch}|${grnSearch}`);
   const [grnStatusFilter, setGrnStatusFilter] = useState('all');
 
   // Modals
@@ -171,7 +174,7 @@ export const PurchaseOrdersPage: React.FC = () => {
     if (activeTab === 'po') fetchPurchaseOrders();
     else if (activeTab === 'pr') fetchRequisitions();
     else if (activeTab === 'grn') fetchGrns();
-  }, [activeTab, poStatusFilter, prStatusFilter, grnStatusFilter, activeStore?.id]);
+  }, [activeTab, poStatusFilter, prStatusFilter, grnStatusFilter, activeStore?.id, liveSearch]);
 
   const showNotification = (msg: string, isErr = false) => {
     if (isErr) {

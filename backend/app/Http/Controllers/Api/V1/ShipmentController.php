@@ -31,7 +31,7 @@ class ShipmentController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $scoped = fn () => Shipment::where('organization_id', $org->id)
+        $scoped = fn () => $this->inUserWarehouses(Shipment::where('organization_id', $org->id), $request)
             ->whereIn('status', self::STATUSES)
             ->when($request->integer('store_id'), fn ($q, $storeId) => $q->whereHas('order', fn ($o) => $o->where('store_id', $storeId)));
 
@@ -180,7 +180,7 @@ class ShipmentController extends Controller
 
     private function find(Request $request, int $id, bool $lock = false): Shipment
     {
-        return Shipment::where('organization_id', $request->user()->currentOrganization()->id)
+        return $this->inUserWarehouses(Shipment::where('organization_id', $request->user()->currentOrganization()->id), $request)
             ->when($lock, fn ($q) => $q->lockForUpdate())
             ->findOrFail($id);
     }

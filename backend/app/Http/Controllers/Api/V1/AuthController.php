@@ -8,6 +8,7 @@ use App\Http\Requests\LoginRequest;
 use App\Http\Requests\ResendOtpRequest;
 use App\Http\Requests\VerifyOtpRequest;
 use App\Models\User;
+use App\Services\AccessControl;
 use App\Services\AuditService;
 use App\Services\OtpService;
 use Illuminate\Http\JsonResponse;
@@ -92,16 +93,7 @@ class AuthController extends Controller
                 'message' => 'Login successful. Welcome back.',
                 'data' => [
                     'requires_otp' => false,
-                    'user' => [
-                        'id' => $user->id,
-                        'name' => $user->name,
-                        'email' => $user->email,
-                        'role' => $user->role->value,
-                        'role_label' => $user->role->label(),
-                        'status' => $user->status,
-                        'permissions' => $user->role->permissions(),
-                        'last_login_at' => $user->last_login_at?->toIso8601String(),
-                    ],
+                    'user' => $this->profile($user),
                     'token' => $token,
                 ],
                 'errors' => null,
@@ -177,16 +169,7 @@ class AuthController extends Controller
             'success' => true,
             'message' => 'Login successful. Welcome back.',
             'data' => [
-                'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'role' => $user->role->value,
-                    'role_label' => $user->role->label(),
-                    'status' => $user->status,
-                    'permissions' => $user->role->permissions(),
-                    'last_login_at' => $user->last_login_at?->toIso8601String(),
-                ],
+                'user' => $this->profile($user),
                 'token' => $token,
             ],
             'errors' => null,
@@ -226,16 +209,7 @@ class AuthController extends Controller
             'success' => true,
             'message' => 'Authenticated user profile retrieved.',
             'data' => [
-                'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'role' => $user->role->value,
-                    'role_label' => $user->role->label(),
-                    'status' => $user->status,
-                    'permissions' => $user->role->permissions(),
-                    'last_login_at' => $user->last_login_at?->toIso8601String(),
-                ],
+                'user' => $this->profile($user),
             ],
             'errors' => null,
         ]);
@@ -268,5 +242,28 @@ class AuthController extends Controller
             'data' => null,
             'errors' => null,
         ]);
+    }
+
+    /**
+     * The signed-in user as the app needs it: who they are, what they may do (permission keys) and where
+     * (null warehouse_ids = every warehouse). The app hides what is not allowed; the server checks every request anyway.
+     *
+     * @return array<string, mixed>
+     */
+    private function profile(User $user): array
+    {
+        $access = app(AccessControl::class);
+
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'role' => $user->role->value,
+            'role_label' => $user->role->label(),
+            'status' => $user->status,
+            'permissions' => $access->permissions($user),
+            'warehouse_ids' => $access->warehouseIds($user),
+            'last_login_at' => $user->last_login_at?->toIso8601String(),
+        ];
     }
 }

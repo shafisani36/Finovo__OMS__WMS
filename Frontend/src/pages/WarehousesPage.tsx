@@ -20,11 +20,16 @@ import DataTable from '../components/common/DataTable';
 import type { Column } from '../components/common/DataTable';
 import omsService from '../services/omsService';
 import { useConfirmDialog } from '../components/common/ConfirmDialog';
+import { WAREHOUSE_TYPES } from '../services/omsService';
 import type { WarehouseModel } from '../services/omsService';
 import WarehouseStatusBadge from '../components/warehouse/WarehouseStatusBadge';
 import CustomDropdown from '../components/common/CustomDropdown';
+import { useAuth } from '../hooks/useAuth';
+import { can } from '../types/auth';
 
 export const WarehousesPage: React.FC = () => {
+  const { user } = useAuth();
+  const canManage = can(user, 'warehouses.manage');
   const { notify, dialog } = useConfirmDialog();
   const navigate = useNavigate();
 
@@ -58,7 +63,7 @@ export const WarehousesPage: React.FC = () => {
         return false;
       }
       // Type filter
-      if (typeFilter !== 'all' && w.type !== typeFilter) {
+      if (typeFilter !== 'all' && w.warehouse_type !== typeFilter) {
         return false;
       }
       // Search
@@ -162,7 +167,7 @@ export const WarehousesPage: React.FC = () => {
             color: '#475569',
           }}
         >
-          {row.type?.replace(/_/g, ' ') || 'Distribution Center'}
+          {row.warehouse_type?.replace(/_/g, ' ') || 'Distribution Center'}
         </span>
       ),
     },
@@ -240,7 +245,7 @@ export const WarehousesPage: React.FC = () => {
       align: 'right',
       render: (row) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
-          {row.status === 'ready_for_activation' && (
+          {canManage && row.status === 'ready_for_activation' && (
             <button
               onClick={(e) => handleQuickActivate(row.id, e)}
               className="btn-finovo-primary"
@@ -277,7 +282,7 @@ export const WarehousesPage: React.FC = () => {
       </nav>
 
       {/* Page Header */}
-      <div className="page-header-row">
+      <div className="page-header-row page-header-row--stacked">
         <div className="page-title-section">
           <div className="page-title-badge-wrap">
             <h1 className="page-title">Warehouses & Fulfillment Centers</h1>
@@ -288,20 +293,19 @@ export const WarehousesPage: React.FC = () => {
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        {/* Callout on the left, main action on the right; stacked on phones. */}
+        <div className="page-header-actions">
           <InfoCalloutCard
             title="Readiness Engine Active"
             description="Warehouses validate locations, staff, and policies before activation is granted."
             icon={<ShieldCheck size={18} />}
           />
-          <button
-            onClick={() => navigate('/warehouses/create')}
-            className="btn-finovo-primary"
-            style={{ padding: '10px 18px', fontSize: 13 }}
-          >
-            <Plus size={16} />
-            <span>New Warehouse Wizard</span>
-          </button>
+          {canManage && (
+            <button onClick={() => navigate('/warehouses/create')} className="btn-finovo-primary page-header-action">
+              <Plus size={16} />
+              <span>New Warehouse Wizard</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -407,12 +411,7 @@ export const WarehousesPage: React.FC = () => {
                 onChange={(val) => setTypeFilter(val)}
                 options={[
                   { value: 'all', label: 'All Facility Types' },
-                  { value: 'distribution_center', label: 'Distribution Center' },
-                  { value: 'fulfillment_hub', label: 'Fulfillment Hub' },
-                  { value: 'retail_backroom', label: 'Retail Backroom' },
-                  { value: 'cross_dock', label: 'Cross-Dock' },
-                  { value: 'quarantine_zone', label: 'Quarantine Zone' },
-                  { value: 'third_party_3pl', label: '3PL Partner' },
+                  ...WAREHOUSE_TYPES.map((t) => ({ value: t.value, label: t.label })),
                 ]}
                 size="sm"
               />

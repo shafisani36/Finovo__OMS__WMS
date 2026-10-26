@@ -1,20 +1,22 @@
 <?php
 
-namespace App\Services;
-
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Warehouse;
 use App\Models\WarehouseLocation;
+use App\Models\WarehouseMembership;
+use App\Services\AccessControl;
 use App\Services\EmailService;
+use App\Services\WarehouseInsights;
 use App\Services\WarehouseLayoutService;
 use App\Services\WarehouseOpeningStockService;
 use App\Services\WarehouseReadinessService;
 use App\Services\WarehouseService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\Response;
 
 class WarehouseController extends Controller
@@ -24,7 +26,9 @@ class WarehouseController extends Controller
         protected WarehouseReadinessService $readinessService,
         protected WarehouseLayoutService $layoutService,
         protected WarehouseOpeningStockService $openingStockService,
-        protected EmailService $emails
+        protected EmailService $emails,
+        protected AccessControl $access,
+        protected WarehouseInsights $insights,
     ) {}
 
     /**
@@ -41,6 +45,10 @@ class WarehouseController extends Controller
             'sort_by' => $request->query('sort_by'),
             'sort_dir' => $request->query('sort_dir'),
         ];
+
+        if (($ids = $this->access->warehouseIds($request->user())) !== null) {
+            $filters['ids'] = $ids;
+        }
 
         $perPage = (int) $request->query('per_page', 10);
         $result = $this->warehouseService->listWarehouses($org->id, $filters, $perPage);
@@ -91,7 +99,7 @@ class WarehouseController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'code' => ['nullable', 'string', 'max:50'],
-            'warehouse_type' => ['nullable', 'string', 'max:50'],
+            'warehouse_type' => ['nullable', Rule::in(Warehouse::TYPES)],
             'description' => ['nullable', 'string', 'max:1000'],
             'status' => ['nullable', 'string', 'in:draft,setup_incomplete,active'],
             'priority' => ['nullable', 'integer', 'min:0'],
@@ -176,7 +184,7 @@ class WarehouseController extends Controller
         $validated = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255'],
             'code' => ['sometimes', 'required', 'string', 'max:50'],
-            'warehouse_type' => ['nullable', 'string', 'max:50'],
+            'warehouse_type' => ['nullable', Rule::in(Warehouse::TYPES)],
             'description' => ['nullable', 'string', 'max:1000'],
             'priority' => ['nullable', 'integer', 'min:0'],
             'is_default' => ['nullable', 'boolean'],
@@ -322,7 +330,7 @@ class WarehouseController extends Controller
             $query->where('location_type', $type);
         }
 
-        $locations = $query->orderBy('sort_order')->orderBy('code')->paginate((int) $request->query('per_page', 50));
+        $locations = $query->orderBy('sort_order')->orderBy('code')->paginate($this->perPage($request, 50, 1000));
 
         return response()->json([
             'status' => 'success',
@@ -455,12 +463,34 @@ class WarehouseController extends Controller
     {
         $this->authorizeWarehouse($request, $warehouse);
 
-        $assigned = $warehouse->memberships()->with('user:id,name,email,role')->get();
+        $assigned = $warehouse->memberships()
+            ->with(['user:id,name,email,role', 'assignedBy:id,name'])
+            ->orderBy('assigned_at')
+            ->get()
+            ->map(fn (WarehouseMembership $membership) => [
+                'id' => $membership->id,
+                'user_id' => $membership->user_id,
+                'role' => $membership->role,
+                'status' => $membership->status,
+                'assigned_at' => $membership->assigned_at?->toIso8601String(),
+                'expires_at' => $membership->expires_at?->toIso8601String(),
+                'assigned_by' => $membership->assignedBy?->name,
+                'user' => $membership->user ? [
+                    'id' => $membership->user->id,
+                    'name' => $membership->user->name,
+                    'email' => $membership->user->email,
+                    'role_label' => $membership->user->role?->label(),
+                ] : null,
+            ]);
 
         $org = $request->user()->currentOrganization();
-        $eligibleUsers = User::whereHas('memberships', function ($q) use ($org) {
-            $q->where('organization_id', $org->id);
-        })->orWhere('current_organization_id', $org->id)->get(['id', 'name', 'email', 'role']);
+        $eligibleUsers = User::where(fn ($q) => $q
+            ->whereHas('memberships', fn ($q) => $q->where('organization_id', $org->id))
+            ->orWhere('current_organization_id', $org->id))
+            ->where('status', '!=', 'suspended')
+            ->whereNotIn('id', $assigned->pluck('user_id'))
+            ->orderBy('name')
+            ->get(['id', 'name', 'email', 'role']);
 
         return response()->json([
             'status' => 'success',
@@ -588,13 +618,45 @@ class WarehouseController extends Controller
     }
 
     /**
-     * Authorize that the authenticated user belongs to the same organization as the warehouse.
+     * Figures for the warehouse overview: stock, capacity, stock by category and storage by zone with the bin map.
+     */
+    public function overview(Request $request, Warehouse $warehouse): JsonResponse
+    {
+        $this->authorizeWarehouse($request, $warehouse);
+
+        return response()->json(['status' => 'success', 'data' => $this->insights->overview($warehouse)]);
+    }
+
+    /**
+     * Stock movements and setup changes of the warehouse, newest first (?type=all|stock|orders|setup).
+     */
+    public function activity(Request $request, Warehouse $warehouse): JsonResponse
+    {
+        $this->authorizeWarehouse($request, $warehouse);
+        $validated = $request->validate([
+            'type' => ['nullable', 'in:'.implode(',', WarehouseInsights::ACTIVITY_TYPES)],
+            'page' => ['nullable', 'integer', 'min:1'],
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            ...$this->insights->activity($warehouse, $validated['type'] ?? 'all', (int) ($validated['page'] ?? 1), $this->perPage($request, 20)),
+        ]);
+    }
+
+    /**
+     * The warehouse must belong to the user's company and be one the user works in;
+     * knowing a warehouse's ID never opens it.
      */
     private function authorizeWarehouse(Request $request, Warehouse $warehouse): void
     {
         $org = $request->user()->currentOrganization();
         if ($warehouse->organization_id !== $org->id) {
             abort(403, 'Unauthorized access: warehouse does not belong to your organization.');
+        }
+
+        if (! $this->access->canAccessWarehouse($request->user(), $warehouse->id)) {
+            abort(403, 'You are not assigned to this warehouse.');
         }
     }
 }

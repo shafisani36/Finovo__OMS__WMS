@@ -374,4 +374,31 @@ class OrderAllocationAndPickingTest extends TestCase
             'available' => 50,
         ]);
     }
+
+    public function test_order_is_sent_to_the_chosen_warehouse_and_listed_on_its_orders_tab(): void
+    {
+        $variant = $this->product->variants()->first();
+        $north = Warehouse::create(['organization_id' => $this->org->id, 'name' => 'North Hub', 'code' => 'HUB-N']);
+        $this->store->warehouses()->attach($north->id);
+        $outside = Warehouse::create(['organization_id' => $this->org->id, 'name' => 'Not Linked', 'code' => 'HUB-X']);
+
+        // 60 units: the hub only has 50, so it cannot be placed on import; then stock arrives at North Hub.
+        $order = $this->importOrder($this->store, $variant, 60);
+        $this->assertSame('exception', $order->order_status);
+        app(InventoryEngine::class)->adjustStock($this->org->id, $north->id, $variant->id, 'add', 80, 'Opening');
+        $this->actingAs($this->user);
+
+        $options = collect($this->getJson("/api/v1/orders/{$order->id}/fulfillment")->assertOk()->json('data.warehouse_options'))->keyBy('id');
+        $this->assertFalse($options[$this->warehouse->id]['can_fulfil']);
+        $this->assertTrue($options[$north->id]['can_fulfil']);
+        $this->assertArrayNotHasKey($outside->id, $options->all());
+
+        $this->postJson("/api/v1/orders/{$order->id}/allocate", ['warehouse_id' => $outside->id])->assertUnprocessable()->assertJsonValidationErrors('warehouse_id');
+        $this->postJson("/api/v1/orders/{$order->id}/allocate", ['warehouse_id' => $north->id])->assertOk()->assertJsonPath('data.order_status', 'allocated');
+
+        $this->assertSame($north->id, $order->fresh()->pickTasks()->first()->warehouse_id);
+        $this->getJson("/api/v1/orders/{$order->id}/fulfillment")->assertJsonPath('data.warehouse.name', 'North Hub');
+        $this->getJson("/api/v1/orders?warehouse_id={$north->id}")->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $order->id);
+        $this->getJson("/api/v1/orders?warehouse_id={$this->warehouse->id}")->assertJsonCount(0, 'data');
+    }
 }

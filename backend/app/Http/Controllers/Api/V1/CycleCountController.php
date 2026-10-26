@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\CycleCount;
-use App\Models\CycleCountItem;
 use App\Models\InventoryBalance;
 use App\Models\InventoryLocationBalance;
 use App\Models\Warehouse;
@@ -26,7 +25,7 @@ class CycleCountController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $query = CycleCount::where('organization_id', $org->id)
+        $query = $this->inUserWarehouses(CycleCount::where('organization_id', $org->id), $request)
             ->with(['warehouse', 'createdBy', 'approvedBy', 'items.variant.product', 'items.location']);
 
         if ($warehouseId = $request->query('warehouse_id')) {
@@ -100,7 +99,7 @@ class CycleCountController extends Controller
         $org = $request->user()->currentOrganization();
 
         $validated = $request->validate([
-            'warehouse_id' => ['required', 'exists:warehouses,id'],
+            'warehouse_id' => ['required', $this->accessibleWarehouse($request)],
             'title' => ['required', 'string', 'max:150'],
             'scope_type' => ['required', 'in:full,zone,location'],
             'scope_value' => ['nullable', 'string', 'max:100'],
@@ -125,7 +124,7 @@ class CycleCountController extends Controller
             ]);
 
             // Capture snapshot of location balances
-            $locBalances = InventoryLocationBalance::where('organization_id', $org->id)
+            $locBalances = $this->inUserWarehouses(InventoryLocationBalance::where('organization_id', $org->id), $request)
                 ->where('warehouse_id', $warehouse->id)
                 ->with(['location', 'variant'])
                 ->get();
@@ -144,7 +143,7 @@ class CycleCountController extends Controller
                 }
             } else {
                 // Fallback to warehouse-level balances if no physical locations stocked yet
-                $whBalances = InventoryBalance::where('organization_id', $org->id)
+                $whBalances = $this->inUserWarehouses(InventoryBalance::where('organization_id', $org->id), $request)
                     ->where('warehouse_id', $warehouse->id)
                     ->get();
 
@@ -178,7 +177,7 @@ class CycleCountController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $cycle = CycleCount::where('organization_id', $org->id)
+        $cycle = $this->inUserWarehouses(CycleCount::where('organization_id', $org->id), $request)
             ->with('items')
             ->findOrFail($countId);
 
@@ -220,7 +219,7 @@ class CycleCountController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $cycle = CycleCount::where('organization_id', $org->id)
+        $cycle = $this->inUserWarehouses(CycleCount::where('organization_id', $org->id), $request)
             ->with('items')
             ->findOrFail($countId);
 
@@ -240,6 +239,7 @@ class CycleCountController extends Controller
                 $variance = $item->variance_quantity;
                 if ($variance === 0) {
                     $item->update(['status' => 'approved']);
+
                     continue;
                 }
 

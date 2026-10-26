@@ -2,7 +2,9 @@
 
 namespace App\Models;
 
+use App\Enums\Permission;
 use App\Enums\UserRole;
+use App\Services\AccessControl;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -32,7 +34,15 @@ class User extends Authenticatable
         'otp_enabled',
         'last_login_at',
         'last_login_ip',
+        'permissions_version',
+        'warehouse_access',
     ];
+
+    /** Works in every warehouse of the company. */
+    public const WAREHOUSE_ACCESS_ALL = 'all';
+
+    /** Works only in the warehouses assigned to them (active warehouse memberships). */
+    public const WAREHOUSE_ACCESS_ASSIGNED = 'assigned';
 
     /**
      * The attributes that should be hidden for serialization.
@@ -57,6 +67,7 @@ class User extends Authenticatable
             'role' => UserRole::class,
             'otp_enabled' => 'boolean',
             'last_login_at' => 'datetime',
+            'permissions_version' => 'integer',
         ];
     }
 
@@ -73,6 +84,24 @@ class User extends Authenticatable
     public function isActive(): bool
     {
         return $this->status === 'active';
+    }
+
+    /**
+     * Whether the user may perform an action (role defaults plus this employee's own allows and denies).
+     */
+    public function hasPermission(Permission|string $permission): bool
+    {
+        return app(AccessControl::class)->allows($this, $permission);
+    }
+
+    public function permissionOverrides(): HasMany
+    {
+        return $this->hasMany(UserPermissionOverride::class);
+    }
+
+    public function warehouseMemberships(): HasMany
+    {
+        return $this->hasMany(WarehouseMembership::class);
     }
 
     public function otpChallenges(): HasMany
@@ -122,7 +151,7 @@ class User extends Authenticatable
 
         $this->memberships()->create([
             'organization_id' => $org->id,
-            'role' => $this->isAdmin() ? 'admin' : 'operator',
+            'role' => $this->role->value,
         ]);
 
         $this->update(['current_organization_id' => $org->id]);

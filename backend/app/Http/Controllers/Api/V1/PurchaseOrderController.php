@@ -22,7 +22,7 @@ class PurchaseOrderController extends Controller
         $org = $request->user()->currentOrganization();
 
         // With ?store_id= only that store's purchase orders are listed and counted.
-        $scoped = fn () => PurchaseOrder::where('organization_id', $org->id)
+        $scoped = fn () => $this->inUserWarehouses(PurchaseOrder::where('organization_id', $org->id), $request)
             ->when($request->integer('store_id'), fn ($q, $storeId) => $q->where('store_id', $storeId));
 
         $orders = $scoped()
@@ -67,7 +67,7 @@ class PurchaseOrderController extends Controller
             'supplier_email' => 'nullable|email|max:255',
             'supplier_contact' => 'nullable|string|max:100',
             'store_id' => ['nullable', 'integer', $this->inOrganization($request, 'stores')],
-            'warehouse_id' => ['required', 'integer', $this->inOrganization($request, 'warehouses')],
+            'warehouse_id' => ['required', 'integer', $this->accessibleWarehouse($request)],
             'order_date' => 'nullable|date',
             'expected_delivery_date' => 'nullable|date|after_or_equal:'.($request->input('order_date') ?: 'today'),
             'payment_terms' => 'nullable|string|max:100',
@@ -100,7 +100,7 @@ class PurchaseOrderController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $po = PurchaseOrder::where('organization_id', $org->id)
+        $po = $this->inUserWarehouses(PurchaseOrder::where('organization_id', $org->id), $request)
             ->with(['warehouse', 'creator', 'requisition', 'items.variant.product', 'goodsReceivedNotes.receivedBy'])
             ->findOrFail($id);
 
@@ -116,7 +116,7 @@ class PurchaseOrderController extends Controller
     public function issue(Request $request, int $id): JsonResponse
     {
         $org = $request->user()->currentOrganization();
-        $po = PurchaseOrder::where('organization_id', $org->id)->findOrFail($id);
+        $po = $this->inUserWarehouses(PurchaseOrder::where('organization_id', $org->id), $request)->findOrFail($id);
 
         $updated = $this->purchaseOrderService->issuePurchaseOrder($po, $request->user());
 
@@ -133,7 +133,7 @@ class PurchaseOrderController extends Controller
     public function cancel(Request $request, int $id): JsonResponse
     {
         $org = $request->user()->currentOrganization();
-        $po = PurchaseOrder::where('organization_id', $org->id)->findOrFail($id);
+        $po = $this->inUserWarehouses(PurchaseOrder::where('organization_id', $org->id), $request)->findOrFail($id);
 
         $request->validate(['reason' => 'nullable|string|max:1000']);
 

@@ -15,6 +15,7 @@ use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Models\SkuMapping;
 use App\Models\Store;
+use App\Models\StoreProductLink;
 use App\Models\Warehouse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -37,6 +38,7 @@ class StoreSyncService
         protected InventoryEngine $inventory,
         protected ProductImageStore $images,
         protected EmailService $emails,
+        protected OrderService $orders,
     ) {}
 
     public function canSync(Store $store): bool
@@ -69,10 +71,7 @@ class StoreSyncService
             $imagesNotSaved = 0;
 
             foreach ($source->products($store) as $product) {
-                $saved = $this->saveProduct($store, $product, $warehouse, $result);
-
-                // Outside the database transaction: a slow or failed download never blocks the catalog import.
-                if ($this->images->store($saved) === false) {
+                if (! $this->importProduct($store, $product, $warehouse, $result)) {
                     $imagesNotSaved++;
                 }
             }
@@ -80,7 +79,7 @@ class StoreSyncService
             $since = $store->last_sync_at?->copy()->subMinutes(self::ORDER_OVERLAP_MINUTES);
 
             foreach ($source->orders($store, $since) as $order) {
-                $this->saveOrder($store, $order, $result);
+                $this->importOrder($store, $order, $result);
             }
 
             $result->warnings = $source->warnings();
@@ -110,6 +109,54 @@ class StoreSyncService
         return $result;
     }
 
+    /**
+     * Save one product from the store (a full sync, or a webhook for a single product).
+     *
+     * @return bool false when the product photo could not be downloaded
+     */
+    public function importProduct(Store $store, ProductData $data, ?Warehouse $warehouse = null, ?SyncResult $result = null): bool
+    {
+        $saved = $this->saveProduct($store, $data, $warehouse ?? $this->defaultWarehouse($store), $result ?? new SyncResult);
+
+        // Outside the database transaction: a slow or failed download never blocks the catalog import.
+        return $this->images->store($saved) !== false;
+    }
+
+    /**
+     * Save one order from the store (a full sync, or a webhook for a single order).
+     */
+    public function importOrder(Store $store, OrderData $data, ?SyncResult $result = null): void
+    {
+        $this->saveOrder($store, $data, $result ?? new SyncResult);
+    }
+
+    /**
+     * The store deleted a product: its link to this store is removed, and the Finovo product is archived when
+     * no other store sells it. Stock and history stay in Finovo.
+     */
+    public function removeProduct(Store $store, string $externalId): void
+    {
+        DB::transaction(function () use ($store, $externalId) {
+            $link = StoreProductLink::where('store_id', $store->id)->where('external_id', $externalId)->first();
+            $product = $link?->product;
+
+            if (! $product) {
+                return;
+            }
+
+            SkuMapping::where('store_id', $store->id)->whereIn('product_variant_id', $product->variants()->pluck('id'))->delete();
+            $link->delete();
+
+            $soldElsewhere = StoreProductLink::where('product_id', $product->id)->exists()
+                || SkuMapping::whereIn('product_variant_id', $product->variants()->pluck('id'))->exists();
+
+            if (! $soldElsewhere) {
+                $product->update(['is_active' => false]);
+                $product->variants()->update(['is_active' => false]);
+            }
+        });
+    }
+
     private function defaultWarehouse(Store $store): ?Warehouse
     {
         return $store->warehouses()
@@ -136,8 +183,15 @@ class StoreSyncService
                 'description' => $data->description,
                 'category' => $data->category,
                 'image_url' => $data->imageUrl,
+                'images' => array_values(array_unique(array_filter([$data->imageUrl, ...$data->images]))) ?: null,
+                'details' => $data->details ?: null,
                 'is_active' => $data->isActive,
             ];
+
+            // Each store keeps its own original record, so a product sold in several stores never mixes them.
+            if ($data->raw) {
+                $attributes['platform_data'] = [...($product?->platform_data ?? []), (string) $store->id => $data->raw];
+            }
 
             if ($product) {
                 $product->update($attributes);
@@ -160,6 +214,7 @@ class StoreSyncService
                     'barcode' => $variantData->barcode,
                     'option_name' => $variantData->optionName,
                     'option_value' => $variantData->optionValue,
+                    'image_url' => $variantData->imageUrl,
                     'price' => $variantData->price,
                     'cost_price' => $variantData->costPrice,
                     'is_active' => $data->isActive,
@@ -190,6 +245,11 @@ class StoreSyncService
                     $result->openingStockLines++;
                 }
             }
+
+            StoreProductLink::updateOrCreate(
+                ['store_id' => $store->id, 'product_id' => $product->id],
+                ['organization_id' => $store->organization_id, 'external_id' => $data->externalId],
+            );
 
             return $product;
         });
@@ -342,17 +402,30 @@ class StoreSyncService
             $order = Order::where('organization_id', $store->organization_id)
                 ->where('store_id', $store->id)
                 ->where('external_order_id', $data->externalId)
-                ->first();
+                ->first()
+                // An order Finovo created on the store comes back with Finovo's own ID; it is the same order.
+                ?? ($data->finovoOrderId ? Order::where('organization_id', $store->organization_id)
+                    ->where('store_id', $store->id)
+                    ->whereKey((int) $data->finovoOrderId)
+                    ->first() : null);
 
             $attributes = [
                 'customer_email' => $data->customerEmail,
                 'customer_phone' => $data->customerPhone,
                 'shipping_address' => $data->shippingAddress,
+                'billing_address' => $data->billingAddress,
                 'payment_status' => $data->paymentStatus,
                 'fulfillment_status' => $data->fulfillmentStatus,
+                'subtotal_amount' => $data->subtotal,
+                'shipping_amount' => $data->shippingTotal,
+                'tax_amount' => $data->taxTotal,
+                'discount_amount' => $data->discountTotal,
+                'payment_method' => $data->paymentMethod,
                 'total_amount' => $data->total,
                 'currency' => $data->currency,
                 'notes' => $data->note,
+                'details' => $data->details ?: null,
+                'platform_data' => $data->raw ?: null,
             ];
 
             if ($order) {
@@ -363,11 +436,9 @@ class StoreSyncService
                     $order->customer_name = $data->customerName;
                 }
 
-                if ($data->cancelled && ! in_array($order->order_status, Order::SHIPPED_STATUSES, true)) {
-                    $order->order_status = 'cancelled';
-                }
-
+                $order->external_order_id = $data->externalId;
                 $order->save();
+                $this->refreshLineDetails($order, $data->lines);
                 $result->ordersUpdated++;
 
                 return null;
@@ -388,11 +459,14 @@ class StoreSyncService
                     'product_variant_id' => $this->variantForLine($store, $line)?->id,
                     'external_sku' => $line->sku ?? '',
                     'product_name' => $line->name,
+                    'image_url' => $line->imageUrl,
                     'quantity' => $line->quantity,
                     'unit_price' => $line->unitPrice,
                     'tax_amount' => $line->taxAmount,
+                    'discount_amount' => $line->discountAmount,
                     'total_amount' => $line->totalAmount,
                     'status' => $data->cancelled ? 'cancelled' : 'pending',
+                    'platform_data' => $line->raw ?: null,
                 ]);
             }
 
@@ -403,6 +477,39 @@ class StoreSyncService
 
         if ($created) {
             $this->emails->sendOrderConfirmationEmail($created);
+
+            return;
+        }
+
+        // Cancelled on the store: release Finovo's reserved stock the same way a cancellation in Finovo does.
+        $existing = Order::where('organization_id', $store->organization_id)->where('store_id', $store->id)->where('external_order_id', $data->externalId)->first();
+        if ($data->cancelled && $existing && $existing->order_status !== 'cancelled' && ! in_array($existing->order_status, Order::SHIPPED_STATUSES, true)) {
+            $this->orders->cancel($existing, onStore: false);
+        }
+    }
+
+    /**
+     * Lines of an order imported earlier get the store's newer descriptive details (photo, discount, original record).
+     * Quantities and prices stay as imported: Finovo has already reserved and picked against them.
+     *
+     * @param  list<OrderLineData>  $lines
+     */
+    private function refreshLineDetails(Order $order, array $lines): void
+    {
+        $items = $order->items()->get();
+
+        foreach ($lines as $line) {
+            $index = $items->search(fn ($item) => $item->external_sku === ($line->sku ?? '') && $item->product_name === $line->name);
+
+            if ($index === false) {
+                continue;
+            }
+
+            $items->pull($index)->update(array_filter([
+                'image_url' => $line->imageUrl,
+                'discount_amount' => $line->discountAmount,
+                'platform_data' => $line->raw ?: null,
+            ], fn ($value) => $value !== null));
         }
     }
 

@@ -3,8 +3,6 @@
 namespace Tests\Feature;
 
 use App\Models\InventoryBalance;
-use App\Models\InventoryLedgerEntry;
-use App\Models\InventoryLocationBalance;
 use App\Models\Organization;
 use App\Models\Product;
 use App\Models\ProductVariant;
@@ -21,16 +19,27 @@ class EnterpriseInventoryEngineTest extends TestCase
     use RefreshDatabase;
 
     protected Organization $orgA;
+
     protected Organization $orgB;
+
     protected User $userA;
+
     protected User $userB;
+
     protected User $supervisorA;
+
     protected Warehouse $warehouse1;
+
     protected Warehouse $warehouse2;
+
     protected WarehouseLocation $dockLocation;
+
     protected WarehouseLocation $storageBin;
+
     protected Product $product;
+
     protected ProductVariant $variant;
+
     protected InventoryEngine $inventoryEngine;
 
     protected function setUp(): void
@@ -568,6 +577,7 @@ class EnterpriseInventoryEngineTest extends TestCase
             'quantity' => 10,
         ]);
 
-        $forbiddenTransfer->assertStatus(404); // Scoped to org, cannot find warehouse from another tenant
+        // Another company's warehouses are not valid choices, so the transfer never starts.
+        $forbiddenTransfer->assertUnprocessable()->assertJsonValidationErrors(['from_warehouse_id', 'to_warehouse_id']);
     }
 }

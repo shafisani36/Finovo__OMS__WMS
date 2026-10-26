@@ -95,11 +95,15 @@ class StoreScopedListsTest extends TestCase
         $this->getJson('/api/v1/inventory/movements?type=transfer')->assertJsonCount(0, 'data');
     }
 
-    public function test_orders_and_products_cannot_be_typed_in_by_hand(): void
+    public function test_orders_and_products_typed_in_by_hand_must_be_complete(): void
     {
         $admin = User::factory()->create(['status' => 'active', 'role' => UserRole::ADMIN]);
 
-        $this->actingAs($admin)->postJson('/api/v1/orders', ['customer_name' => 'X'])->assertMethodNotAllowed();
-        $this->postJson('/api/v1/products', ['name' => 'X', 'sku' => 'X'])->assertMethodNotAllowed();
+        $this->actingAs($admin)->postJson('/api/v1/orders', ['customer_name' => 'X'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['items', 'currency', 'payment_status']);
+        $this->postJson('/api/v1/products', ['name' => 'X', 'sku' => 'X'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['variants']);
     }
 }

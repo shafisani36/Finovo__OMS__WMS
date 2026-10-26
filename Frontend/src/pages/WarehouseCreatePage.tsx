@@ -15,7 +15,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import CustomDropdown from '../components/common/CustomDropdown';
-import omsService from '../services/omsService';
+import omsService, { WAREHOUSE_TYPES } from '../services/omsService';
 
 const TIMEZONES = [
   'UTC',
@@ -34,14 +34,6 @@ const TIMEZONES = [
   'Australia/Sydney',
 ];
 
-const WAREHOUSE_TYPES = [
-  { value: 'distribution_center', label: 'Distribution Center (DC)', description: 'Primary central distribution hub' },
-  { value: 'fulfillment_hub', label: 'Fulfillment Hub', description: 'Fast-dispatch e-commerce order routing center' },
-  { value: 'retail_backroom', label: 'Retail Backroom', description: 'Store-level micro-fulfillment storage' },
-  { value: 'cross_dock', label: 'Cross-Dock Facility', description: 'Direct transfer without long-term storage' },
-  { value: 'quarantine_zone', label: 'Quarantine Zone', description: 'Hold & inspection area for damaged or pending goods' },
-  { value: 'third_party_3pl', label: '3PL Partner Facility', description: 'External third-party logistics center' },
-];
 
 export const WarehouseCreatePage: React.FC = () => {
   const navigate = useNavigate();
@@ -142,12 +134,12 @@ export const WarehouseCreatePage: React.FC = () => {
       const payload = {
         name,
         code: code.toUpperCase().trim(),
-        type,
+        warehouse_type: type,
         is_default: isDefault,
         priority: Number(priority),
         status: 'draft',
-        address_line1: addressLine1,
-        address_line2: addressLine2,
+        address: addressLine1,
+        address_line_2: addressLine2,
         city,
         state,
         postal_code: postalCode,
@@ -444,7 +436,7 @@ export const WarehouseCreatePage: React.FC = () => {
                   required
                   value={type}
                   onChange={(val) => setType(val)}
-                  options={WAREHOUSE_TYPES}
+                  options={WAREHOUSE_TYPES.map((t) => ({ ...t }))}
                   size="md"
                 />
               </div>

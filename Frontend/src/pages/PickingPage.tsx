@@ -19,9 +19,14 @@ import DataTable from '../components/common/DataTable';
 import type { Column } from '../components/common/DataTable';
 import CustomDropdown from '../components/common/CustomDropdown';
 import omsService from '../services/omsService';
+import { useAuth } from '../hooks/useAuth';
+import { can } from '../types/auth';
 import type { PickingItem } from '../services/omsService';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 export const PickingPage: React.FC = () => {
+  const { user } = useAuth();
+  const canUpdate = can(user, 'picking.update');
   const [tasks, setTasks] = useState<PickingItem[]>([]);
   const [kpis, setKpis] = useState({
     pending_orders: 0,
@@ -36,6 +41,8 @@ export const PickingPage: React.FC = () => {
   const [total, setTotal] = useState(0);
   const [lastPage, setLastPage] = useState(1);
   const [search, setSearch] = useState('');
+  // Live search: the list reloads 300 ms after typing stops.
+  const debouncedSearch = useDebouncedValue(search.trim());
   const [statusFilter, setStatusFilter] = useState('');
 
   // Row selection for bulk actions
@@ -54,7 +61,7 @@ export const PickingPage: React.FC = () => {
       setLoading(true);
       const res = await omsService.getPickingTasks({
         store_id: activeStore?.id,
-        search: search || undefined,
+        search: debouncedSearch || undefined,
         status: statusFilter || undefined,
         page,
         per_page: perPage,
@@ -72,13 +79,12 @@ export const PickingPage: React.FC = () => {
 
   useEffect(() => {
     fetchTasks();
-  }, [page, perPage, statusFilter, activeStore?.id]);
+  }, [page, perPage, statusFilter, activeStore?.id, debouncedSearch]);
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setPage(1);
-    fetchTasks();
-  };
+  const handleSearchSubmit = (e: React.FormEvent) => e.preventDefault();
+
+  // A new search starts from the first page.
+  useEffect(() => setPage(1), [debouncedSearch]);
 
   const handleQuickComplete = async (taskId: number) => {
     try {
@@ -201,6 +207,7 @@ export const PickingPage: React.FC = () => {
           <CustomDropdown
             value={row.status}
             onChange={(val) => handleStatusChange(row.id, val)}
+            disabled={!canUpdate}
             options={[
               { value: 'not_started', label: 'Not Started' },
               { value: 'in_progress', label: 'In Progress' },
@@ -221,7 +228,7 @@ export const PickingPage: React.FC = () => {
       render: (row) => (
         <button
           onClick={() => handleQuickComplete(row.id)}
-          disabled={actionLoadingId === row.id}
+          disabled={!canUpdate || actionLoadingId === row.id}
           style={{
             width: 32,
             height: 32,
@@ -316,7 +323,7 @@ export const PickingPage: React.FC = () => {
             <button
               onClick={() => setBulkModalOpen(true)}
               className="btn-finovo-secondary"
-              disabled={selectedIds.size === 0}
+              disabled={!canUpdate || selectedIds.size === 0}
             >
               <RefreshCw size={14} />
               <span>Bulk Update</span>

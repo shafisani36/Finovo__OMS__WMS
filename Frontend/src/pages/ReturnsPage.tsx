@@ -12,6 +12,7 @@ import { useActiveStore } from '../hooks/useActiveStore';
 import omsService from '../services/omsService';
 import type { ReturnableOrder, ReturnKpis, ReturnModel } from '../services/omsService';
 import { formatDate } from '../utils/format';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 const REASONS = ['Wrong size or variant', 'Damaged in transit', 'Defective product', 'Not as described', 'Changed mind', 'Other'];
 
@@ -48,7 +49,8 @@ export const ReturnsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch] = useState('');
-  const [appliedSearch, setAppliedSearch] = useState('');
+  // Live search: the list reloads 300 ms after typing stops.
+  const appliedSearch = useDebouncedValue(search.trim());
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
   const [meta, setMeta] = useState({ total: 0, last_page: 1 });
@@ -74,6 +76,9 @@ export const ReturnsPage: React.FC = () => {
 
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // A new search starts from the first page.
+  useEffect(() => setPage(1), [appliedSearch]);
 
   const fetchReturns = useCallback(async () => {
     try {
@@ -387,8 +392,6 @@ export const ReturnsPage: React.FC = () => {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              setPage(1);
-              setAppliedSearch(search.trim());
             }}
           >
             <div className="topbar-search-input" style={{ width: '100%', boxSizing: 'border-box' }}>

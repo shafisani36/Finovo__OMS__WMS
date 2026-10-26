@@ -26,7 +26,7 @@ class GoodsReceivedNoteController extends Controller
         $org = $request->user()->currentOrganization();
 
         // With ?store_id= only notes for that store's purchase orders are listed and counted.
-        $scoped = fn () => GoodsReceivedNote::where('organization_id', $org->id)
+        $scoped = fn () => $this->inUserWarehouses(GoodsReceivedNote::where('organization_id', $org->id), $request)
             ->when($request->integer('store_id'), fn ($q, $storeId) => $q->whereHas('purchaseOrder', fn ($po) => $po->where('store_id', $storeId)));
 
         $query = $scoped()
@@ -85,7 +85,7 @@ class GoodsReceivedNoteController extends Controller
 
         $validated = $request->validate([
             'purchase_order_id' => 'required|exists:purchase_orders,id',
-            'warehouse_id' => 'nullable|exists:warehouses,id',
+            'warehouse_id' => ['nullable', $this->accessibleWarehouse($request)],
             'receiving_location_id' => 'nullable|exists:warehouse_locations,id',
             'supplier_delivery_note' => 'nullable|string|max:100',
             'carrier' => 'nullable|string|max:100',
@@ -109,7 +109,7 @@ class GoodsReceivedNoteController extends Controller
             'items.*.notes' => 'nullable|string',
         ]);
 
-        $po = PurchaseOrder::where('organization_id', $org->id)->findOrFail($validated['purchase_order_id']);
+        $po = $this->inUserWarehouses(PurchaseOrder::where('organization_id', $org->id), $request)->findOrFail($validated['purchase_order_id']);
 
         $grn = $this->grnService->createGrn($po, $validated, $request->user());
 
@@ -127,7 +127,7 @@ class GoodsReceivedNoteController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $grn = GoodsReceivedNote::where('organization_id', $org->id)
+        $grn = $this->inUserWarehouses(GoodsReceivedNote::where('organization_id', $org->id), $request)
             ->with([
                 'purchaseOrder.items.variant.product',
                 'warehouse',
@@ -152,7 +152,7 @@ class GoodsReceivedNoteController extends Controller
     public function inspect(Request $request, int $id): JsonResponse
     {
         $org = $request->user()->currentOrganization();
-        $grn = GoodsReceivedNote::where('organization_id', $org->id)->findOrFail($id);
+        $grn = $this->inUserWarehouses(GoodsReceivedNote::where('organization_id', $org->id), $request)->findOrFail($id);
 
         $validated = $request->validate([
             'notes' => 'nullable|string',
@@ -184,7 +184,7 @@ class GoodsReceivedNoteController extends Controller
     public function postToInventory(Request $request, int $id): JsonResponse
     {
         $org = $request->user()->currentOrganization();
-        $grn = GoodsReceivedNote::where('organization_id', $org->id)->findOrFail($id);
+        $grn = $this->inUserWarehouses(GoodsReceivedNote::where('organization_id', $org->id), $request)->findOrFail($id);
 
         $posted = $this->grnService->postToInventory($grn, $request->user());
 
@@ -201,7 +201,7 @@ class GoodsReceivedNoteController extends Controller
     public function downloadPdf(Request $request, int $id): Response
     {
         $org = $request->user()->currentOrganization();
-        $grn = GoodsReceivedNote::where('organization_id', $org->id)->findOrFail($id);
+        $grn = $this->inUserWarehouses(GoodsReceivedNote::where('organization_id', $org->id), $request)->findOrFail($id);
 
         return $this->pdfService->streamGrnPdf($grn);
     }

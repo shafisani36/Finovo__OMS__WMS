@@ -15,8 +15,23 @@
 
 .barcode-label-code svg {
   display: block;
+}
+
+/* Barcode and its details QR code side by side; the QR drops below on narrow screens. */
+.barcode-label-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   max-width: 100%;
-  height: auto;
+}
+
+.barcode-label-qr {
+  padding: 4px;
+  border-radius: 6px;
+  background: #ffffff;
+  line-height: 0;
 }
 
 .barcode-label-caption {
@@ -36,8 +51,8 @@
   font-size: 12px;
 }
 
-.barcode-label--compact .barcode-label-code svg {
-  max-width: 260px;
+.barcode-label--compact {
+  max-width: 100%;
 }
 
 /* A dashed panel holding one or more labels */
@@ -218,4 +233,63 @@
   .scanner-steps {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* Camera scanning in the scan popup */
+.scanner-camera-toggle {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1e56ff;
+  cursor: pointer;
+}
+
+.scanner-camera-toggle[aria-pressed='true'] {
+  background: #1e56ff;
+  color: #ffffff;
+}
+
+.scanner-camera {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #0f172a;
+  aspect-ratio: 4 / 3;
+}
+
+.scanner-camera video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.scanner-camera-frame {
+  position: absolute;
+  inset: 18% 12%;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 12px;
+  box-shadow: 0 0 0 999px rgba(15, 23, 42, 0.35);
+  pointer-events: none;
+}
+
+.scanner-camera-status {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.75);
+  color: #ffffff;
+  font-size: 12px;
 }

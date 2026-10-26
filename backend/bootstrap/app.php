@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureUserPermission;
 use App\Http\Middleware\EnsureUserRole;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
@@ -22,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->statefulApi();
         $middleware->alias([
             'role' => EnsureUserRole::class,
+            'permission' => EnsureUserPermission::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

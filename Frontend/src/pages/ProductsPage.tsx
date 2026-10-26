@@ -1,16 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { Package, Tag, CheckCircle2, Eye, Layers } from 'lucide-react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { Package, Tag, CheckCircle2, Eye, Layers, Plus } from 'lucide-react';
 import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import DataTable from '../components/common/DataTable';
+import { Alert } from '../components/common/Alert';
 import type { Column } from '../components/common/DataTable';
 import omsService from '../services/omsService';
 import { useActiveStore } from '../hooks/useActiveStore';
 import type { ProductModel } from '../services/omsService';
 import ProductThumb from '../components/catalog/ProductThumb';
+import ProductFormModal from '../components/catalog/ProductFormModal';
+import { useAuth } from '../hooks/useAuth';
+import { can } from '../types/auth';
 import { variantLabel } from '../utils/format';
-import ProductDetailModal from '../components/catalog/ProductDetailModal';
 import '../components/catalog/DetailModal.css';
 
 export const ProductsPage: React.FC = () => {
@@ -24,7 +27,11 @@ export const ProductsPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const [search, setSearch] = useState(searchParams.get('search') ?? '');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [viewProduct, setViewProduct] = useState<ProductModel | null>(null);
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const [formOpen, setFormOpen] = useState(false);
+  // A message handed over by the page that changed a product (e.g. after deleting it).
+  const notice = (useLocation().state as { message?: string } | null)?.message;
 
   const fetchProducts = async () => {
     try {
@@ -151,7 +158,7 @@ export const ProductsPage: React.FC = () => {
         <button
           onClick={(e) => {
             e.stopPropagation();
-            setViewProduct(row);
+            navigate(`/products/${row.id}`);
           }}
           className="btn-finovo-secondary"
           style={{ padding: '4px 10px', fontSize: 11 }}
@@ -185,11 +192,19 @@ export const ProductsPage: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <InfoCalloutCard
             title="Catalog Master"
-            description="Manage internal SKU identifiers linked with remote channel listings."
+            description="Products added or edited here are also created or updated on your connected stores."
             icon={<Tag size={18} />}
           />
+          {can(user, 'products.manage') && (
+            <button type="button" className="btn-finovo-primary" style={{ height: 42 }} onClick={() => setFormOpen(true)}>
+              <Plus size={16} />
+              <span>Add Product</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {notice && <Alert type="success" message={notice} className="page-banner" />}
 
       <div className="kpi-grid">
         <MetricCard title="Total Catalog SKUs" value={total} icon={<Package size={20} />} pillText="In System" />
@@ -215,7 +230,7 @@ export const ProductsPage: React.FC = () => {
           keyField="id"
           isLoading={loading}
           emptyMessage="No products created yet."
-          onRowClick={(row) => setViewProduct(row)}
+          onRowClick={(row) => navigate(`/products/${row.id}`)}
           pagination={{
             currentPage: page,
             lastPage,
@@ -226,7 +241,12 @@ export const ProductsPage: React.FC = () => {
         />
       </div>
 
-      {viewProduct && <ProductDetailModal product={viewProduct} onClose={() => setViewProduct(null)} />}
+      {formOpen && (
+        <ProductFormModal
+          onClose={() => setFormOpen(false)}
+          onSaved={(message, productId) => navigate(`/products/${productId}`, { state: { message } })}
+        />
+      )}
     </div>
   );
 };

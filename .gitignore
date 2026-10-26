@@ -22,3 +22,5 @@ backend/storage/framework/views/*
 Thumbs.db
 .vscode/
 .idea/
+
+/backend/.env

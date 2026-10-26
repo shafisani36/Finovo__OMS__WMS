@@ -2,10 +2,11 @@
 
 namespace App\Providers;
 
+use App\Services\AccessControl;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
-use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 
@@ -16,7 +17,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // One per request, so each employee's permissions are worked out once per request and never kept longer.
+        $this->app->scoped(AccessControl::class);
     }
 
     /**
@@ -95,7 +97,7 @@ class AppServiceProvider extends ServiceProvider
             });
         });
     }
-    
+
     /**
      * Callback and download links sent to store platforms must use the public HTTPS address,
      * also when TLS ends at a load balancer or reverse proxy in front of the app.

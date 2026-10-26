@@ -32,6 +32,13 @@ return [
     | Store platforms (Stores → Connect New Store)
     */
 
+    /*
+    | Store notifications (webhooks): the public HTTPS address stores send them to. Defaults to APP_URL.
+    */
+    'webhooks' => [
+        'base_url' => env('WEBHOOK_BASE_URL', env('APP_URL')),
+    ],
+
     'shopify' => [
         'client_id' => env('SHOPIFY_CLIENT_ID'),
         'client_secret' => env('SHOPIFY_CLIENT_SECRET'),

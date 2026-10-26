@@ -2,6 +2,8 @@
 
 namespace App\Integrations\Sync\Sources;
 
+use App\Integrations\ShopifyClient;
+use App\Integrations\Sync\Contracts\FetchesSingleRecords;
 use App\Integrations\Sync\Data\OrderData;
 use App\Integrations\Sync\Data\OrderLineData;
 use App\Integrations\Sync\Data\ProductData;
@@ -10,16 +12,17 @@ use App\Models\Store;
 use Carbon\CarbonImmutable;
 use DateTimeInterface;
 use Illuminate\Http\Client\Response;
-use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
 /**
  * Reads products, variants, stock and orders through the Shopify GraphQL Admin API.
  * Page sizes keep every query under Shopify's 1,000-point query cost limit.
  */
-class ShopifyDataSource extends HttpDataSource
+class ShopifyDataSource extends HttpDataSource implements FetchesSingleRecords
 {
-    private const PRODUCTS_PER_PAGE = 20;
+    private const PRODUCTS_PER_PAGE = 10;
+
+    private const IMAGES_PER_PRODUCT = 10;
 
     private const VARIANTS_PER_PAGE = 40;
 
@@ -29,18 +32,22 @@ class ShopifyDataSource extends HttpDataSource
 
     private const VARIANT_FIELDS = 'legacyResourceId sku barcode price inventoryQuantity selectedOptions { name value } inventoryItem { unitCost { amount } }';
 
+    private const CUSTOMER_DATA_WARNING = 'Shopify withheld customer names, emails and addresses. Request "Protected customer data" access for the Finovo app in the Shopify Partner Dashboard (App → API access), then sync again.';
+
+    private const ADDRESS_FIELDS = '{ name company address1 address2 city province zip country countryCodeV2 phone }';
+
     /** Fields Shopify treats as protected customer data; only returned once the app is approved for them. */
-    private const CUSTOMER_FIELDS = 'email phone customer { firstName lastName } shippingAddress { name company address1 address2 city province zip country countryCodeV2 phone }';
+    private const CUSTOMER_FIELDS = 'email phone customer { firstName lastName } shippingAddress '.self::ADDRESS_FIELDS.' billingAddress '.self::ADDRESS_FIELDS;
+
+    public function __construct(
+        protected ShopifyClient $client
+    ) {}
 
     public function products(Store $store): iterable
     {
         $query = 'query($cursor: String) { products(first: '.self::PRODUCTS_PER_PAGE.', after: $cursor) {
             pageInfo { hasNextPage endCursor }
-            nodes {
-                id legacyResourceId title handle description productType status
-                featuredMedia { preview { image { url } } }
-                variants(first: '.self::VARIANTS_PER_PAGE.') { pageInfo { hasNextPage endCursor } nodes { '.self::VARIANT_FIELDS.' } }
-            }
+            nodes { '.$this->productFields().' }
         } }';
 
         $cursor = null;
@@ -56,6 +63,29 @@ class ShopifyDataSource extends HttpDataSource
         } while ($page['pageInfo']['hasNextPage']);
     }
 
+    public function product(Store $store, string $externalId): ?ProductData
+    {
+        $node = $this->query($store, 'query($id: ID!) { product(id: $id) { '.$this->productFields().' } }', [
+            'id' => ShopifyClient::gid('Product', $externalId),
+        ])['product'] ?? null;
+
+        return $node ? $this->toProduct($node, $this->allVariants($store, $node)) : null;
+    }
+
+    public function order(Store $store, string $externalId): ?OrderData
+    {
+        $variables = ['id' => ShopifyClient::gid('Order', $externalId)];
+
+        try {
+            $node = $this->query($store, 'query($id: ID!) { order(id: $id) { '.$this->orderFields(true).' } }', $variables)['order'] ?? null;
+        } catch (ShopifyCustomerDataDenied) {
+            $this->warnings[] = self::CUSTOMER_DATA_WARNING;
+            $node = $this->query($store, 'query($id: ID!) { order(id: $id) { '.$this->orderFields(false).' } }', $variables)['order'] ?? null;
+        }
+
+        return $node ? $this->toOrder($node) : null;
+    }
+
     public function orders(Store $store, ?DateTimeInterface $updatedSince): iterable
     {
         $filter = $updatedSince ? "updated_at:>'".CarbonImmutable::instance($updatedSince)->utc()->format('Y-m-d\TH:i:s\Z')."'" : null;
@@ -68,7 +98,7 @@ class ShopifyDataSource extends HttpDataSource
             } catch (ShopifyCustomerDataDenied) {
                 // Read the orders without customer details rather than not at all.
                 $withCustomerData = false;
-                $this->warnings[] = 'Shopify withheld customer names, emails and addresses. Request "Protected customer data" access for the Finovo app in the Shopify Partner Dashboard (App → API access), then sync again.';
+                $this->warnings[] = self::CUSTOMER_DATA_WARNING;
 
                 continue;
             }
@@ -94,19 +124,38 @@ class ShopifyDataSource extends HttpDataSource
     {
         return 'query($cursor: String, $query: String) { orders(first: '.self::ORDERS_PER_PAGE.', after: $cursor, query: $query, sortKey: UPDATED_AT) {
             pageInfo { hasNextPage endCursor }
-            nodes {
-                legacyResourceId name createdAt cancelledAt displayFinancialStatus displayFulfillmentStatus note
-                currentTotalPriceSet { shopMoney { amount currencyCode } }
-                '.($withCustomerData ? self::CUSTOMER_FIELDS : '').'
-                lineItems(first: '.self::LINES_PER_ORDER.') { nodes {
-                    name sku quantity
-                    variant { legacyResourceId }
-                    originalUnitPriceSet { shopMoney { amount } }
-                    discountedTotalSet { shopMoney { amount } }
-                    taxLines { priceSet { shopMoney { amount } } }
-                } }
-            }
+            nodes { '.$this->orderFields($withCustomerData).' }
         } }';
+    }
+
+    private function productFields(): string
+    {
+        return 'id legacyResourceId title handle description productType status vendor tags
+            totalInventory onlineStoreUrl createdAt updatedAt
+            featuredMedia { preview { image { url } } }
+            media(first: '.self::IMAGES_PER_PRODUCT.') { nodes { preview { image { url } } } }
+            variants(first: '.self::VARIANTS_PER_PAGE.') { pageInfo { hasNextPage endCursor } nodes { '.self::VARIANT_FIELDS.' } }';
+    }
+
+    private function orderFields(bool $withCustomerData): string
+    {
+        return 'legacyResourceId name createdAt updatedAt processedAt cancelledAt cancelReason displayFinancialStatus displayFulfillmentStatus
+            note tags sourceName paymentGatewayNames customAttributes { key value }
+            currentTotalPriceSet { shopMoney { amount currencyCode } }
+            currentSubtotalPriceSet { shopMoney { amount } }
+            totalShippingPriceSet { shopMoney { amount } }
+            currentTotalTaxSet { shopMoney { amount } }
+            currentTotalDiscountsSet { shopMoney { amount } }
+            '.($withCustomerData ? self::CUSTOMER_FIELDS : '').'
+            lineItems(first: '.self::LINES_PER_ORDER.') { nodes {
+                name sku quantity variantTitle vendor
+                image { url }
+                variant { legacyResourceId }
+                totalDiscountSet { shopMoney { amount } }
+                originalUnitPriceSet { shopMoney { amount } }
+                discountedTotalSet { shopMoney { amount } }
+                taxLines { priceSet { shopMoney { amount } } }
+            } }';
     }
 
     /**
@@ -147,6 +196,18 @@ class ShopifyDataSource extends HttpDataSource
             imageUrl: $node['featuredMedia']['preview']['image']['url'] ?? null,
             isActive: ($node['status'] ?? 'ACTIVE') === 'ACTIVE',
             variants: array_map(fn (array $variant) => $this->toVariant($variant), $variants),
+            images: array_values(array_filter(array_map(fn (array $media) => $media['preview']['image']['url'] ?? null, $node['media']['nodes'] ?? []))),
+            details: array_filter([
+                'Vendor' => $node['vendor'] ?? null,
+                'Product type' => $node['productType'] ?? null,
+                'Tags' => $node['tags'] ?? [],
+                'Status on Shopify' => isset($node['status']) ? ucfirst(strtolower($node['status'])) : null,
+                'Stock on Shopify' => $node['totalInventory'] ?? null,
+                'Store page' => $node['onlineStoreUrl'] ?? null,
+                'Created on Shopify' => $node['createdAt'] ?? null,
+                'Updated on Shopify' => $node['updatedAt'] ?? null,
+            ], fn ($value) => $value !== null && $value !== '' && $value !== []),
+            raw: [...$node, 'variants' => $variants],
         );
     }
 
@@ -181,6 +242,7 @@ class ShopifyDataSource extends HttpDataSource
     {
         $customer = $node['customer'] ?? null;
         $address = $node['shippingAddress'] ?? null;
+        $money = fn (string $field) => isset($node[$field]['shopMoney']['amount']) ? (float) $node[$field]['shopMoney']['amount'] : null;
         $customerName = trim(($customer['firstName'] ?? '').' '.($customer['lastName'] ?? '')) ?: ($address['name'] ?? null);
 
         return new OrderData(
@@ -189,18 +251,7 @@ class ShopifyDataSource extends HttpDataSource
             customerName: $customerName ?: null,
             customerEmail: $node['email'] ?? null,
             customerPhone: $node['phone'] ?? $address['phone'] ?? null,
-            shippingAddress: $address ? array_filter([
-                'name' => $address['name'] ?? null,
-                'company' => $address['company'] ?? null,
-                'address1' => $address['address1'] ?? null,
-                'address2' => $address['address2'] ?? null,
-                'city' => $address['city'] ?? null,
-                'province' => $address['province'] ?? null,
-                'zip' => $address['zip'] ?? null,
-                'country' => $address['country'] ?? null,
-                'country_code' => $address['countryCodeV2'] ?? null,
-                'phone' => $address['phone'] ?? null,
-            ], fn ($value) => filled($value)) : null,
+            shippingAddress: $this->toAddress($address),
             paymentStatus: match ($node['displayFinancialStatus'] ?? null) {
                 'PAID' => OrderData::PAYMENT_PAID,
                 'REFUNDED', 'PARTIALLY_REFUNDED' => OrderData::PAYMENT_REFUNDED,
@@ -225,8 +276,50 @@ class ShopifyDataSource extends HttpDataSource
                 unitPrice: (float) ($line['originalUnitPriceSet']['shopMoney']['amount'] ?? 0),
                 taxAmount: array_sum(array_map(fn (array $tax) => (float) ($tax['priceSet']['shopMoney']['amount'] ?? 0), $line['taxLines'] ?? [])),
                 totalAmount: (float) ($line['discountedTotalSet']['shopMoney']['amount'] ?? 0),
+                discountAmount: (float) ($line['totalDiscountSet']['shopMoney']['amount'] ?? 0),
+                imageUrl: $line['image']['url'] ?? null,
+                raw: $line,
             ), $node['lineItems']['nodes'] ?? []),
+            billingAddress: $this->toAddress($node['billingAddress'] ?? null),
+            subtotal: $money('currentSubtotalPriceSet'),
+            shippingTotal: $money('totalShippingPriceSet'),
+            taxTotal: $money('currentTotalTaxSet'),
+            discountTotal: $money('currentTotalDiscountsSet'),
+            paymentMethod: implode(', ', $node['paymentGatewayNames'] ?? []) ?: null,
+            details: array_filter([
+                'Tags' => $node['tags'] ?? [],
+                'Sales channel' => $node['sourceName'] ?? null,
+                'Cancel reason' => $node['cancelReason'] ?? null,
+                'Processed on Shopify' => $node['processedAt'] ?? null,
+                'Updated on Shopify' => $node['updatedAt'] ?? null,
+            ], fn ($value) => $value !== null && $value !== '' && $value !== []),
+            raw: $node,
+            finovoOrderId: collect($node['customAttributes'] ?? [])->firstWhere('key', OrderData::FINOVO_REFERENCE_KEY)['value'] ?? null,
         );
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $address
+     * @return array<string, string>|null
+     */
+    private function toAddress(?array $address): ?array
+    {
+        if (! $address) {
+            return null;
+        }
+
+        return array_filter([
+            'name' => $address['name'] ?? null,
+            'company' => $address['company'] ?? null,
+            'address1' => $address['address1'] ?? null,
+            'address2' => $address['address2'] ?? null,
+            'city' => $address['city'] ?? null,
+            'province' => $address['province'] ?? null,
+            'zip' => $address['zip'] ?? null,
+            'country' => $address['country'] ?? null,
+            'country_code' => $address['countryCodeV2'] ?? null,
+            'phone' => $address['phone'] ?? null,
+        ], fn ($value) => filled($value)) ?: null;
     }
 
     /**
@@ -239,12 +332,7 @@ class ShopifyDataSource extends HttpDataSource
      */
     private function query(Store $store, string $query, array $variables): array
     {
-        $url = 'https://'.$store->external_reference.'/admin/api/'.config('services.shopify.api_version').'/graphql.json';
-
-        $response = $this->send(fn () => Http::acceptJson()
-            ->timeout(30)
-            ->withHeaders(['X-Shopify-Access-Token' => (string) $store->credential('access_token')])
-            ->post($url, ['query' => $query, 'variables' => $variables]));
+        $response = $this->send(fn () => $this->client->graphql($store, $query, $variables));
 
         $errors = $response->json('errors');
 
@@ -263,12 +351,6 @@ class ShopifyDataSource extends HttpDataSource
 
     protected function isRateLimited(Response $response): bool
     {
-        if ($response->status() === 429) {
-            return true;
-        }
-
-        $errors = $response->json('errors');
-
-        return is_array($errors) && ($errors[0]['extensions']['code'] ?? null) === 'THROTTLED';
+        return ShopifyClient::isThrottled($response);
     }
 }
