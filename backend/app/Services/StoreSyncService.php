@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Integrations\Sync\Contracts\StoreDataSource;
 use App\Integrations\Sync\Data\OrderData;
 use App\Integrations\Sync\Data\OrderLineData;
 use App\Integrations\Sync\Data\ProductData;
@@ -17,6 +18,7 @@ use App\Models\SkuMapping;
 use App\Models\Store;
 use App\Models\StoreProductLink;
 use App\Models\Warehouse;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Throwable;
@@ -33,12 +35,16 @@ class StoreSyncService
     /** Orders changed shortly before the previous sync are read again, so none are missed between runs. */
     private const ORDER_OVERLAP_MINUTES = 10;
 
+    /** The Orders page asks for new orders each time it opens; the store is read at most this often for it. */
+    private const ORDER_REFRESH_SECONDS = 60;
+
     public function __construct(
         protected StoreDataSourceFactory $sources,
         protected InventoryEngine $inventory,
         protected ProductImageStore $images,
         protected EmailService $emails,
         protected OrderService $orders,
+        protected StoreSyncOutbox $outbox,
     ) {}
 
     public function canSync(Store $store): bool
@@ -76,11 +82,7 @@ class StoreSyncService
                 }
             }
 
-            $since = $store->last_sync_at?->copy()->subMinutes(self::ORDER_OVERLAP_MINUTES);
-
-            foreach ($source->orders($store, $since) as $order) {
-                $this->importOrder($store, $order, $result);
-            }
+            $this->importChangedOrders($store, $source, $result);
 
             $result->warnings = $source->warnings();
 
@@ -107,6 +109,41 @@ class StoreSyncService
         ]);
 
         return $result;
+    }
+
+    /**
+     * Import the orders created or changed on the store since it was last read, so the Orders page shows them
+     * without pressing Sync. Skipped (null) before the store's first full sync, when it was read moments ago,
+     * or while another import of it is running.
+     *
+     * @throws Throwable when the store cannot be read
+     */
+    public function syncOrders(Store $store): ?SyncResult
+    {
+        if (! $store->last_sync_at || $store->last_sync_at->gt(now()->subSeconds(self::ORDER_REFRESH_SECONDS))) {
+            return null;
+        }
+
+        return Cache::lock("store-order-import:{$store->id}", 120)->get(function () use ($store) {
+            $startedAt = now();
+            $result = new SyncResult;
+            $this->importChangedOrders($store, $this->sources->for($store->platform), $result);
+            $store->update(['last_sync_at' => $startedAt]);
+
+            return $result;
+        }) ?: null;
+    }
+
+    /**
+     * Orders changed shortly before the store was last read are read again, so none are missed between runs.
+     */
+    private function importChangedOrders(Store $store, StoreDataSource $source, SyncResult $result): void
+    {
+        $since = $store->last_sync_at?->copy()->subMinutes(self::ORDER_OVERLAP_MINUTES);
+
+        foreach ($source->orders($store, $since) as $order) {
+            $this->importOrder($store, $order, $result);
+        }
     }
 
     /**
@@ -272,7 +309,7 @@ class StoreSyncService
             return false;
         }
 
-        $this->inventory->adjustStock(
+        $this->outbox->importingFrom($store, fn () => $this->inventory->adjustStock(
             organizationId: $store->organization_id,
             warehouseId: $warehouse->id,
             productVariantId: $variant->id,
@@ -281,7 +318,7 @@ class StoreSyncService
             reason: 'opening_stock',
             notes: "Opening stock imported from {$store->platform->label()} store {$store->name}",
             idempotencyKey: "store-{$store->id}-opening-{$variant->id}",
-        );
+        ));
 
         return true;
     }

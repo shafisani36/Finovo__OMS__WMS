@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\StorePlatform;
 use App\Integrations\ConnectorErrors;
+use App\Integrations\Push\BigCommerceWriter;
 use App\Integrations\Push\StoreWriterFactory;
 use App\Integrations\Sync\Contracts\FetchesSingleRecords;
 use App\Integrations\Sync\StoreDataSourceFactory;
@@ -12,6 +13,7 @@ use App\Models\Store;
 use App\Models\StoreWebhookEvent;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -41,7 +43,26 @@ class StoreWebhookService
         'product.updated' => 'product.saved',
         'product.restored' => 'product.saved',
         'product.deleted' => 'product.deleted',
+        // BigCommerce
+        'store/order/created' => 'order.saved',
+        'store/order/updated' => 'order.saved',
+        'store/order/statusUpdated' => 'order.saved',
+        'store/product/created' => 'product.saved',
+        'store/product/updated' => 'product.saved',
+        'store/product/deleted' => 'product.deleted',
+        // Wix (sent to the Finovo app, see recordWix())
+        'wix.ecom.v1.order_created' => 'order.saved',
+        'wix.ecom.v1.order_updated' => 'order.saved',
+        'wix.ecom.v1.order_approved' => 'order.saved',
+        'wix.ecom.v1.order_canceled' => 'order.saved',
+        'wix.ecom.v1.order_payment_status_updated' => 'order.saved',
+        'wix.stores.catalog.v3.product_created' => 'product.saved',
+        'wix.stores.catalog.v3.product_updated' => 'product.saved',
+        'wix.stores.catalog.v3.product_deleted' => 'product.deleted',
     ];
+
+    /** Header the Finovo PrestaShop and OpenCart modules sign their notifications with. */
+    public const MODULE_SIGNATURE_HEADER = 'X-Finovo-Signature';
 
     public function __construct(
         protected StoreWriterFactory $writers,
@@ -56,7 +77,7 @@ class StoreWebhookService
      */
     public function supports(StorePlatform $platform): bool
     {
-        return $this->writers->supports($platform);
+        return $this->writers->supportsWebhooks($platform);
     }
 
     /**
@@ -82,7 +103,7 @@ class StoreWebhookService
      */
     public function register(Store $store): array
     {
-        $writer = $this->writers->for($store);
+        $writer = $this->writers->webhooks($store);
         $url = $this->callbackUrl($store);
 
         $outcome = match (true) {
@@ -110,7 +131,7 @@ class StoreWebhookService
      */
     public function unregister(Store $store): void
     {
-        $writer = $this->writers->for($store);
+        $writer = $this->writers->webhooks($store);
         $url = $this->callbackUrl($store);
 
         if ($writer && $url) {
@@ -119,28 +140,25 @@ class StoreWebhookService
     }
 
     /**
-     * Whether the notification really comes from the store: Shopify signs with the app secret, WooCommerce
-     * with the secret Finovo gave the store when it subscribed.
+     * Whether the notification really comes from the store: Shopify signs with the app secret, WooCommerce with the
+     * secret Finovo gave the store when it subscribed, the Finovo PrestaShop and OpenCart modules with their key or
+     * secret; BigCommerce sends back the secret header set on its subscription.
      */
     public function hasValidSignature(Request $request, Store $store): bool
     {
-        [$header, $secret] = match ($store->platform) {
-            StorePlatform::SHOPIFY => ['X-Shopify-Hmac-Sha256', (string) config('services.shopify.client_secret')],
-            StorePlatform::WOOCOMMERCE => ['X-WC-Webhook-Signature', (string) $store->webhook_secret],
-            default => [null, ''],
+        $signed = function (string $secret, ?string $signature) use ($request): bool {
+            return $secret !== '' && filled($signature) && hash_equals(base64_encode(hash_hmac('sha256', $request->getContent(), $secret, true)), (string) $signature);
         };
 
-        $signature = $header ? (string) $request->header($header) : '';
-
-        if ($signature === '' || $secret === '') {
-            return false;
-        }
-
-        if ($store->platform === StorePlatform::SHOPIFY && strcasecmp((string) $request->header('X-Shopify-Shop-Domain'), (string) $store->external_reference) !== 0) {
-            return false;
-        }
-
-        return hash_equals(base64_encode(hash_hmac('sha256', $request->getContent(), $secret, true)), $signature);
+        return match ($store->platform) {
+            StorePlatform::SHOPIFY => strcasecmp((string) $request->header('X-Shopify-Shop-Domain'), (string) $store->external_reference) === 0
+                && $signed((string) config('services.shopify.client_secret'), $request->header('X-Shopify-Hmac-Sha256')),
+            StorePlatform::WOOCOMMERCE => $signed((string) $store->webhook_secret, $request->header('X-WC-Webhook-Signature')),
+            StorePlatform::BIGCOMMERCE => filled($store->webhook_secret) && hash_equals((string) $store->webhook_secret, (string) $request->header(BigCommerceWriter::SECRET_HEADER)),
+            StorePlatform::PRESTASHOP => $signed((string) $store->credential('webservice_key'), $request->header(self::MODULE_SIGNATURE_HEADER)),
+            StorePlatform::OPENCART => $signed((string) $store->credential('api_secret'), $request->header(self::MODULE_SIGNATURE_HEADER)),
+            default => false,
+        };
     }
 
     /**
@@ -161,11 +179,46 @@ class StoreWebhookService
      */
     public function record(Request $request, Store $store): ?StoreWebhookEvent
     {
-        $topic = (string) ($request->header('X-Shopify-Topic') ?? $request->header('X-WC-Webhook-Topic'));
-        $deliveryId = (string) ($request->header('X-Shopify-Webhook-Id')
-            ?? trim($request->header('X-WC-Webhook-ID').'-'.$request->header('X-WC-Webhook-Delivery-ID'), '-'))
-            ?: hash('sha256', $topic.$request->getContent());
+        [$topic, $deliveryId, $resourceId] = match ($store->platform) {
+            StorePlatform::BIGCOMMERCE => [(string) $request->json('scope'), (string) $request->json('hash'), $request->json('data.id')],
+            StorePlatform::PRESTASHOP, StorePlatform::OPENCART => [(string) $request->header('X-Finovo-Topic'), (string) $request->header('X-Finovo-Delivery'), $request->json('id')],
+            default => [
+                (string) ($request->header('X-Shopify-Topic') ?? $request->header('X-WC-Webhook-Topic')),
+                (string) ($request->header('X-Shopify-Webhook-Id') ?? trim($request->header('X-WC-Webhook-ID').'-'.$request->header('X-WC-Webhook-Delivery-ID'), '-')),
+                $request->json('id') ?? $request->json('admin_graphql_api_id'),
+            ],
+        };
 
+        return $this->saveEvent($store, $topic, $deliveryId ?: hash('sha256', $topic.$request->getContent()), $resourceId);
+    }
+
+    /**
+     * A notification Wix sends to the Finovo app (one address for every site): a JWT signed with the app's key,
+     * carrying the site's app instance and the changed record. Returns null when it needs no work.
+     *
+     * @throws RuntimeException when the signature is not Wix's
+     */
+    public function recordWix(string $token): ?StoreWebhookEvent
+    {
+        $payload = $this->verifiedJwt($token, (string) config('services.wix.webhook_public_key'));
+        $event = json_decode((string) ($payload['data'] ?? ''), true) ?: [];
+        $data = is_string($event['data'] ?? null) ? (json_decode($event['data'], true) ?: []) : (array) ($event['data'] ?? []);
+        $instanceId = (string) ($event['instanceId'] ?? '');
+
+        $store = Store::where('platform', StorePlatform::WIX)->get()
+            ->first(fn (Store $store) => $instanceId !== '' && $store->credential('instance_id') === $instanceId);
+
+        if (! $store) {
+            return null;
+        }
+
+        $topic = (string) ($event['eventType'] ?? '');
+
+        return $this->saveEvent($store, $topic, (string) ($event['id'] ?? hash('sha256', $token)), $data['entityId'] ?? null);
+    }
+
+    private function saveEvent(Store $store, string $topic, string $deliveryId, mixed $resourceId): ?StoreWebhookEvent
+    {
         if (! isset(self::TOPICS[$topic])) {
             return null;
         }
@@ -176,12 +229,33 @@ class StoreWebhookService
                 'store_id' => $store->id,
                 'topic' => $topic,
                 'delivery_id' => substr($deliveryId, 0, 150),
-                'resource_id' => (string) ($request->json('id') ?? $request->json('admin_graphql_api_id')) ?: null,
+                'resource_id' => filled($resourceId) ? (string) $resourceId : null,
                 'status' => StoreWebhookEvent::STATUS_RECEIVED,
             ]);
         } catch (UniqueConstraintViolationException) {
             return null;
         }
+    }
+
+    /**
+     * The claims of an RS256 JSON web token after checking its signature with the public key.
+     *
+     * @return array<string, mixed>
+     *
+     * @throws RuntimeException
+     */
+    private function verifiedJwt(string $token, string $publicKey): array
+    {
+        $parts = explode('.', trim($token));
+        $decode = fn (string $part) => base64_decode(strtr($part, '-_', '+/').str_repeat('=', (4 - strlen($part) % 4) % 4), true);
+        $key = openssl_pkey_get_public(str_contains($publicKey, '-----BEGIN') ? str_replace('\\n', "\n", $publicKey) : "-----BEGIN PUBLIC KEY-----\n".chunk_split($publicKey, 64, "\n")."-----END PUBLIC KEY-----\n");
+
+        if (count($parts) !== 3 || ! $key || (json_decode((string) $decode($parts[0]), true)['alg'] ?? null) !== 'RS256'
+            || openssl_verify($parts[0].'.'.$parts[1], (string) $decode($parts[2]), $key, OPENSSL_ALGO_SHA256) !== 1) {
+            throw new RuntimeException('The notification is not signed by Wix.');
+        }
+
+        return json_decode((string) $decode($parts[1]), true) ?: [];
     }
 
     /**

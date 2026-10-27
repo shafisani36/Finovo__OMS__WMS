@@ -18,7 +18,7 @@ const errorText = (err: unknown, fallback: string) => (err instanceof Error && e
  * Live camera preview that reads barcodes and QR codes (phone back camera, or a laptop webcam).
  * The decoder is loaded only when the camera is opened. Browsers allow the camera on HTTPS or localhost.
  */
-const CameraScanner: React.FC<{ onDetected: (text: string) => void }> = ({ onDetected }) => {
+export const CameraScanner: React.FC<{ onDetected: (text: string) => void }> = ({ onDetected }) => {
   const video = useRef<HTMLVideoElement>(null);
   const detected = useRef(onDetected);
   detected.current = onDetected;

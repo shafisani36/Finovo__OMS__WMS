@@ -3,6 +3,7 @@
 namespace App\Integrations\Sync\Sources;
 
 use App\Integrations\Connectors\ExternalDatabaseConnector;
+use App\Integrations\Sync\Contracts\FetchesSingleRecords;
 use App\Integrations\Sync\Data\OrderData;
 use App\Integrations\Sync\Data\OrderLineData;
 use App\Integrations\Sync\Data\ProductData;
@@ -24,7 +25,7 @@ use Throwable;
  *
  * OpenCart keeps stock per option value rather than per combination, so each option value becomes a variant.
  */
-class OpenCartDataSource extends HttpDataSource
+class OpenCartDataSource extends HttpDataSource implements FetchesSingleRecords
 {
     use InterpretsStatusNames;
 
@@ -83,6 +84,22 @@ class OpenCartDataSource extends HttpDataSource
                 return;
             }
         }
+    }
+
+    public function product(Store $store, string $externalId): ?ProductData
+    {
+        $rows = $this->rows($store);
+        $product = $this->read(fn () => $rows->productsByIds([(int) $externalId]))[0] ?? null;
+
+        return $product ? $this->toProduct($product, $this->read(fn () => $rows->optionValues([(int) $externalId])), $rows->imageBaseUrl()) : null;
+    }
+
+    public function order(Store $store, string $externalId): ?OrderData
+    {
+        $rows = $this->rows($store);
+        $order = $this->read(fn () => $rows->ordersByIds([(int) $externalId]))[0] ?? null;
+
+        return $order ? $this->toOrder($order, $this->read(fn () => $rows->orderProducts([(int) $externalId]))) : null;
     }
 
     private function rows(Store $store): OpenCartRows

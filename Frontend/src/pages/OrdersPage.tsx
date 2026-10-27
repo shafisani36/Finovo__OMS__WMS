@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { FileText, CheckCircle, AlertCircle, Eye, Plus } from 'lucide-react';
+import { FileText, CheckCircle, AlertCircle, Eye, Plus, PackageCheck, UploadCloud, XCircle } from 'lucide-react';
 import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import DataTable from '../components/common/DataTable';
 import type { Column } from '../components/common/DataTable';
-import omsService from '../services/omsService';
+import omsService, { ORDER_CREATE_PLATFORMS } from '../services/omsService';
 import { useAuth } from '../hooks/useAuth';
 import { can } from '../types/auth';
 import { useConfirmDialog } from '../components/common/ConfirmDialog';
@@ -17,16 +17,23 @@ import { formatMoney, variantNote } from '../utils/format';
 import OrderDetailModal from '../components/catalog/OrderDetailModal';
 import OrderFormModal from '../components/catalog/OrderFormModal';
 import { Alert } from '../components/common/Alert';
+import RowActionsMenu from '../components/common/RowActionsMenu';
+import type { RowAction } from '../components/common/RowActionsMenu';
+import { errorMessage } from '../utils/errors';
 import '../components/catalog/DetailModal.css';
 
 /** Same rules as the backend's Order::ALLOCATABLE_STATUSES and Order::SHIPPED_STATUSES. */
 const ALLOCATABLE_STATUSES = ['imported', 'pending', 'partially_allocated', 'exception'];
 const SHIPPED_STATUSES = ['partially_shipped', 'shipped', 'delivered', 'returned'];
 
+/** How often the managed store's new orders are imported and the list refreshed while the page is open. */
+const ORDER_REFRESH_MS = 60 * 1000;
+
 export const OrdersPage: React.FC = () => {
   const { user } = useAuth();
   const canAllocate = can(user, 'orders.allocate');
   const canCancel = can(user, 'orders.cancel');
+  const canManage = can(user, 'orders.manage');
   const { confirm, notify, dialog } = useConfirmDialog();
   const { activeStore } = useActiveStore();
   const [orders, setOrders] = useState<OrderModel[]>([]);
@@ -50,9 +57,10 @@ export const OrdersPage: React.FC = () => {
   const [banner, setBanner] = useState<string | null>(null);
 
 
-  const fetchOrders = async () => {
+  /** Load the current page of orders; a quiet refresh keeps the table on screen while it loads. */
+  const fetchOrders = async (quiet = false) => {
     try {
-      setLoading(true);
+      if (!quiet) setLoading(true);
       const res = await omsService.getOrders({
         search: debouncedSearch || undefined,
         status: statusFilter || undefined,
@@ -90,6 +98,42 @@ export const OrdersPage: React.FC = () => {
     fetchOrders();
   }, [page, perPage, statusFilter, debouncedSearch, activeStore?.id]);
 
+  // The latest fetchOrders, for the timer below (it keeps the page, search and store the user is on).
+  const fetchOrdersRef = useRef(fetchOrders);
+  fetchOrdersRef.current = fetchOrders;
+
+  // New orders of the managed store are imported when the page opens, every minute while it is visible and when
+  // the tab is shown again, so they appear without pressing Sync. Orders sent by store notifications show up on
+  // the same refresh.
+  useEffect(() => {
+    const storeId = activeStore?.id;
+
+    /** Import the store's new orders, then reload the list (on opening, only when orders arrived: it was just loaded). */
+    const refresh = async (opening = false) => {
+      if (document.visibilityState !== 'visible') return;
+      let changed = false;
+      if (storeId) {
+        try {
+          const result = await omsService.syncStoreOrders(storeId);
+          changed = result.orders_created + result.orders_updated > 0;
+        } catch {
+          // The store could not be read this time; the reason is shown on the Stores page and the next refresh tries again.
+        }
+      }
+      if (!opening || changed) fetchOrdersRef.current(true);
+    };
+    const onTick = () => refresh();
+
+    refresh(true);
+    const timer = window.setInterval(onTick, ORDER_REFRESH_MS);
+    document.addEventListener('visibilitychange', onTick);
+
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onTick);
+    };
+  }, [activeStore?.id]);
+
   const handleAllocate = async (orderId: number) => {
     try {
       const res = await omsService.allocateOrder(orderId);
@@ -97,6 +141,16 @@ export const OrdersPage: React.FC = () => {
       fetchOrders();
     } catch (err) {
       notify({ title: 'Allocation failed', message: err instanceof Error ? err.message : 'The order could not be allocated.' });
+    }
+  };
+
+  const handlePush = async (order: OrderModel) => {
+    try {
+      const res = await omsService.pushOrder(order.id);
+      setBanner(res.message);
+      fetchOrders(true);
+    } catch (err) {
+      notify({ title: 'Order not sent', message: errorMessage(err, 'The order could not be sent to its store.') });
     }
   };
 
@@ -115,6 +169,27 @@ export const OrdersPage: React.FC = () => {
     } catch (err) {
       notify({ title: 'Order not cancelled', message: err instanceof Error ? err.message : 'The order could not be cancelled.' });
     }
+  };
+
+  /** What the user may do with an order, in the order the work happens. */
+  const rowActions = (order: OrderModel): RowAction[] => {
+    const isCancelled = order.order_status === 'cancelled';
+    const actions: RowAction[] = [{ label: 'Manage', icon: Eye, onSelect: () => setViewOrder(order) }];
+
+    if (canAllocate && ALLOCATABLE_STATUSES.includes(order.order_status)) {
+      actions.push({ label: 'Allocate', icon: PackageCheck, onSelect: () => handleAllocate(order.id) });
+    }
+    // Only an order not on its store yet is pushed; one imported from (or already sent to) its store is kept in
+    // step automatically: its status, shipments and cancellation reach the store by themselves.
+    const canPush = !order.external_order_id && !isCancelled && order.store && ORDER_CREATE_PLATFORMS.includes(order.store.platform);
+    if (canManage && canPush) {
+      actions.push({ label: 'Push to Store', icon: UploadCloud, onSelect: () => handlePush(order) });
+    }
+    if (canCancel && !isCancelled && !SHIPPED_STATUSES.includes(order.order_status)) {
+      actions.push({ label: 'Cancel', icon: XCircle, onSelect: () => handleCancel(order.id), danger: true });
+    }
+
+    return actions;
   };
 
   const columns: Column<OrderModel>[] = [
@@ -186,36 +261,7 @@ export const OrdersPage: React.FC = () => {
       key: 'actions',
       header: 'Actions',
       align: 'center',
-      render: (row) => (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }} onClick={(e) => e.stopPropagation()}>
-          <button
-            onClick={() => setViewOrder(row)}
-            className="btn-finovo-secondary"
-            style={{ padding: '4px 8px', fontSize: 11 }}
-          >
-            <Eye size={13} />
-            <span>Manage</span>
-          </button>
-          {canAllocate && ALLOCATABLE_STATUSES.includes(row.order_status) ? (
-            <button
-              onClick={() => handleAllocate(row.id)}
-              className="btn-finovo-primary"
-              style={{ padding: '4px 8px', fontSize: 11 }}
-            >
-              Allocate
-            </button>
-          ) : null}
-          {canCancel && row.order_status !== 'cancelled' && !SHIPPED_STATUSES.includes(row.order_status) && (
-            <button
-              onClick={() => handleCancel(row.id)}
-              className="btn-finovo-secondary"
-              style={{ padding: '4px 8px', fontSize: 11, color: '#ef4444' }}
-            >
-              Cancel
-            </button>
-          )}
-        </div>
-      ),
+      render: (row) => <RowActionsMenu label={`Actions for order ${row.order_number}`} actions={rowActions(row)} />,
     },
   ];
 

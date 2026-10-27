@@ -211,6 +211,28 @@ class StoreController extends Controller
     }
 
     /**
+     * Import the store's new and changed orders. The Orders page calls this whenever it opens or refreshes, so
+     * orders appear without pressing Sync; stores that cannot be read yet are skipped quietly.
+     */
+    public function syncOrders(Request $request, Store $store): JsonResponse
+    {
+        $this->ensureSameOrganization($request, $store);
+
+        $result = $this->syncService->canSync($store)
+            ? $this->errors->run($store, 'order import', fn () => $this->syncService->syncOrders($store))
+            : null;
+
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'imported' => (bool) $result,
+                'orders_created' => $result?->ordersCreated ?? 0,
+                'orders_updated' => $result?->ordersUpdated ?? 0,
+            ],
+        ]);
+    }
+
+    /**
      * Switch on (or check again) automatic import for a store: Finovo subscribes to its order and product
      * notifications, so new orders arrive without pressing Sync.
      */

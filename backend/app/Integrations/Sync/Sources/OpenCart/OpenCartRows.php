@@ -42,6 +42,22 @@ interface OpenCartRows
      */
     public function orderProducts(array $orderIds): array;
 
+    /**
+     * The given products (same columns as products()).
+     *
+     * @param  list<int>  $productIds
+     * @return list<array<string, mixed>>
+     */
+    public function productsByIds(array $productIds): array;
+
+    /**
+     * The given orders (same columns as orders()).
+     *
+     * @param  list<int>  $orderIds
+     * @return list<array<string, mixed>>
+     */
+    public function ordersByIds(array $orderIds): array;
+
     /** Public URL of the shop's image folder, when known. */
     public function imageBaseUrl(): ?string;
 }

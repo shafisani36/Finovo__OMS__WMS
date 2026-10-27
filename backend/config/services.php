@@ -67,6 +67,8 @@ return [
         'share_url_id' => env('WIX_SHARE_URL_ID'),
         // Account API key for stores connected by site ID instead of the app.
         'api_key' => env('WIX_API_KEY'),
+        // Public key Wix signs the app's notifications with (app dashboard → Webhooks); enables instant import.
+        'webhook_public_key' => env('WIX_WEBHOOK_PUBLIC_KEY'),
     ],
 
     // Default MySQL login for OpenCart / osCommerce shop databases (a store can override each value)

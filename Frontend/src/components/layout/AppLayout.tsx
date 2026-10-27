@@ -22,6 +22,7 @@ import {
   X,
   ChevronRight,
   LogOut,
+  Receipt,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
@@ -66,7 +67,10 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
   },
   {
     title: 'ADMINISTRATION',
-    items: [{ to: '/employees', label: 'Employees', icon: UserCog, permission: 'employees.view' }],
+    items: [
+      { to: '/billing', label: 'Client Billing', icon: Receipt, permission: 'billing.view' },
+      { to: '/employees', label: 'Employees', icon: UserCog, permission: 'employees.view' },
+    ],
   },
 ];
 

@@ -66,7 +66,7 @@ trait SendsPlatformRequests
 
     private function errorDetail(Response $response): string
     {
-        $message = $response->json('message') ?? $response->json('error.message') ?? $response->json('errors.0.message') ?? $response->json('title');
+        $message = $response->json('message') ?? $response->json('error.message') ?? $response->json('errors.0.message') ?? $response->json('title') ?? $response->json('0.message');
 
         return is_string($message) && $message !== '' ? ': '.$message : '';
     }

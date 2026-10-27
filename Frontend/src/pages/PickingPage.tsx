@@ -10,6 +10,8 @@ import {
   Download,
   Info,
   Loader2,
+  ScanLine,
+  Waves,
   X
 } from 'lucide-react';
 import { Alert } from '../components/common/Alert';
@@ -21,7 +23,9 @@ import CustomDropdown from '../components/common/CustomDropdown';
 import omsService from '../services/omsService';
 import { useAuth } from '../hooks/useAuth';
 import { can } from '../types/auth';
-import type { PickingItem } from '../services/omsService';
+import type { PickingItem, PickWaveSummary } from '../services/omsService';
+import { PickScanModal, PickWaveModal } from '../components/picking/PickingScan';
+import '../components/picking/Picking.css';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 export const PickingPage: React.FC = () => {
@@ -51,6 +55,10 @@ export const PickingPage: React.FC = () => {
   const [bulkStatus, setBulkStatus] = useState('in_progress');
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
   const [banner, setBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [waves, setWaves] = useState<PickWaveSummary[]>([]);
+  const [scanTaskId, setScanTaskId] = useState<number | null>(null);
+  const [waveId, setWaveId] = useState<number | null>(null);
+  const [creatingWave, setCreatingWave] = useState(false);
 
   const showResult = (message: string) => setBanner({ type: 'success', text: message });
   const showError = (err: unknown, fallback: string) =>
@@ -70,6 +78,7 @@ export const PickingPage: React.FC = () => {
       setKpis(res.kpis);
       setTotal(res.meta.total);
       setLastPage(res.meta.last_page);
+      setWaves(await omsService.getPickWaves());
     } catch (err) {
       showError(err, 'Failed to load picking tasks.');
     } finally {
@@ -141,6 +150,28 @@ export const PickingPage: React.FC = () => {
     }
   };
 
+  /** Put the selected orders into a wave and open its pick list. */
+  const handleCreateWave = async () => {
+    try {
+      setCreatingWave(true);
+      const res = await omsService.createPickWave(Array.from(selectedIds) as number[]);
+      setSelectedIds(new Set());
+      showResult(res.message);
+      setWaveId(res.data.id);
+      fetchTasks();
+    } catch (err) {
+      showError(err, 'The wave could not be created.');
+    } finally {
+      setCreatingWave(false);
+    }
+  };
+
+  /** A scan screen finished an order or a wave: show it and refresh the list. */
+  const handleScanChanged = (message: string) => {
+    showResult(message);
+    fetchTasks();
+  };
+
   /** Download the rows on screen as a CSV picking list. */
   const handleExport = () => {
     const header = ['Order', 'Customer', 'Product', 'Quantity', 'Items', 'Status', 'Warehouse', 'Priority'];
@@ -162,9 +193,14 @@ export const PickingPage: React.FC = () => {
       header: 'ORDER',
       width: '12%',
       render: (row) => (
-        <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
-          {row.order_number}
-        </span>
+        <div>
+          <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{row.order_number}</span>
+          {row.wave_number && (
+            <div>
+              <span className="pick-wave-tag">{row.wave_number}</span>
+            </div>
+          )}
+        </div>
       ),
     },
     {
@@ -226,30 +262,27 @@ export const PickingPage: React.FC = () => {
       width: '12%',
       align: 'center',
       render: (row) => (
-        <button
-          onClick={() => handleQuickComplete(row.id)}
-          disabled={!canUpdate || actionLoadingId === row.id}
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 8,
-            border: '1px solid #dbeafe',
-            backgroundColor: '#eff6ff',
-            color: '#1e56ff',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            transition: 'all 0.15s ease',
-          }}
-          title="Advance Status"
-        >
-          {actionLoadingId === row.id ? (
-            <Loader2 size={16} className="animate-spin" />
-          ) : (
-            <Check size={16} strokeWidth={2.5} />
-          )}
-        </button>
+        <div className="pick-row-actions">
+          <button
+            type="button"
+            className="pick-row-button"
+            onClick={() => setScanTaskId(row.id)}
+            title={row.status === 'picked' ? 'Scan to pack' : row.status === 'packed' ? 'View scanned items' : 'Scan to pick'}
+            aria-label="Scan items"
+          >
+            <ScanLine size={16} />
+          </button>
+          <button
+            type="button"
+            className="pick-row-button"
+            onClick={() => handleQuickComplete(row.id)}
+            disabled={!canUpdate || actionLoadingId === row.id}
+            title="Advance status without scanning"
+            aria-label="Advance status"
+          >
+            {actionLoadingId === row.id ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} strokeWidth={2.5} />}
+          </button>
+        </div>
       ),
     },
   ];
@@ -321,6 +354,16 @@ export const PickingPage: React.FC = () => {
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button
+              onClick={handleCreateWave}
+              className="btn-finovo-secondary"
+              disabled={!canUpdate || selectedIds.size < 2 || creatingWave}
+              title="Pick the selected orders together in one walk through the warehouse"
+            >
+              {creatingWave ? <Loader2 size={14} className="animate-spin" /> : <Waves size={14} />}
+              <span>Create Wave</span>
+            </button>
+
+            <button
               onClick={() => setBulkModalOpen(true)}
               className="btn-finovo-secondary"
               disabled={!canUpdate || selectedIds.size === 0}
@@ -360,6 +403,21 @@ export const PickingPage: React.FC = () => {
           </div>
         </div>
 
+        {waves.length > 0 && (
+          <div className="pick-waves-strip">
+            <span>Open waves:</span>
+            {waves.map((wave) => (
+              <button key={wave.id} type="button" className="pick-wave-chip" onClick={() => setWaveId(wave.id)}>
+                <Waves size={13} />
+                {wave.wave_number}
+                <span>
+                  {wave.orders} orders{wave.warehouse ? ` · ${wave.warehouse}` : ''}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Full-width Search Bar matching Screenshot 3 */}
         <div style={{ padding: '12px 24px', borderBottom: '1px solid #f1f5f9' }}>
           <form onSubmit={handleSearchSubmit}>
@@ -397,6 +455,11 @@ export const PickingPage: React.FC = () => {
           }}
         />
       </div>
+
+      {scanTaskId !== null && (
+        <PickScanModal taskId={scanTaskId} canScan={canUpdate} onClose={() => setScanTaskId(null)} onChanged={handleScanChanged} />
+      )}
+      {waveId !== null && <PickWaveModal waveId={waveId} canScan={canUpdate} onClose={() => setWaveId(null)} onChanged={handleScanChanged} />}
 
       {/* Bulk Update Modal */}
       {bulkModalOpen && (

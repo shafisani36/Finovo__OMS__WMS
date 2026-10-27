@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Loader2, Plus, Trash2, X } from 'lucide-react';
 import { Alert } from '../common/Alert';
-import omsService, { WRITABLE_PLATFORMS } from '../../services/omsService';
+import omsService, { PRODUCT_PLATFORMS } from '../../services/omsService';
 import type { ProductDetail, ProductPayload, StoreModel } from '../../services/omsService';
 import { platformLabel } from '../stores/storePlatforms';
 import { useStoreList } from '../../hooks/useStoreList';
@@ -76,7 +76,7 @@ export const productPayload = (product: ProductDetail, overrides: Partial<Produc
   ...overrides,
 });
 
-const canWriteTo = (store: StoreModel) => store.connection_state === 'connected' && WRITABLE_PLATFORMS.includes(store.platform);
+const canWriteTo = (store: StoreModel) => store.connection_state === 'connected' && PRODUCT_PLATFORMS.includes(store.platform);
 
 interface Props {
   /** The product being edited; empty to add a new one. */

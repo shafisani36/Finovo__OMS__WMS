@@ -13,6 +13,7 @@ use App\Integrations\Authorization\WixAuthorization;
 use App\Integrations\ConnectorErrors;
 use App\Models\Store;
 use App\Services\StoreConnectionService;
+use App\Services\StoreWebhookService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -32,6 +33,7 @@ class StoreAuthorizationController extends Controller
         protected StoreConnectionService $connections,
         protected AuthorizationState $state,
         protected ConnectorErrors $errors,
+        protected StoreWebhookService $webhooks,
     ) {}
 
     public function shopifyCallback(Request $request, ShopifyAuthorization $shopify): RedirectResponse
@@ -247,6 +249,7 @@ class StoreAuthorizationController extends Controller
             'state' => ['required', 'string'],
             'webservice_key' => ['required', 'string', 'max:64'],
             'shop_url' => ['required', 'url', 'max:255'],
+            'notifications' => ['sometimes', 'boolean'],
         ]);
 
         return $this->completeModuleInstall(StorePlatform::PRESTASHOP, $validated, ['webservice_key' => $validated['webservice_key']]);
@@ -262,6 +265,7 @@ class StoreAuthorizationController extends Controller
             'api_key' => ['required', 'string', 'max:100'],
             'api_secret' => ['required', 'string', 'min:32', 'max:255'],
             'shop_url' => ['required', 'url', 'max:255'],
+            'notifications' => ['sometimes', 'boolean'],
         ]);
 
         return $this->completeModuleInstall(StorePlatform::OPENCART, $validated, [
@@ -272,9 +276,10 @@ class StoreAuthorizationController extends Controller
 
     /**
      * Save what a shop module sent and confirm Finovo can reach the shop with it.
-     * The module shows the returned message to the merchant.
+     * The module shows the returned message to the merchant. A module that can notify Finovo of changes gets the
+     * address to send them to (none while Finovo is not on a public HTTPS address).
      *
-     * @param  array{state: string, shop_url: string}  $validated
+     * @param  array{state: string, shop_url: string, notifications?: bool}  $validated
      * @param  array<string, string>  $credentials
      */
     private function completeModuleInstall(StorePlatform $platform, array $validated, array $credentials): JsonResponse
@@ -287,10 +292,14 @@ class StoreAuthorizationController extends Controller
             return response()->json(['status' => 'error', 'message' => $this->failure($platform, $e)], 403);
         }
 
+        // Recorded first: connecting switches on automatic import, which checks the module has this address.
+        $webhookUrl = ! empty($validated['notifications']) ? $this->webhooks->callbackUrl($store) : null;
+        $store->forceFill(['settings' => [...($store->settings ?? []), 'module_webhook_url' => $webhookUrl]])->save();
+
         $result = $this->connections->completeAuthorization($store, $credentials, $shopUrl);
 
         return response()->json(
-            ['status' => $result->successful ? 'success' : 'error', 'message' => $result->message],
+            ['status' => $result->successful ? 'success' : 'error', 'message' => $result->message, 'webhook_url' => $result->successful ? $webhookUrl : null],
             $result->successful ? 200 : 422,
         );
     }

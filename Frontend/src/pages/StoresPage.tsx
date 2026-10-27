@@ -13,7 +13,8 @@ import {
   PlugZap,
   ShieldCheck,
   Loader2,
-  Trash2
+  Trash2,
+  Download
 } from 'lucide-react';
 import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
@@ -27,7 +28,7 @@ import StoreConnectingOverlay from '../components/stores/StoreConnectingOverlay'
 import type { ConnectingMode } from '../components/stores/StoreConnectingOverlay';
 import { STORE_PLATFORMS, platformLabel } from '../components/stores/storePlatforms';
 import CustomDropdown from '../components/common/CustomDropdown';
-import omsService, { WRITABLE_PLATFORMS } from '../services/omsService';
+import omsService, { AUTO_IMPORT_PLATFORMS } from '../services/omsService';
 import type { StoreConnectionState, StoreModel, WarehouseModel } from '../services/omsService';
 import { useActiveStore } from '../hooks/useActiveStore';
 import { useAuth } from '../hooks/useAuth';
@@ -36,6 +37,8 @@ import { can } from '../types/auth';
 /** Platforms whose products and orders Finovo can import. */
 const SYNC_SUPPORTED = ['shopify', 'woocommerce', 'bigcommerce', 'prestashop', 'wix', 'ebay', 'magento', 'opencart', 'oscommerce'];
 const AUTHORIZED_ON_PLATFORM = ['shopify', 'woocommerce', 'bigcommerce', 'wix', 'ebay', 'prestashop', 'opencart'];
+/** Platforms connected through a Finovo module installed on the shop; a connected shop can install its latest version. */
+const MODULE_PLATFORMS = ['prestashop', 'opencart'];
 
 /** Labels and order of the statuses a store can show (the server sends the same list for the filter). */
 const CONNECTION_STATES: { value: StoreConnectionState; label: string }[] = [
@@ -357,8 +360,8 @@ export const StoresPage: React.FC = () => {
       key: 'auto_import',
       header: 'Auto Import',
       render: (row) => {
-        if (row.connection_state !== 'connected' || !WRITABLE_PLATFORMS.includes(row.platform)) {
-          return <span style={{ fontSize: 12, color: '#94a3b8' }} title="New orders arrive with the scheduled sync">Scheduled sync</span>;
+        if (row.connection_state !== 'connected' || !AUTO_IMPORT_PLATFORMS.includes(row.platform)) {
+          return <span style={{ fontSize: 12, color: '#94a3b8' }} title="New orders are imported every minute">Every minute</span>;
         }
         const webhooks = row.settings?.webhooks;
         if (webhooks?.status === 'active') {
@@ -410,6 +413,18 @@ export const StoresPage: React.FC = () => {
               >
                 {busy ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} color="#1e56ff" />}
                 <span>Test</span>
+              </button>
+            )}
+            {canConnect && row.status === 'active' && MODULE_PLATFORMS.includes(row.platform) && (
+              <button
+                onClick={() => handleAuthorize(row)}
+                className="btn-finovo-secondary"
+                style={{ padding: '6px 12px', fontSize: 12 }}
+                disabled={busy}
+                title={`Download the latest Finovo module and install it over the old one in ${platformLabel(row.platform)}`}
+              >
+                <Download size={14} color="#1e56ff" />
+                <span>Module</span>
               </button>
             )}
             {canSync && row.status === 'active' && SYNC_SUPPORTED.includes(row.platform) && (

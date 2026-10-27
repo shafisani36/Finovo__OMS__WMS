@@ -4,12 +4,17 @@ namespace App\Integrations\Push;
 
 use App\Integrations\Concerns\SendsPlatformRequests;
 use App\Models\Order;
+use App\Models\OrderItem;
+use App\Models\OrderReturn;
 use App\Models\Product;
 use App\Models\ProductVariant;
+use App\Models\Shipment;
 use App\Models\SkuMapping;
 use App\Models\Store;
 use App\Models\StoreProductLink;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
+use RuntimeException;
 
 /**
  * What every store writer shares: request handling and turning Finovo products and orders into the
@@ -76,6 +81,53 @@ abstract class PlatformWriter implements StoreWriter
     }
 
     /**
+     * The order's lines with the store's IDs for their variant and product (null for a product not on the store).
+     *
+     * @return list<array{item: OrderItem, variant: string|null, product: string|null}>
+     */
+    protected function storeLines(Store $store, Order $order): array
+    {
+        $order->loadMissing('items.variant');
+
+        return $order->items->map(fn (OrderItem $item) => [
+            'item' => $item,
+            'variant' => $this->variantExternalId($store, $item->product_variant_id),
+            'product' => $this->productExternalId($store, $item->variant?->product_id),
+        ])->values()->all();
+    }
+
+    /**
+     * storeLines() for stores that only sell their own products: a product not on the store stops the order.
+     *
+     * @return list<array{item: OrderItem, variant: string, product: string|null}>
+     *
+     * @throws RuntimeException
+     */
+    protected function requireStoreLines(Store $store, Order $order): array
+    {
+        $lines = $this->storeLines($store, $order);
+        $missing = array_map(fn (array $line) => $line['item']->product_name, array_filter($lines, fn (array $line) => $line['variant'] === null));
+
+        if ($missing) {
+            throw new RuntimeException(implode(', ', $missing).(count($missing) === 1 ? ' is' : ' are')." not on {$this->platform()}, so the order cannot be created there. Add the product to the store (or sync the store) first.");
+        }
+
+        return $lines;
+    }
+
+    /**
+     * @throws RuntimeException when the order has no email address
+     */
+    protected function requireEmail(Order $order): string
+    {
+        if (blank($order->customer_email)) {
+            throw new RuntimeException("{$this->platform()} needs the customer's email address to create an order. Add it to order {$order->order_number} and push it again.");
+        }
+
+        return (string) $order->customer_email;
+    }
+
+    /**
      * ["Sara", "Khan"] from "Sara Khan" (a single word is the last name, which stores require).
      *
      * @return array{0: string, 1: string}
@@ -85,6 +137,49 @@ abstract class PlatformWriter implements StoreWriter
         $parts = preg_split('/\s+/', trim((string) $name), 2) ?: [];
 
         return count($parts) === 2 ? [$parts[0], $parts[1]] : ['', $parts[0] ?? ''];
+    }
+
+    /**
+     * A Finovo order status as people read it: "partially_allocated" → "Partially allocated".
+     */
+    protected function statusLabel(string $status): string
+    {
+        return ucfirst(str_replace('_', ' ', $status));
+    }
+
+    /**
+     * "Shipped with TCS. Tracking number: 123. Track it here: https://…" for stores that show it as a note.
+     */
+    protected function trackingNote(Shipment $shipment): string
+    {
+        return implode(' ', array_filter([
+            $shipment->carrier ? "Shipped with {$shipment->carrier}." : 'Shipped.',
+            $shipment->tracking_number ? "Tracking number: {$shipment->tracking_number}." : null,
+            $shipment->trackingLink() ? "Track it here: {$shipment->trackingLink()}" : null,
+        ]));
+    }
+
+    /**
+     * "Return RMA-2026-0001 completed in Finovo: 1 × Classic Tee - M (sellable)."
+     */
+    protected function returnNote(OrderReturn $return): string
+    {
+        $items = $return->items()->get()->map(fn ($item) => "{$item->quantity} × {$item->product_name}")->implode(', ');
+        $condition = $return->disposition ? ' ('.str_replace('_', ' ', $return->disposition).')' : '';
+
+        return "Return {$return->return_number} completed in Finovo: {$items}{$condition}.";
+    }
+
+    /**
+     * A secret the store sends back with every notification, created once per store.
+     */
+    protected function webhookSecret(Store $store): string
+    {
+        if (blank($store->webhook_secret)) {
+            $store->forceFill(['webhook_secret' => Str::random(48)])->save();
+        }
+
+        return (string) $store->webhook_secret;
     }
 
     protected function amount(float|int|string|null $value): string

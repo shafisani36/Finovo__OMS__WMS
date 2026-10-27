@@ -3,44 +3,41 @@
 namespace App\Integrations\Push;
 
 use App\Models\Order;
-use App\Models\Product;
+use App\Models\OrderReturn;
+use App\Models\Shipment;
 use App\Models\Store;
 use RuntimeException;
 
 /**
- * Writes Finovo's changes to a connected store, so products and orders created or edited in Finovo
- * also change on the store, and registers the notifications (webhooks) that bring the store's own
- * changes into Finovo automatically.
+ * Keeps a connected store's orders and stock in line with Finovo: orders created in Finovo are created on the
+ * store, and every change Finovo makes (payment, warehouse progress, dispatch with tracking, delivery,
+ * cancellation, returns, available stock) is shown on the store too.
  *
  * Every method throws RuntimeException with a message the merchant understands when the store refuses.
  */
 interface StoreWriter
 {
     /**
-     * Create the product on the store (no external ID yet) or update the one it is linked to.
-     *
-     * @throws RuntimeException
-     */
-    public function saveProduct(Store $store, Product $product, ?string $externalId): PushedProduct;
-
-    /**
-     * @throws RuntimeException
-     */
-    public function deleteProduct(Store $store, string $externalId): void;
-
-    /**
-     * Create the order on the store; returns the store's ID for it.
+     * Create the order on the store with its customer, address, lines and payment; returns the store's ID for it.
      *
      * @throws RuntimeException
      */
     public function createOrder(Store $store, Order $order): string;
 
     /**
-     * Send the order's customer, address and note to the store.
+     * Send the order's customer details, address, note and payment to the store.
      *
      * @throws RuntimeException
      */
     public function updateOrder(Store $store, Order $order): void;
+
+    /**
+     * Show the warehouse progress of an order Finovo is preparing (allocated, picking, picked, packed: see
+     * Order::PROCESSING_STATUSES) in the store's own terms.
+     *
+     * @throws RuntimeException
+     */
+    public function updateStatus(Store $store, Order $order): void;
 
     /**
      * @throws RuntimeException
@@ -48,16 +45,32 @@ interface StoreWriter
     public function cancelOrder(Store $store, Order $order): void;
 
     /**
-     * Subscribe Finovo's address to the store's order and product notifications (missing ones only).
+     * Set the quantity the store shows as available for one variant.
      *
      * @throws RuntimeException
      */
-    public function registerWebhooks(Store $store, string $callbackUrl): void;
+    public function setStock(Store $store, LinkedVariant $variant, int $quantity): void;
 
     /**
-     * Remove Finovo's notification subscriptions from the store (when the store is removed from Finovo).
+     * Mark the order shipped on the store with the shipment's courier and tracking; returns the store's
+     * fulfillment or shipment ID when it gives one.
      *
      * @throws RuntimeException
      */
-    public function removeWebhooks(Store $store, string $callbackUrl): void;
+    public function fulfill(Store $store, Order $order, Shipment $shipment): ?string;
+
+    /**
+     * Report that a shipped order reached the customer.
+     *
+     * @throws RuntimeException
+     */
+    public function reportDelivered(Store $store, Order $order, Shipment $shipment): void;
+
+    /**
+     * Show a completed return (its items and their condition) on the store's order. Finovo does not move money:
+     * a refund is made on the store itself.
+     *
+     * @throws RuntimeException
+     */
+    public function reportReturn(Store $store, Order $order, OrderReturn $return): void;
 }

@@ -30,6 +30,7 @@ import {
 import { BarcodeLabel, BarcodeSettingsDialog } from '../components/barcode/BarcodeLabel';
 import MetricCard from '../components/common/MetricCard';
 import CustomDropdown from '../components/common/CustomDropdown';
+import DemandForecast from '../components/inventory/DemandForecast';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import omsService from '../services/omsService';
 import { useAuth } from '../hooks/useAuth';
@@ -1766,6 +1767,8 @@ export const InventoryPage: React.FC = () => {
                 </tbody>
               </table>
             </div>
+
+            <DemandForecast warehouseId={selectedWarehouseId !== 'all' ? Number(selectedWarehouseId) : undefined} />
           </div>
         )}
       </div>

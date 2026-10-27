@@ -35,8 +35,17 @@ export interface StoreModel {
   } | null;
 }
 
-/** Store platforms Finovo can write products and orders to (and receive automatic imports from). */
-export const WRITABLE_PLATFORMS: StorePlatform[] = ['shopify', 'woocommerce'];
+/** Store platforms whose orders, statuses and stock Finovo keeps up to date. */
+export const ORDER_PLATFORMS: StorePlatform[] = ['shopify', 'woocommerce', 'bigcommerce', 'prestashop', 'wix', 'ebay', 'magento', 'opencart', 'oscommerce'];
+
+/** Store platforms an order taken in Finovo can be created on (eBay orders are placed by buyers only). */
+export const ORDER_CREATE_PLATFORMS: StorePlatform[] = ORDER_PLATFORMS.filter((platform) => platform !== 'ebay');
+
+/** Store platforms whose catalog Finovo edits (products created, changed and deleted in Finovo). */
+export const PRODUCT_PLATFORMS: StorePlatform[] = ORDER_PLATFORMS;
+
+/** Store platforms that notify Finovo of new orders and product changes at once (the others are read every minute). */
+export const AUTO_IMPORT_PLATFORMS: StorePlatform[] = ['shopify', 'woocommerce', 'bigcommerce', 'prestashop', 'opencart', 'wix'];
 
 export type StoreConnectionState = 'connected' | 'awaiting_authorization' | 'setup_incomplete' | 'disconnected';
 
@@ -238,7 +247,168 @@ export interface PickingItem {
   status_label: string;
   warehouse: string;
   priority: string;
+  /** The open wave the order is picked in, if any. */
+  wave_number: string | null;
 }
+
+/** One order line on the scan screen, with the units scanned so far and the bin to pick from. */
+export interface PickLine {
+  order_item_id: number;
+  product_variant_id: number | null;
+  sku: string;
+  barcode: string | null;
+  name: string;
+  image_url: string | null;
+  quantity: number;
+  picked: number;
+  packed: number;
+  location: string | null;
+  /** False for a line without a Finovo product: it has no barcode and is checked by eye. */
+  scannable: boolean;
+}
+
+export interface PickScanTask {
+  id: number;
+  order_id: number;
+  order_number: string | null;
+  customer: string | null;
+  warehouse: string | null;
+  status: PickingItem['status'];
+  /** pick at the shelf, pack at the packing station, null once packed. */
+  stage: 'pick' | 'pack' | null;
+  wave_number: string | null;
+  units: number;
+  scanned: number;
+  lines: PickLine[];
+}
+
+export interface PickWaveSummary {
+  id: number;
+  wave_number: string;
+  warehouse: string | null;
+  orders: number;
+  created_at: string;
+}
+
+export interface PickWaveDetail {
+  id: number;
+  wave_number: string;
+  status: 'open' | 'completed' | 'cancelled';
+  warehouse: string | null;
+  created_by: string | null;
+  created_at: string;
+  units: number;
+  picked: number;
+  totes: { tote: number; task_id: number; order_number: string | null; customer: string | null; status: PickingItem['status'] }[];
+  /** One row per product in the order of the bins, with the units each tote takes. */
+  lines: {
+    product_variant_id: number;
+    sku: string;
+    name: string;
+    image_url: string | null;
+    location: string | null;
+    quantity: number;
+    picked: number;
+    totes: { tote: number; order_number: string | null; quantity: number; picked: number }[];
+  }[];
+}
+
+export interface DemandForecastRow {
+  warehouse_id: number;
+  warehouse_name: string | null;
+  product_variant_id: number;
+  product_name: string | null;
+  variant: string | null;
+  sku: string | null;
+  sold: number;
+  daily_rate: number;
+  available: number;
+  in_transit: number;
+  days_of_cover: number;
+  stockout_date: string;
+  lead_time_days: number;
+  suggested_quantity: number;
+  status: 'order_now' | 'order_soon' | 'healthy';
+}
+
+/** A 3PL client: a brand whose stock is kept and shipped, billed with its own rate card. */
+export interface ClientRates {
+  storage_per_unit_day: number;
+  receiving_per_unit: number;
+  order_fee: number;
+  additional_unit_fee: number;
+  return_fee: number;
+  monthly_minimum: number;
+}
+
+export interface ClientInput extends ClientRates {
+  name: string;
+  code: string;
+  contact_name: string | null;
+  email: string | null;
+  phone: string | null;
+  billing_address: string | null;
+  currency: string;
+  payment_terms_days: number;
+  is_active: boolean;
+  store_ids: number[];
+}
+
+export interface ClientModel extends Omit<ClientInput, 'store_ids'> {
+  id: number;
+  stores: { id: number; name: string; platform: string }[];
+  /** Total of issued, unpaid invoices. */
+  outstanding: number;
+  overdue_invoices: number;
+  /** Last day covered by an invoice that is not void. */
+  billed_until: string | null;
+}
+
+export interface BillingStore {
+  id: number;
+  name: string;
+  platform: string;
+  client_id: number | null;
+}
+
+export interface ClientInvoiceLine {
+  id?: number;
+  type: string;
+  description: string;
+  quantity: number;
+  rate: number;
+  amount: number;
+}
+
+export interface ClientCharges {
+  from: string;
+  to: string;
+  currency: string;
+  total: number;
+  lines: ClientInvoiceLine[];
+  activity: { unit_days: number; units_received: number; orders_shipped: number; units_shipped: number; additional_units: number; returns: number };
+}
+
+export interface ClientInvoiceModel {
+  id: number;
+  invoice_number: string;
+  client_id: number;
+  client: { id: number; name: string; code: string } | null;
+  status: 'draft' | 'issued' | 'paid' | 'void';
+  currency: string;
+  total: number;
+  notes: string | null;
+  period_start: string;
+  period_end: string;
+  due_date: string | null;
+  is_overdue: boolean;
+  issued_at: string | null;
+  paid_at: string | null;
+  created_at: string;
+  lines?: ClientInvoiceLine[];
+}
+
+export type MoneyByCurrency = { currency: string; amount: number }[];
 
 export interface ShipmentModel {
   id: number;
@@ -973,7 +1143,29 @@ export interface CustomerDetailModel {
   orders: CustomerOrderModel[];
 }
 
-export const omsService = {
+export /** Downloads a PDF from the API (with the signed-in user's token) under the name the server gives it. */
+const downloadPdf = async (path: string, fallbackName: string, failure: string) => {
+  const token = getAuthToken();
+  const response = await fetch(path, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.message || failure);
+  }
+  const filename = /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') ?? '')?.[1] ?? fallbackName;
+  const url = window.URL.createObjectURL(await response.blob());
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+};
+
+const omsService = {
   // Stores
   async getStores(params?: { search?: string; status?: string; platform?: string; page?: number; per_page?: number }) {
     const { data } = await apiClient.get('/stores', { params });
@@ -1009,6 +1201,12 @@ export const omsService = {
   async syncStore(storeId: number) {
     const { data } = await apiClient.post(`/stores/${storeId}/sync`);
     return data;
+  },
+
+  /** Import the store's new and changed orders (skipped by the server when it was read in the last minute). */
+  async syncStoreOrders(storeId: number): Promise<{ imported: boolean; orders_created: number; orders_updated: number }> {
+    const { data } = await apiClient.post(`/stores/${storeId}/sync-orders`);
+    return data.data;
   },
 
   // Warehouses
@@ -1361,6 +1559,12 @@ export const omsService = {
     return data;
   },
 
+  /** Sales speed, days of stock left and the quantity to order, per item and warehouse. */
+  async getDemandForecast(params: { warehouse_id?: number; days?: number; cover_days?: number }): Promise<{ data: DemandForecastRow[]; meta: { days: number; cover_days: number; order_now: number; order_soon: number } }> {
+    const { data } = await apiClient.get('/inventory/replenishment/forecast', { params });
+    return data;
+  },
+
   // Picking & Packing
   async getPickingTasks(params?: { store_id?: number; search?: string; status?: string; page?: number; per_page?: number }) {
     const { data } = await apiClient.get('/picking', { params });
@@ -1379,6 +1583,43 @@ export const omsService = {
 
   async bulkUpdatePickTasks(taskIds: number[], status: string) {
     const { data } = await apiClient.post('/picking/bulk-update', { task_ids: taskIds, status });
+    return data;
+  },
+
+  async getPickLines(taskId: number): Promise<PickScanTask> {
+    const { data } = await apiClient.get(`/picking/${taskId}/lines`);
+    return data.data;
+  },
+
+  /** Scan one unit of the order (picked, or checked again at packing). */
+  async scanPickUnit(taskId: number, code: string): Promise<{ message: string; completed: boolean; data: PickScanTask }> {
+    const { data } = await apiClient.post(`/picking/${taskId}/scan`, { code });
+    return data;
+  },
+
+  async getPickWaves(): Promise<PickWaveSummary[]> {
+    const { data } = await apiClient.get('/picking/waves');
+    return data.data;
+  },
+
+  async createPickWave(taskIds: number[]): Promise<{ message: string; data: PickWaveDetail }> {
+    const { data } = await apiClient.post('/picking/waves', { task_ids: taskIds });
+    return data;
+  },
+
+  async getPickWave(waveId: number): Promise<PickWaveDetail> {
+    const { data } = await apiClient.get(`/picking/waves/${waveId}`);
+    return data.data;
+  },
+
+  /** Scan one unit for a wave; the reply names the tote it goes into. */
+  async scanWaveUnit(waveId: number, code: string): Promise<{ message: string; tote: number; data: PickWaveDetail }> {
+    const { data } = await apiClient.post(`/picking/waves/${waveId}/scan`, { code });
+    return data;
+  },
+
+  async cancelPickWave(waveId: number): Promise<{ message: string }> {
+    const { data } = await apiClient.delete(`/picking/waves/${waveId}`);
     return data;
   },
 
@@ -1522,24 +1763,68 @@ export const omsService = {
 
   /** Downloads the order's invoice PDF; the order gets its invoice number the first time. */
   async downloadOrderInvoice(orderId: number, orderNumber: string) {
-    const token = getAuthToken();
-    const response = await fetch(`/api/v1/orders/${orderId}/invoice`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      credentials: 'include',
-    });
-    if (!response.ok) {
-      const body = await response.json().catch(() => null);
-      throw new Error(body?.message || 'Could not download the invoice.');
-    }
-    const filename = /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') ?? '')?.[1] ?? `Invoice-${orderNumber}.pdf`;
-    const url = window.URL.createObjectURL(await response.blob());
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.URL.revokeObjectURL(url);
+    await downloadPdf(`/api/v1/orders/${orderId}/invoice`, `Invoice-${orderNumber}.pdf`, 'Could not download the invoice.');
+  },
+
+  // 3PL billing
+  async getClients(): Promise<{ data: ClientModel[]; stores: BillingStore[] }> {
+    const { data } = await apiClient.get('/billing/clients');
+    return data;
+  },
+
+  async saveClient(input: ClientInput, clientId?: number): Promise<{ message: string; data: ClientModel }> {
+    const { data } = clientId ? await apiClient.put(`/billing/clients/${clientId}`, input) : await apiClient.post('/billing/clients', input);
+    return data;
+  },
+
+  async deleteClient(clientId: number): Promise<{ message: string }> {
+    const { data } = await apiClient.delete(`/billing/clients/${clientId}`);
+    return data;
+  },
+
+  /** What the client owes for a period so far (this month when no dates are given). */
+  async getClientCharges(clientId: number, params?: { from?: string; to?: string }): Promise<ClientCharges> {
+    const { data } = await apiClient.get(`/billing/clients/${clientId}/charges`, { params });
+    return data.data;
+  },
+
+  async getClientInvoices(params?: { client_id?: number; status?: string; page?: number; per_page?: number }): Promise<{
+    data: ClientInvoiceModel[];
+    meta: { current_page: number; last_page: number; per_page: number; total: number };
+    kpis: { outstanding: MoneyByCurrency; overdue: MoneyByCurrency; paid_this_month: MoneyByCurrency; drafts: number };
+  }> {
+    const { data } = await apiClient.get('/billing/invoices', { params });
+    return data;
+  },
+
+  async getClientInvoice(invoiceId: number): Promise<ClientInvoiceModel> {
+    const { data } = await apiClient.get(`/billing/invoices/${invoiceId}`);
+    return data.data;
+  },
+
+  async createClientInvoice(input: { client_id: number; period_start: string; period_end: string }): Promise<{ message: string; data: ClientInvoiceModel }> {
+    const { data } = await apiClient.post('/billing/invoices', input);
+    return data;
+  },
+
+  /** recalculate, issue, pay or void an invoice. */
+  async clientInvoiceAction(invoiceId: number, action: 'recalculate' | 'issue' | 'pay' | 'void'): Promise<{ message: string; data: ClientInvoiceModel }> {
+    const { data } = await apiClient.post(`/billing/invoices/${invoiceId}/${action}`);
+    return data;
+  },
+
+  async addClientInvoiceLine(invoiceId: number, line: { description: string; quantity: number; rate: number }): Promise<{ message: string; data: ClientInvoiceModel }> {
+    const { data } = await apiClient.post(`/billing/invoices/${invoiceId}/lines`, line);
+    return data;
+  },
+
+  async removeClientInvoiceLine(invoiceId: number, lineId: number): Promise<{ message: string; data: ClientInvoiceModel }> {
+    const { data } = await apiClient.delete(`/billing/invoices/${invoiceId}/lines/${lineId}`);
+    return data;
+  },
+
+  async downloadClientInvoice(invoiceId: number, invoiceNumber: string) {
+    await downloadPdf(`/api/v1/billing/invoices/${invoiceId}/pdf`, `${invoiceNumber}.pdf`, 'Could not download the invoice.');
   },
 
   /** Reserves stock for the order; without a warehouse the best-stocked linked warehouse is used. */
@@ -1555,6 +1840,12 @@ export const omsService = {
 
   async cancelOrder(orderId: number): Promise<{ message: string; push?: PushReport }> {
     const { data } = await apiClient.post(`/orders/${orderId}/cancel`);
+    return data;
+  },
+
+  /** Send the order to its store as it is now: created there if missing, then its payment, cancellation or shipments. */
+  async pushOrder(orderId: number): Promise<{ message: string }> {
+    const { data } = await apiClient.post(`/orders/${orderId}/push`);
     return data;
   },
 

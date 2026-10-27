@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Integrations\ConnectorErrors;
+use App\Integrations\Push\ProductWriter;
 use App\Integrations\Push\StoreWriter;
 use App\Integrations\Push\StoreWriterFactory;
 use App\Models\Order;
@@ -24,6 +25,7 @@ class StorePushService
     public function __construct(
         protected StoreWriterFactory $writers,
         protected ConnectorErrors $errors,
+        protected StoreSyncOutbox $outbox,
     ) {}
 
     /**
@@ -37,7 +39,7 @@ class StorePushService
         $report = new PushReport;
 
         foreach ($this->linkedStores($product)->concat($stores)->unique('id') as $store) {
-            $this->attempt($report, $store, 'product push', function (StoreWriter $writer) use ($store, $product) {
+            $this->attempt($report, $store, $this->writers->products($store), 'product push', function (ProductWriter $writer) use ($store, $product) {
                 $link = StoreProductLink::where('store_id', $store->id)->where('product_id', $product->id)->first();
                 $pushed = $writer->saveProduct($store, $product, $link?->external_id);
 
@@ -79,7 +81,7 @@ class StorePushService
         $report = new PushReport;
 
         foreach (StoreProductLink::where('product_id', $product->id)->with('store')->get() as $link) {
-            $this->attempt($report, $link->store, 'product delete', fn (StoreWriter $writer) => $writer->deleteProduct($link->store, $link->external_id));
+            $this->attempt($report, $link->store, $this->writers->products($link->store), 'product delete', fn (ProductWriter $writer) => $writer->deleteProduct($link->store, $link->external_id));
         }
 
         return $report;
@@ -93,10 +95,32 @@ class StorePushService
         $report = new PushReport;
 
         if ($order->store && ! $order->external_order_id) {
-            $this->attempt($report, $order->store, 'order push', function (StoreWriter $writer) use ($order) {
+            $this->attempt($report, $order->store, $this->writers->for($order->store), 'order push', function (StoreWriter $writer) use ($order) {
                 $order->forceFill(['external_order_id' => $writer->createOrder($order->store, $order)])->save();
             });
         }
+
+        return $report;
+    }
+
+    /**
+     * Put a Finovo order on its store (the Push action, for an order that is not there yet, e.g. its store was
+     * not connected when the order was taken): create it, then send the status it has reached since (the
+     * warehouse step, or its dispatched and delivered shipments with tracking). Orders already on their store
+     * need no push: every change is sent there automatically.
+     */
+    public function pushOrder(Order $order): PushReport
+    {
+        $report = new PushReport;
+        $order->loadMissing('store', 'items');
+
+        $this->attempt($report, $order->store, $this->writers->for($order->store), 'order push', function (StoreWriter $writer) use ($order) {
+            $order->forceFill(['external_order_id' => $writer->createOrder($order->store, $order)])->save();
+
+            in_array($order->order_status, Order::PROCESSING_STATUSES, true)
+                ? $writer->updateStatus($order->store, $order)
+                : $this->outbox->pushShipments($order, $writer);
+        });
 
         return $report;
     }
@@ -133,19 +157,22 @@ class StorePushService
         $report = new PushReport;
 
         if ($order->store && $order->external_order_id) {
-            $this->attempt($report, $order->store, $action, $call);
+            $this->attempt($report, $order->store, $this->writers->for($order->store), $action, $call);
         }
 
         return $report;
     }
 
     /**
-     * @param  Closure(StoreWriter): mixed  $call
+     * Run one store's part of a push and note the outcome; a store Finovo cannot write to is skipped.
+     *
+     * @template TWriter of object
+     *
+     * @param  TWriter|null  $writer
+     * @param  Closure(TWriter): mixed  $call
      */
-    private function attempt(PushReport $report, Store $store, string $action, Closure $call): void
+    private function attempt(PushReport $report, Store $store, ?object $writer, string $action, Closure $call): void
     {
-        $writer = $this->writers->for($store);
-
         if (! $writer) {
             $report->skipped[] = $store->name;
 

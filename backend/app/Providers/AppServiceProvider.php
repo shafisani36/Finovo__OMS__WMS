@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Services\AccessControl;
+use App\Services\StoreSyncOutbox;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Http\Request;
@@ -19,6 +20,8 @@ class AppServiceProvider extends ServiceProvider
     {
         // One per request, so each employee's permissions are worked out once per request and never kept longer.
         $this->app->scoped(AccessControl::class);
+        // Collects the store updates of one request so they are sent once, after the response.
+        $this->app->scoped(StoreSyncOutbox::class);
     }
 
     /**

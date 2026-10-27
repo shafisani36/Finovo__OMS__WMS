@@ -6,17 +6,20 @@ use App\Integrations\ShopifyClient;
 use App\Integrations\Sync\Data\OrderData;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\OrderReturn;
 use App\Models\Product;
 use App\Models\ProductVariant;
+use App\Models\Shipment;
 use App\Models\Store;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 /**
  * Writes products and orders to a Shopify shop through the GraphQL Admin API.
  */
-class ShopifyWriter extends PlatformWriter
+class ShopifyWriter extends PlatformWriter implements ProductWriter, WebhookSubscriber
 {
     /** Shopify notifications Finovo listens to. */
     public const WEBHOOK_TOPICS = ['ORDERS_CREATE', 'ORDERS_UPDATED', 'ORDERS_CANCELLED', 'PRODUCTS_CREATE', 'PRODUCTS_UPDATE', 'PRODUCTS_DELETE', 'APP_UNINSTALLED'];
@@ -131,18 +134,32 @@ class ShopifyWriter extends PlatformWriter
 
     public function updateOrder(Store $store, Order $order): void
     {
+        $orderId = ShopifyClient::gid('Order', (string) $order->external_order_id);
+
         $this->mutate($store, 'mutation($input: OrderInput!) {
             orderUpdate(input: $input) { order { id } userErrors { field message } }
         }', ['input' => array_filter([
-            'id' => ShopifyClient::gid('Order', (string) $order->external_order_id),
+            'id' => $orderId,
             'email' => $order->customer_email,
             'note' => (string) $order->notes,
             'shippingAddress' => $this->mailingAddress($this->deliveryAddress($order)),
         ], fn ($value) => $value !== null)], 'orderUpdate');
+
+        // Paid in Finovo (e.g. cash on delivery collected): the shop shows it as paid too.
+        if ($order->payment_status === 'paid' && ! in_array($this->orderState($store, $orderId)['displayFinancialStatus'] ?? null, ['PAID', 'PARTIALLY_REFUNDED', 'REFUNDED'], true)) {
+            $this->mutate($store, 'mutation($input: OrderMarkAsPaidInput!) {
+                orderMarkAsPaid(input: $input) { order { id } userErrors { field message } }
+            }', ['input' => ['id' => $orderId]], 'orderMarkAsPaid');
+        }
     }
 
     public function cancelOrder(Store $store, Order $order): void
     {
+        // Shopify refuses to cancel an order twice.
+        if ($this->orderState($store, ShopifyClient::gid('Order', (string) $order->external_order_id))['cancelledAt'] ?? null) {
+            return;
+        }
+
         $this->mutate($store, 'mutation($orderId: ID!, $reason: OrderCancelReason!, $restock: Boolean!, $staffNote: String) {
             orderCancel(orderId: $orderId, reason: $reason, restock: $restock, notifyCustomer: false, staffNote: $staffNote) {
                 orderCancelUserErrors { field message }
@@ -154,6 +171,158 @@ class ShopifyWriter extends PlatformWriter
             'restock' => false,
             'staffNote' => 'Cancelled in Finovo.',
         ], 'orderCancel', 'orderCancelUserErrors');
+    }
+
+    /**
+     * Shopify has no warehouse steps of its own, so the step is kept as a tag on the order ("Finovo: Packed").
+     */
+    public function updateStatus(Store $store, Order $order): void
+    {
+        $orderId = ShopifyClient::gid('Order', (string) $order->external_order_id);
+        $current = $this->statusTag($order->order_status);
+        $previous = array_values(array_diff(array_map(fn (string $status) => $this->statusTag($status), Order::PROCESSING_STATUSES), [$current]));
+
+        $this->mutate($store, 'mutation($id: ID!, $tags: [String!]!) { tagsRemove(id: $id, tags: $tags) { node { id } userErrors { field message } } }', [
+            'id' => $orderId,
+            'tags' => $previous,
+        ], 'tagsRemove');
+        $this->mutate($store, 'mutation($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { node { id } userErrors { field message } } }', [
+            'id' => $orderId,
+            'tags' => [$current],
+        ], 'tagsAdd');
+    }
+
+    public function setStock(Store $store, LinkedVariant $variant, int $quantity): void
+    {
+        $variantId = $variant->externalId;
+        $locationId = $this->locationId($store);
+        $item = $this->graphql($store, 'query($id: ID!, $location: ID!) {
+            productVariant(id: $id) { inventoryItem { id tracked inventoryLevel(locationId: $location) { id } } }
+        }', ['id' => ShopifyClient::gid('ProductVariant', $variantId), 'location' => $locationId])['productVariant']['inventoryItem'] ?? null;
+
+        if (! $item) {
+            throw new RuntimeException("Shopify has no variant {$variantId} any more; sync the store to refresh its products.");
+        }
+
+        // Shopify only keeps counts for tracked items stocked at the location.
+        if (! $item['tracked']) {
+            $this->mutate($store, 'mutation($id: ID!) { inventoryItemUpdate(id: $id, input: { tracked: true }) { inventoryItem { id } userErrors { field message } } }', [
+                'id' => $item['id'],
+            ], 'inventoryItemUpdate');
+        }
+        if (! $item['inventoryLevel']) {
+            $this->mutate($store, 'mutation($item: ID!, $location: ID!) { inventoryActivate(inventoryItemId: $item, locationId: $location) { inventoryLevel { id } userErrors { field message } } }', [
+                'item' => $item['id'],
+                'location' => $locationId,
+            ], 'inventoryActivate');
+        }
+
+        // Finovo is the stock authority, so the count is set without comparing it with Shopify's (changeFromQuantity: null).
+        $this->mutate($store, 'mutation($input: InventorySetQuantitiesInput!, $key: String!) {
+            inventorySetQuantities(input: $input) @idempotent(key: $key) { inventoryAdjustmentGroup { reason } userErrors { field message } }
+        }', [
+            'input' => [
+                'name' => 'available',
+                'reason' => 'correction',
+                'quantities' => [['inventoryItemId' => $item['id'], 'locationId' => $locationId, 'quantity' => $quantity, 'changeFromQuantity' => null]],
+            ],
+            'key' => (string) Str::uuid(),
+        ], 'inventorySetQuantities');
+    }
+
+    public function fulfill(Store $store, Order $order, Shipment $shipment): ?string
+    {
+        $openOrders = collect($this->graphql($store, 'query($id: ID!) { order(id: $id) { fulfillmentOrders(first: 20) { nodes { id status } } } }', [
+            'id' => ShopifyClient::gid('Order', (string) $order->external_order_id),
+        ])['order']['fulfillmentOrders']['nodes'] ?? [])->whereIn('status', ['OPEN', 'IN_PROGRESS']);
+
+        // Already fulfilled on Shopify (for example by hand): nothing left to send.
+        if ($openOrders->isEmpty()) {
+            return null;
+        }
+
+        $result = $this->mutate($store, 'mutation($fulfillment: FulfillmentInput!) {
+            fulfillmentCreate(fulfillment: $fulfillment) { fulfillment { legacyResourceId } userErrors { field message } }
+        }', ['fulfillment' => [
+            'lineItemsByFulfillmentOrder' => $openOrders->map(fn (array $fulfillmentOrder) => ['fulfillmentOrderId' => $fulfillmentOrder['id']])->values()->all(),
+            'notifyCustomer' => true,
+            'trackingInfo' => array_filter([
+                'company' => $shipment->carrier,
+                'number' => $shipment->tracking_number,
+                'url' => $shipment->trackingLink(),
+            ]),
+        ]], 'fulfillmentCreate');
+
+        return isset($result['fulfillment']['legacyResourceId']) ? (string) $result['fulfillment']['legacyResourceId'] : null;
+    }
+
+    public function reportDelivered(Store $store, Order $order, Shipment $shipment): void
+    {
+        if (! $shipment->store_fulfillment_id) {
+            return;
+        }
+
+        $this->mutate($store, 'mutation($event: FulfillmentEventInput!) {
+            fulfillmentEventCreate(fulfillmentEvent: $event) { fulfillmentEvent { id } userErrors { field message } }
+        }', ['event' => ['fulfillmentId' => ShopifyClient::gid('Fulfillment', $shipment->store_fulfillment_id), 'status' => 'DELIVERED']], 'fulfillmentEventCreate');
+    }
+
+    private function statusTag(string $status): string
+    {
+        return 'Finovo: '.$this->statusLabel($status);
+    }
+
+    /**
+     * The shop's payment and cancellation state of an order.
+     *
+     * @return array{displayFinancialStatus?: string, cancelledAt?: string|null}
+     */
+    private function orderState(Store $store, string $orderId): array
+    {
+        $order = $this->graphql($store, 'query($id: ID!) { order(id: $id) { displayFinancialStatus cancelledAt } }', ['id' => $orderId])['order'] ?? null;
+
+        if (! $order) {
+            throw new RuntimeException('Shopify has no such order any more; it may have been deleted on the shop.');
+        }
+
+        return $order;
+    }
+
+    /**
+     * The return is added to the order's note (Shopify's own returns and refunds move money, which Finovo leaves to the shop).
+     */
+    public function reportReturn(Store $store, Order $order, OrderReturn $return): void
+    {
+        $orderId = ShopifyClient::gid('Order', (string) $order->external_order_id);
+        $note = $this->graphql($store, 'query($id: ID!) { order(id: $id) { note } }', ['id' => $orderId])['order']['note'] ?? '';
+
+        $this->mutate($store, 'mutation($input: OrderInput!) { orderUpdate(input: $input) { order { id } userErrors { field message } } }', ['input' => [
+            'id' => $orderId,
+            'note' => trim($note."\n".$this->returnNote($return)),
+        ]], 'orderUpdate');
+    }
+
+    /**
+     * The shop location Finovo's stock is published to: the first active location, remembered on the store.
+     */
+    private function locationId(Store $store): string
+    {
+        if ($id = $store->settings['sync']['shopify_location_id'] ?? null) {
+            return $id;
+        }
+
+        $location = collect($this->graphql($store, 'query { locations(first: 20) { nodes { id name isActive } } }')['locations']['nodes'] ?? [])
+            ->firstWhere('isActive', true);
+
+        if (! $location) {
+            throw new RuntimeException('Shopify has no active location to keep stock at. Add one in Shopify → Settings → Locations.');
+        }
+
+        $settings = $store->settings ?? [];
+        $settings['sync'] = [...($settings['sync'] ?? []), 'shopify_location_id' => $location['id'], 'shopify_location_name' => $location['name']];
+        $store->forceFill(['settings' => $settings])->save();
+
+        return $location['id'];
     }
 
     public function registerWebhooks(Store $store, string $callbackUrl): void

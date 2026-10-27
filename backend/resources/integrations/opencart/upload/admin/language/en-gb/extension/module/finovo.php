@@ -6,7 +6,7 @@ $_['heading_title']         = 'Finovo OMS Connector';
 $_['text_extension']        = 'Extensions';
 $_['text_edit']             = 'Finovo Connection';
 $_['text_success']          = 'This shop is connected to Finovo.';
-$_['text_connected']        = 'Connected. Finovo can read orders and products from this shop.';
+$_['text_connected']        = 'Connected. Finovo reads orders and products, and updates orders, statuses and stock in this shop.';
 $_['text_not_connected']    = 'Not connected.';
 
 // Button

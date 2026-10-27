@@ -4,16 +4,45 @@
  *
  * Installing the module (Extensions → Modules → Install) creates an API key and secret for Finovo and sends them
  * to the Finovo store that generated this download. Finovo then calls catalog/controller/extension/finovo/api.php
- * with requests signed by that secret.
+ * with requests signed by that secret, and the module tells Finovo the moment an order or product changes.
  */
 class ControllerExtensionModuleFinovo extends Controller {
+	/** Shop events Finovo is told about: code => [trigger, action]. */
+	const EVENTS = array(
+		'finovo_order' => array('catalog/model/checkout/order/addOrderHistory/after', 'extension/finovo/notify/order'),
+		'finovo_product_add' => array('admin/model/catalog/product/addProduct/after', 'extension/module/finovo/productSaved'),
+		'finovo_product_edit' => array('admin/model/catalog/product/editProduct/after', 'extension/module/finovo/productSaved'),
+		'finovo_product_delete' => array('admin/model/catalog/product/deleteProduct/after', 'extension/module/finovo/productDeleted'),
+	);
+
 	public function install() {
 		$this->connect();
 	}
 
 	public function uninstall() {
 		$this->load->model('setting/setting');
+		$this->load->model('setting/event');
 		$this->model_setting_setting->deleteSetting('module_finovo');
+
+		foreach (array_keys(self::EVENTS) as $code) {
+			$this->model_setting_event->deleteEventByCode($code);
+		}
+	}
+
+	/**
+	 * Event: a product was added or edited in the admin.
+	 */
+	public function productSaved(&$route, &$args, &$output) {
+		$productId = substr($route, -strlen('addProduct')) === 'addProduct' ? (int)$output : (int)($args[0] ?? 0);
+
+		\Finovo\Notifier::send($this->config, 'product.updated', $productId);
+	}
+
+	/**
+	 * Event: a product was deleted in the admin.
+	 */
+	public function productDeleted(&$route, &$args, &$output) {
+		\Finovo\Notifier::send($this->config, 'product.deleted', (int)($args[0] ?? 0));
 	}
 
 	public function index() {
@@ -95,6 +124,7 @@ class ControllerExtensionModuleFinovo extends Controller {
 			'api_key' => $apiKey,
 			'api_secret' => $apiSecret,
 			'shop_url' => $this->shopUrl(),
+			'notifications' => true,
 		));
 
 		if (!$response['ok']) {
@@ -105,7 +135,28 @@ class ControllerExtensionModuleFinovo extends Controller {
 			return $restored['module_finovo_error'];
 		}
 
+		$this->model_setting_setting->editSetting('module_finovo', array(
+			'module_finovo_status' => 1,
+			'module_finovo_api_key' => $apiKey,
+			'module_finovo_api_secret' => $apiSecret,
+			'module_finovo_webhook_url' => $response['webhook_url'],
+			'module_finovo_error' => '',
+		));
+		$this->registerEvents();
+
 		return null;
+	}
+
+	/**
+	 * (Re)register the events that notify Finovo, so "Connect again" after an upgrade switches them on.
+	 */
+	private function registerEvents() {
+		$this->load->model('setting/event');
+
+		foreach (self::EVENTS as $code => $event) {
+			$this->model_setting_event->deleteEventByCode($code);
+			$this->model_setting_event->addEvent($code, $event[0], $event[1]);
+		}
 	}
 
 	/**
@@ -141,7 +192,7 @@ class ControllerExtensionModuleFinovo extends Controller {
 	}
 
 	/**
-	 * @return array ok (bool) and message (string)
+	 * @return array ok (bool), message (string) and webhook_url (string)
 	 */
 	private function post($url, array $payload) {
 		if (!function_exists('curl_init')) {
@@ -172,7 +223,8 @@ class ControllerExtensionModuleFinovo extends Controller {
 		$json = json_decode($body, true);
 		$message = (is_array($json) && isset($json['message'])) ? (string)$json['message'] : 'HTTP ' . $status;
 		$ok = $status >= 200 && $status < 300 && is_array($json) && isset($json['status']) && $json['status'] === 'success';
+		$webhookUrl = (is_array($json) && !empty($json['webhook_url'])) ? (string)$json['webhook_url'] : '';
 
-		return array('ok' => $ok, 'message' => $message);
+		return array('ok' => $ok, 'message' => $message, 'webhook_url' => $webhookUrl);
 	}
 }

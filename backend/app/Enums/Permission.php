@@ -65,6 +65,10 @@ enum Permission: string
     case PURCHASING_ORDER = 'purchasing.order';
     case PURCHASING_RECEIVE = 'purchasing.receive';
 
+    // 3PL billing
+    case BILLING_VIEW = 'billing.view';
+    case BILLING_MANAGE = 'billing.manage';
+
     // Settings
     case SETTINGS_BARCODE = 'settings.barcode';
 
@@ -79,6 +83,7 @@ enum Permission: string
             'products', 'inventory' => 'Products & Inventory',
             'picking', 'shipments', 'returns' => 'Fulfillment',
             'purchasing' => 'Purchasing',
+            'billing' => 'Billing',
             'settings' => 'Settings',
         };
     }
@@ -128,6 +133,8 @@ enum Permission: string
             self::PURCHASING_APPROVE => 'Approve or reject requisitions',
             self::PURCHASING_ORDER => 'Create, issue and cancel purchase orders',
             self::PURCHASING_RECEIVE => 'Receive goods (GRN)',
+            self::BILLING_VIEW => 'View clients and their invoices',
+            self::BILLING_MANAGE => 'Manage clients, rate cards and invoices',
             self::SETTINGS_BARCODE => 'Change barcode label settings',
         };
     }

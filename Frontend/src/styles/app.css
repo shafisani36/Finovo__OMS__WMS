@@ -2772,3 +2772,60 @@ a.btn-finovo-secondary {
   font-size: 13px;
   box-shadow: none;
 }
+
+/* Row actions: three-dot button and the menu it opens (RowActionsMenu) */
+.row-actions-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.row-actions-trigger:hover,
+.row-actions-trigger[aria-expanded='true'] {
+  background: #f1f5f9;
+  border-color: var(--finovo-border);
+  color: #0f172a;
+}
+
+.row-actions-menu {
+  position: fixed;
+  z-index: 1000;
+  padding: 6px;
+  background: #ffffff;
+  border: 1px solid var(--finovo-border);
+  border-radius: 12px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+}
+
+.row-actions-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: #334155;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row-actions-item:hover,
+.row-actions-item:focus-visible {
+  background: #f8fafc;
+  outline: none;
+}
+
+.row-actions-item.is-danger {
+  color: #b91c1c;
+}

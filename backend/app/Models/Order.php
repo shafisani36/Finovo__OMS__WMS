@@ -19,6 +19,9 @@ class Order extends Model
     /** Orders in these statuses can (re)try reserving stock. */
     public const ALLOCATABLE_STATUSES = ['imported', 'pending', 'partially_allocated', 'exception'];
 
+    /** Orders the warehouse is preparing; each step is shown on the order's store. */
+    public const PROCESSING_STATUSES = ['allocated', 'partially_allocated', 'picking', 'picked', 'packed'];
+
     /** Orders in these statuses have left the warehouse and can no longer be cancelled. */
     public const SHIPPED_STATUSES = ['partially_shipped', 'shipped', 'delivered', 'returned'];
 

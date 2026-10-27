@@ -3,12 +3,14 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Integrations\Push\StoreWriterFactory;
 use App\Models\Order;
 use App\Models\Store;
 use App\Services\AccessControl;
 use App\Services\InvoiceService;
 use App\Services\OrderAllocationEngine;
 use App\Services\OrderService;
+use App\Services\StorePushService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -175,6 +177,42 @@ class OrderController extends Controller
             'message' => trim("Order {$order->order_number} was cancelled and its reserved stock released. ".$report->message('cancelled')),
             'data' => $order->fresh(),
             'push' => $report->toArray(),
+        ]);
+    }
+
+    /**
+     * Put an order taken in Finovo on its store, with the status it has reached. Orders already on their store
+     * (imported from it, or sent before) are kept in step automatically, so they are not pushed.
+     */
+    public function push(Request $request, Order $order, StorePushService $push, StoreWriterFactory $writers): JsonResponse
+    {
+        $this->ensureSameOrganization($request, $order);
+        $store = $order->store;
+
+        $refusal = match (true) {
+            ! $store => "Order {$order->order_number} has no store. Edit it and choose its store first.",
+            ! $writers->for($store) => $store->isConnected()
+                ? "{$store->name} is a {$store->platform->label()}, which keeps its orders in Finovo only."
+                : "{$store->name} is not connected. Connect it on the Stores page first.",
+            (bool) $order->external_order_id => "Order {$order->order_number} is already on {$store->name}; its status, shipments and cancellation are sent there automatically.",
+            $order->order_status === 'cancelled' => "Order {$order->order_number} is cancelled and was never on {$store->name}, so there is nothing to send.",
+            default => null,
+        };
+
+        if ($refusal) {
+            return response()->json(['status' => 'error', 'message' => $refusal], 422);
+        }
+
+        $report = $push->pushOrder($order);
+
+        if ($report->hasFailures()) {
+            return response()->json(['status' => 'error', 'message' => "Order {$order->order_number} could not be sent to {$store->name}: ".$report->failed[$store->name]], 422);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Order {$order->order_number} was sent to {$store->name} with its current status (".str_replace('_', ' ', $order->order_status).').',
+            'data' => $order->fresh(['store']),
         ]);
     }
 

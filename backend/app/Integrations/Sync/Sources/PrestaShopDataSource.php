@@ -2,6 +2,7 @@
 
 namespace App\Integrations\Sync\Sources;
 
+use App\Integrations\Sync\Contracts\FetchesSingleRecords;
 use App\Integrations\Sync\Data\OrderData;
 use App\Integrations\Sync\Data\OrderLineData;
 use App\Integrations\Sync\Data\ProductData;
@@ -16,7 +17,7 @@ use RuntimeException;
 /**
  * Reads products, combinations, stock and orders through the PrestaShop webservice (JSON output).
  */
-class PrestaShopDataSource extends HttpDataSource
+class PrestaShopDataSource extends HttpDataSource implements FetchesSingleRecords
 {
     private const PRODUCTS_PER_PAGE = 50;
 
@@ -62,6 +63,20 @@ class PrestaShopDataSource extends HttpDataSource
                 return;
             }
         }
+    }
+
+    public function product(Store $store, string $externalId): ?ProductData
+    {
+        $product = $this->list($store, 'products', ['filter[id]' => '['.(int) $externalId.']'])[0] ?? null;
+
+        return $product ? $this->toProduct($store, $product) : null;
+    }
+
+    public function order(Store $store, string $externalId): ?OrderData
+    {
+        $order = $this->list($store, 'orders', ['filter[id]' => '['.(int) $externalId.']'])[0] ?? null;
+
+        return $order ? $this->toOrder($store, $order) : null;
     }
 
     /**

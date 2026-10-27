@@ -10,3 +10,9 @@ Artisan::command('inspire', function () {
 
 // Keep store products and orders current (needs the scheduler cron and a queue worker on the server)
 Schedule::command('stores:sync')->everyFifteenMinutes()->withoutOverlapping();
+
+// New and changed store orders, every minute (stores that notify Finovo send them at once as well)
+Schedule::command('stores:import-orders')->everyMinute()->withoutOverlapping();
+
+// Send stock and shipment updates to stores, and retry failed ones (also sent right after each change)
+Schedule::command('stores:push-updates')->everyMinute()->withoutOverlapping();

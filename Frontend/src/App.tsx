@@ -21,6 +21,7 @@ import { InventoryPage } from './pages/InventoryPage';
 import { ShipmentsPage } from './pages/ShipmentsPage';
 import { ReturnsPage } from './pages/ReturnsPage';
 import { CustomersPage } from './pages/CustomersPage';
+import { BillingPage } from './pages/BillingPage';
 import { EmployeesPage } from './pages/EmployeesPage';
 import { ProductDetailPage } from './pages/ProductDetailPage';
 import { CustomerDetailPage } from './pages/CustomerDetailPage';
@@ -142,6 +143,7 @@ export const App: React.FC = () => {
             <Route path="/stock-movements" element={<RequirePermission permission="inventory.view"><StockMovementsPage /></RequirePermission>} />
             <Route path="/returns" element={<RequirePermission permission="returns.view"><ReturnsPage /></RequirePermission>} />
             <Route path="/customers" element={<RequirePermission permission="customers.view"><CustomersPage /></RequirePermission>} />
+            <Route path="/billing" element={<RequirePermission permission="billing.view"><BillingPage /></RequirePermission>} />
             <Route path="/employees" element={<RequirePermission permission="employees.view"><EmployeesPage /></RequirePermission>} />
             <Route path="/customers/:id" element={<RequirePermission permission="customers.view"><CustomerDetailPage /></RequirePermission>} />
             <Route path="/change-password" element={<ChangePasswordPage />} />

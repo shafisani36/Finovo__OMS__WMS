@@ -23,11 +23,13 @@ class PickTask extends Model
         'organization_id',
         'order_id',
         'warehouse_id',
+        'pick_wave_id',
         'status',
         'assigned_to_user_id',
         'items_count',
         'priority',
         'notes',
+        'scan_progress',
         'started_at',
         'completed_at',
     ];
@@ -36,6 +38,7 @@ class PickTask extends Model
     {
         return [
             'items_count' => 'integer',
+            'scan_progress' => 'array',
             'started_at' => 'datetime',
             'completed_at' => 'datetime',
         ];
@@ -54,6 +57,11 @@ class PickTask extends Model
     public function warehouse(): BelongsTo
     {
         return $this->belongsTo(Warehouse::class);
+    }
+
+    public function wave(): BelongsTo
+    {
+        return $this->belongsTo(PickWave::class, 'pick_wave_id');
     }
 
     public function assignedUser(): BelongsTo
@@ -78,6 +86,16 @@ class PickTask extends Model
         }
 
         return DB::transaction(function () use ($status, $user) {
+            // Moving back undoes the scans of the stages being repeated (back before packed: packing scans,
+            // back before picked: all scans).
+            $from = array_search($this->status, self::STATUSES, true);
+            $to = array_search($status, self::STATUSES, true);
+            if ($from !== false && $to !== false && $to < $from) {
+                $this->scan_progress = $to < array_search('picked', self::STATUSES, true)
+                    ? null
+                    : array_filter(['pick' => $this->scan_progress['pick'] ?? null]);
+            }
+
             $this->status = $status;
 
             if ($status === 'in_progress' && ! $this->started_at) {

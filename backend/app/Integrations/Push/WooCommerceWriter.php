@@ -6,17 +6,18 @@ use App\Integrations\Sync\Data\OrderData;
 use App\Integrations\WooCommerceClient;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\OrderReturn;
 use App\Models\Product;
 use App\Models\ProductVariant;
+use App\Models\Shipment;
 use App\Models\Store;
 use Illuminate\Http\Client\Response;
-use Illuminate\Support\Str;
 use RuntimeException;
 
 /**
  * Writes products and orders to a WooCommerce store through its REST API (wc/v3).
  */
-class WooCommerceWriter extends PlatformWriter
+class WooCommerceWriter extends PlatformWriter implements ProductWriter, WebhookSubscriber
 {
     /** WooCommerce notifications Finovo listens to. */
     public const WEBHOOK_TOPICS = ['order.created', 'order.updated', 'order.deleted', 'product.created', 'product.updated', 'product.deleted'];
@@ -110,16 +111,64 @@ class WooCommerceWriter extends PlatformWriter
 
     public function updateOrder(Store $store, Order $order): void
     {
-        $this->call(fn () => $this->client->put($store, "orders/{$order->external_order_id}", [
+        $this->call(fn () => $this->client->put($store, "orders/{$order->external_order_id}", array_filter([
             'customer_note' => (string) $order->notes,
             'billing' => $this->address($order->billing_address ?: $this->deliveryAddress($order), $order->customer_email),
             'shipping' => $this->address($this->deliveryAddress($order)),
-        ]));
+            // Records the payment only on an unpaid order (WooCommerce moves it to "processing").
+            'set_paid' => $order->payment_status === 'paid' ? true : null,
+        ], fn ($value) => $value !== null)));
     }
 
     public function cancelOrder(Store $store, Order $order): void
     {
         $this->call(fn () => $this->client->put($store, "orders/{$order->external_order_id}", ['status' => 'cancelled']));
+    }
+
+    /**
+     * WooCommerce has one status for an order being prepared ("Processing"); the warehouse step is added as a
+     * private order note.
+     */
+    public function updateStatus(Store $store, Order $order): void
+    {
+        $this->call(fn () => $this->client->put($store, "orders/{$order->external_order_id}", ['status' => 'processing']));
+        $this->call(fn () => $this->client->post($store, "orders/{$order->external_order_id}/notes", [
+            'note' => 'Finovo: '.$this->statusLabel($order->order_status).'.',
+            'customer_note' => false,
+        ]));
+    }
+
+    public function setStock(Store $store, LinkedVariant $variant, int $quantity): void
+    {
+        $stock = ['manage_stock' => true, 'stock_quantity' => $quantity];
+        $productId = $variant->productExternalId;
+
+        // A simple product is its own variant; a variation is updated under its parent product.
+        $path = $productId && $productId !== $variant->externalId ? "products/{$productId}/variations/{$variant->externalId}" : "products/{$variant->externalId}";
+        $this->call(fn () => $this->client->put($store, $path, $stock));
+    }
+
+    public function fulfill(Store $store, Order $order, Shipment $shipment): ?string
+    {
+        $tracking = $this->trackingNote($shipment);
+
+        $this->call(fn () => $this->client->put($store, "orders/{$order->external_order_id}", ['status' => 'completed']));
+        $this->call(fn () => $this->client->post($store, "orders/{$order->external_order_id}/notes", ['note' => $tracking, 'customer_note' => true]));
+
+        return null;
+    }
+
+    public function reportDelivered(Store $store, Order $order, Shipment $shipment): void
+    {
+        // WooCommerce has no delivered state beyond "completed", which the order got when it shipped.
+    }
+
+    /**
+     * A private order note; a refund (which moves money) is made in WooCommerce itself.
+     */
+    public function reportReturn(Store $store, Order $order, OrderReturn $return): void
+    {
+        $this->call(fn () => $this->client->post($store, "orders/{$order->external_order_id}/notes", ['note' => $this->returnNote($return), 'customer_note' => false]));
     }
 
     public function registerWebhooks(Store $store, string $callbackUrl): void
@@ -149,18 +198,6 @@ class WooCommerceWriter extends PlatformWriter
         foreach ($ours as $webhook) {
             $this->send(fn () => $this->client->delete($store, "webhooks/{$webhook['id']}", ['force' => 'true']), [404]);
         }
-    }
-
-    /**
-     * The secret WooCommerce signs notifications with; created once per store.
-     */
-    private function webhookSecret(Store $store): string
-    {
-        if (blank($store->webhook_secret)) {
-            $store->forceFill(['webhook_secret' => Str::random(48)])->save();
-        }
-
-        return (string) $store->webhook_secret;
     }
 
     /**

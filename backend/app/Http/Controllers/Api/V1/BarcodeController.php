@@ -5,9 +5,9 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\ProductVariant;
+use App\Services\BarcodeLookup;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 /**
@@ -29,8 +29,9 @@ class BarcodeController extends Controller
         'embed_details' => true,
     ];
 
-    /** Labels can carry details after the code ("SKU-1 | Desk Lamp | Price 25.00"); lookups use the code. */
-    private const DETAILS_SEPARATOR = ' | ';
+    public function __construct(
+        protected BarcodeLookup $lookup
+    ) {}
 
     public function settings(Request $request): JsonResponse
     {
@@ -65,9 +66,7 @@ class BarcodeController extends Controller
      */
     public function scan(Request $request): JsonResponse
     {
-        $scanned = (string) $request->validate(['code' => 'required|string|max:2000'])['code'];
-        // Label QR codes carry the code on the first line and details below; older labels used "CODE | details".
-        $code = trim(Str::before(strtok($scanned, "\r\n") ?: $scanned, self::DETAILS_SEPARATOR));
+        $code = $this->lookup->code((string) $request->validate(['code' => 'required|string|max:2000'])['code']);
         $orgId = $request->user()->currentOrganization()->id;
 
         $order = Order::where('organization_id', $orgId)
@@ -82,12 +81,7 @@ class BarcodeController extends Controller
             return response()->json(['status' => 'success', 'type' => 'order', 'data' => $order->fulfillmentSummary()]);
         }
 
-        $variant = ProductVariant::where('organization_id', $orgId)
-            ->where(fn ($q) => $q->where('sku', $code)
-                ->orWhere('barcode', $code)
-                ->orWhereHas('product', fn ($p) => $p->where('sku', $code)->orWhere('barcode', $code)))
-            ->with(['product', 'balances.warehouse'])
-            ->first();
+        $variant = $this->lookup->variant($orgId, $code)?->load(['product', 'balances.warehouse']);
 
         if ($variant) {
             return response()->json(['status' => 'success', 'type' => 'product', 'data' => $this->presentVariant($variant)]);

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Loader2, Search, Trash2, X } from 'lucide-react';
 import { Alert } from '../common/Alert';
 import CustomDropdown from '../common/CustomDropdown';
-import omsService, { WRITABLE_PLATFORMS } from '../../services/omsService';
+import omsService, { ORDER_CREATE_PLATFORMS } from '../../services/omsService';
 import type { OrderModel, OrderPayload, ProductModel } from '../../services/omsService';
 import { platformLabel } from '../stores/storePlatforms';
 import { useStoreList } from '../../hooks/useStoreList';
@@ -240,7 +240,7 @@ export const OrderFormModal: React.FC<Props> = ({ order, onClose, onSaved }) => 
                     value: String(store.id),
                     label: store.name,
                     description:
-                      store.connection_state === 'connected' && WRITABLE_PLATFORMS.includes(store.platform)
+                      store.connection_state === 'connected' && ORDER_CREATE_PLATFORMS.includes(store.platform)
                         ? `Also created on ${platformLabel(store.platform)}`
                         : `${platformLabel(store.platform)}: kept in Finovo only`,
                   })),
@@ -379,7 +379,7 @@ export const OrderFormModal: React.FC<Props> = ({ order, onClose, onSaved }) => 
             <textarea className="cf-input" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} placeholder="Delivery instructions or anything the team should know" />
           </label>
 
-          {chosenStore && !onStore && !(chosenStore.connection_state === 'connected' && WRITABLE_PLATFORMS.includes(chosenStore.platform)) && (
+          {chosenStore && !onStore && !(chosenStore.connection_state === 'connected' && ORDER_CREATE_PLATFORMS.includes(chosenStore.platform)) && (
             <div className="cf-note">{chosenStore.name} cannot take orders from Finovo, so this order stays in Finovo only.</div>
           )}
         </div>

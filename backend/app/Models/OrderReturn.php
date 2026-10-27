@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\StoreSyncOutbox;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -18,6 +19,16 @@ class OrderReturn extends Model
     public const DISPOSITIONS = ['sellable', 'damaged', 'quarantine', 'disposed'];
 
     protected $table = 'returns';
+
+    protected static function booted(): void
+    {
+        // A completed return is noted on the order's store.
+        static::saved(function (OrderReturn $return) {
+            if ($return->wasChanged('status') && $return->status === 'completed') {
+                app(StoreSyncOutbox::class)->returnCompleted($return);
+            }
+        });
+    }
 
     protected $fillable = [
         'organization_id',

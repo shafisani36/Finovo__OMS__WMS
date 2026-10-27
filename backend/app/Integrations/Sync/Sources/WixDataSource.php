@@ -3,6 +3,7 @@
 namespace App\Integrations\Sync\Sources;
 
 use App\Integrations\Authorization\WixAuthorization;
+use App\Integrations\Sync\Contracts\FetchesSingleRecords;
 use App\Integrations\Sync\Data\OrderData;
 use App\Integrations\Sync\Data\OrderLineData;
 use App\Integrations\Sync\Data\ProductData;
@@ -16,7 +17,7 @@ use Illuminate\Support\Facades\Http;
 /**
  * Reads products (Stores catalog V3), inventory items and eCommerce orders of a Wix site.
  */
-class WixDataSource extends HttpDataSource
+class WixDataSource extends HttpDataSource implements FetchesSingleRecords
 {
     private const API = 'https://www.wixapis.com/';
 
@@ -84,6 +85,20 @@ class WixDataSource extends HttpDataSource
             // With a cursor Wix only accepts the cursor itself; filter and sort are carried inside it.
             $search = ['cursorPaging' => ['limit' => self::PAGE_SIZE, 'cursor' => $next]];
         }
+    }
+
+    public function product(Store $store, string $externalId): ?ProductData
+    {
+        $response = $this->send(fn () => $this->api($store)->get("stores/v3/products/{$externalId}?fields=PLAIN_DESCRIPTION&fields=VARIANT_OPTION_CHOICE_NAMES"), [404]);
+
+        return $response->successful() ? $this->toProduct((array) $response->json('product'), $this->stockByVariant($store, [$externalId])) : null;
+    }
+
+    public function order(Store $store, string $externalId): ?OrderData
+    {
+        $response = $this->send(fn () => $this->api($store)->get("ecom/v1/orders/{$externalId}"), [404]);
+
+        return $response->successful() ? $this->toOrder((array) $response->json('order')) : null;
     }
 
     private function api(Store $store): PendingRequest

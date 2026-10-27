@@ -47,6 +47,8 @@ export type Permission =
   | 'purchasing.approve'
   | 'purchasing.order'
   | 'purchasing.receive'
+  | 'billing.view'
+  | 'billing.manage'
   | 'settings.barcode';
 
 export interface User {

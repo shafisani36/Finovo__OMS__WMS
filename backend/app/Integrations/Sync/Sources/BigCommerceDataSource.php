@@ -2,6 +2,7 @@
 
 namespace App\Integrations\Sync\Sources;
 
+use App\Integrations\Sync\Contracts\FetchesSingleRecords;
 use App\Integrations\Sync\Data\OrderData;
 use App\Integrations\Sync\Data\OrderLineData;
 use App\Integrations\Sync\Data\ProductData;
@@ -15,7 +16,7 @@ use Illuminate\Support\Facades\Http;
 /**
  * Reads the catalog (v3 API) and orders (v2 API) of a BigCommerce store.
  */
-class BigCommerceDataSource extends HttpDataSource
+class BigCommerceDataSource extends HttpDataSource implements FetchesSingleRecords
 {
     private const PRODUCTS_PER_PAGE = 50;
 
@@ -86,6 +87,27 @@ class BigCommerceDataSource extends HttpDataSource
                 return;
             }
         }
+    }
+
+    public function product(Store $store, string $externalId): ?ProductData
+    {
+        $response = $this->send(fn () => $this->api($store)->get("v3/catalog/products/{$externalId}", ['include' => 'variants,images']), [404]);
+
+        return $response->successful() ? $this->toProduct((array) $response->json('data')) : null;
+    }
+
+    public function order(Store $store, string $externalId): ?OrderData
+    {
+        $response = $this->send(fn () => $this->api($store)->get("v2/orders/{$externalId}"), [404]);
+
+        if (! $response->successful()) {
+            return null;
+        }
+
+        $lines = (array) $this->send(fn () => $this->api($store)->get("v2/orders/{$externalId}/products", ['limit' => 250]))->json();
+        $shipping = (array) $this->send(fn () => $this->api($store)->get("v2/orders/{$externalId}/shipping_addresses"))->json();
+
+        return $this->toOrder((array) $response->json(), $lines, $shipping[0] ?? null);
     }
 
     private function api(Store $store): PendingRequest

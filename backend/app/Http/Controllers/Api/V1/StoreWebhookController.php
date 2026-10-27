@@ -8,6 +8,7 @@ use App\Models\Store;
 use App\Services\StoreWebhookService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use RuntimeException;
 
 /**
  * Notifications from connected stores (webhooks). Answers at once and does the work after the answer is sent.
@@ -32,6 +33,24 @@ class StoreWebhookController extends Controller
         }
 
         $event = $this->webhooks->record($request, $store);
+
+        if ($event) {
+            ProcessStoreWebhookJob::dispatchAfterResponse($event->id);
+        }
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /**
+     * Wix sends every site's notifications to the Finovo app's one address, as a JWT signed by Wix.
+     */
+    public function wix(Request $request): JsonResponse
+    {
+        try {
+            $event = $this->webhooks->recordWix($request->getContent());
+        } catch (RuntimeException) {
+            return response()->json(['status' => 'error', 'message' => 'Invalid signature.'], 401);
+        }
 
         if ($event) {
             ProcessStoreWebhookJob::dispatchAfterResponse($event->id);

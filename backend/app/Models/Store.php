@@ -31,6 +31,7 @@ class Store extends Model
 
     protected $fillable = [
         'organization_id',
+        'client_id',
         'name',
         'code',
         'platform',
@@ -127,6 +128,12 @@ class Store extends Model
     public function organization(): BelongsTo
     {
         return $this->belongsTo(Organization::class);
+    }
+
+    /** The 3PL client (brand) the store belongs to, if the company bills its warehouse work. */
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(Client::class);
     }
 
     public function warehouses(): BelongsToMany

@@ -21,9 +21,19 @@ class OpenCartDatabaseRows implements OpenCartRows
 
     public function products(int $offset, int $limit): array
     {
+        return $this->rows($this->productQuery()->orderBy('p.product_id')->offset($offset)->limit($limit));
+    }
+
+    public function productsByIds(array $productIds): array
+    {
+        return $productIds === [] ? [] : $this->rows($this->productQuery()->whereIn('p.product_id', $productIds));
+    }
+
+    private function productQuery(): Builder
+    {
         $language = $this->languageId();
 
-        return $this->rows($this->table('product', 'p')
+        return $this->table('product', 'p')
             ->leftJoin($this->prefix.'product_description as pd', fn ($join) => $join->on('pd.product_id', '=', 'p.product_id')->where('pd.language_id', $language))
             ->select('p.product_id', 'p.model', 'p.sku', 'p.upc', 'p.ean', 'p.quantity', 'p.price', 'p.image', 'p.status', 'pd.name', 'pd.description')
             ->selectSub(fn (Builder $query) => $query->from($this->prefix.'product_to_category as pc')
@@ -31,10 +41,7 @@ class OpenCartDatabaseRows implements OpenCartRows
                 ->whereColumn('pc.product_id', 'p.product_id')
                 ->where('cd.language_id', $language)
                 ->limit(1)
-                ->select('cd.name'), 'category')
-            ->orderBy('p.product_id')
-            ->offset($offset)
-            ->limit($limit));
+                ->select('cd.name'), 'category');
     }
 
     public function optionValues(array $productIds): array
@@ -55,22 +62,32 @@ class OpenCartDatabaseRows implements OpenCartRows
 
     public function orders(?string $modifiedSince, int $offset, int $limit): array
     {
-        $language = $this->languageId();
-
-        return $this->rows($this->table('order', 'o')
-            ->leftJoin($this->prefix.'order_status as os', fn ($join) => $join->on('os.order_status_id', '=', 'o.order_status_id')->where('os.language_id', $language))
-            ->where('o.order_status_id', '>', 0)
+        return $this->rows($this->orderQuery()
             ->when($modifiedSince, fn (Builder $query) => $query->where('o.date_modified', '>', $modifiedSince))
             ->orderBy('o.order_id')
             ->offset($offset)
-            ->limit($limit)
+            ->limit($limit));
+    }
+
+    public function ordersByIds(array $orderIds): array
+    {
+        return $orderIds === [] ? [] : $this->rows($this->orderQuery()->whereIn('o.order_id', $orderIds));
+    }
+
+    private function orderQuery(): Builder
+    {
+        $language = $this->languageId();
+
+        return $this->table('order', 'o')
+            ->leftJoin($this->prefix.'order_status as os', fn ($join) => $join->on('os.order_status_id', '=', 'o.order_status_id')->where('os.language_id', $language))
+            ->where('o.order_status_id', '>', 0)
             ->select(
                 'o.order_id', 'o.invoice_prefix', 'o.firstname', 'o.lastname', 'o.email', 'o.telephone',
                 'o.shipping_firstname', 'o.shipping_lastname', 'o.shipping_company', 'o.shipping_address_1', 'o.shipping_address_2',
                 'o.shipping_city', 'o.shipping_postcode', 'o.shipping_zone', 'o.shipping_country', 'o.comment',
                 'o.total', 'o.currency_code', 'o.currency_value', 'o.order_status_id', 'o.date_added', 'o.date_modified',
                 'os.name as status_name',
-            ));
+            );
     }
 
     public function orderProducts(array $orderIds): array

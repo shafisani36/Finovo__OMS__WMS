@@ -46,6 +46,19 @@ class OpenCartModuleRows implements OpenCartRows
         return $orderIds === [] ? [] : (array) $this->call('order_products', ['order_ids' => $orderIds])->json('rows');
     }
 
+    public function productsByIds(array $productIds): array
+    {
+        $response = $this->call('products', ['product_ids' => $productIds, 'limit' => count($productIds)]);
+        $this->imageBaseUrl = $response->json('image_base_url');
+
+        return (array) $response->json('rows');
+    }
+
+    public function ordersByIds(array $orderIds): array
+    {
+        return (array) $this->call('orders', ['order_ids' => $orderIds, 'limit' => count($orderIds)])->json('rows');
+    }
+
     public function imageBaseUrl(): ?string
     {
         return $this->imageBaseUrl;
