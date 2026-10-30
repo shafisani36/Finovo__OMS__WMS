@@ -250,3 +250,18 @@
   cursor: not-allowed;
   opacity: 0.5;
 }
+
+.pick-location-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.pick-lot {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #fef3c7;
+  color: #92400e;
+  font-weight: 600;
+}

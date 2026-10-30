@@ -34,7 +34,7 @@ class CustomerController extends Controller
             ->withMin(['orders as first_order_at' => $ordersInScope], 'placed_at')
             ->orderByDesc('latest_order_at')
             ->orderByDesc('id')
-            ->paginate(min(max($request->integer('per_page', 10), 1), 100));
+            ->paginate($this->perPage($request, 10));
 
         $spending = $this->spendingByCurrency(
             Order::whereIn('customer_id', $customers->pluck('id'))->when($storeId, fn ($q) => $q->where('store_id', $storeId))->get(),

@@ -7,6 +7,7 @@ use App\Models\Organization;
 use App\Models\PickTask;
 use App\Models\Product;
 use App\Models\ProductVariant;
+use App\Models\Shipment;
 use App\Models\Store;
 use App\Models\User;
 use App\Models\Warehouse;
@@ -159,6 +160,39 @@ class PickingScanAndWaveTest extends TestCase
         // Lead time 7 + cover 30 = 37 days at 1 a day, 20 in stock.
         $this->assertSame(17, $row['suggested_quantity']);
         $this->assertSame('order_soon', $row['status']);
+    }
+
+    public function test_picking_takes_the_nearest_expiry_first_and_dispatch_empties_that_bin(): void
+    {
+        $bin = fn (string $code, string $expiry, string $lot) => InventoryLocationBalance::create([
+            'organization_id' => $this->org->id,
+            'warehouse_id' => $this->warehouse->id,
+            'warehouse_location_id' => WarehouseLocation::create(['organization_id' => $this->org->id, 'warehouse_id' => $this->warehouse->id, 'code' => $code])->id,
+            'product_variant_id' => $this->mouse->id,
+            'condition' => 'available',
+            'quantity' => 5,
+            'lot_number' => $lot,
+            'expiry_date' => $expiry,
+        ]);
+        $expired = $bin('Z-01-01', now()->subDay()->toDateString(), 'OLD');
+        $soon = $bin('Z-09-09', now()->addDays(10)->toDateString(), 'SOON');
+        $bin('A-00-01', now()->addYear()->toDateString(), 'LATE');
+
+        $order = $this->importOrder($this->store, $this->mouse, 2);
+        $task = PickTask::where('order_id', $order->id)->firstOrFail();
+
+        // The expired lot is skipped; the lot expiring soonest is picked even though its bin is later on the walk.
+        $this->actingAs($this->user)->getJson("/api/v1/picking/{$task->id}/lines")
+            ->assertJsonPath('data.lines.0.location', 'Z-09-09')
+            ->assertJsonPath('data.lines.0.lot_number', 'SOON');
+
+        $this->putJson("/api/v1/picking/{$task->id}/status", ['status' => 'packed'])->assertOk();
+        $shipment = Shipment::where('order_id', $order->id)->firstOrFail();
+        $this->postJson("/api/v1/shipments/{$shipment->id}/dispatch", ['carrier' => 'Other'])->assertOk();
+
+        // Dispatch takes the units from the same bin the picker was sent to.
+        $this->assertSame(3, $soon->fresh()->quantity);
+        $this->assertSame(5, $expired->fresh()->quantity);
     }
 
     private function variant(string $name, string $sku, string $barcode, string $bin): ProductVariant

@@ -191,11 +191,11 @@ class OpenCartWriter extends PlatformWriter implements ProductWriter, WebhookSub
     public function registerWebhooks(Store $store, string $callbackUrl): void
     {
         if (blank($store->credential('api_secret'))) {
-            throw new RuntimeException('This OpenCart store is connected with database details, so Finovo reads its new orders every minute. Connect it with the Finovo module for instant import.');
+            throw new AutomaticImportUnavailable('This OpenCart store is connected with database details, so Finovo reads its new orders every minute. Connect it with the Finovo module for instant import.');
         }
 
         if (($store->settings['module_webhook_url'] ?? null) !== $callbackUrl) {
-            throw new RuntimeException('Install the latest Finovo module in OpenCart (Stores → Module), then open Extensions → Modules → Finovo and click Connect again, so the shop notifies Finovo of new orders at once.');
+            throw new AutomaticImportUnavailable('Install the latest Finovo module in OpenCart (Stores → Module), then open Extensions → Modules → Finovo and click Connect again, so the shop notifies Finovo of new orders at once.');
         }
     }
 

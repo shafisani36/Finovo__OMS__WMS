@@ -113,7 +113,16 @@ class AppServiceProvider extends ServiceProvider
             TrustProxies::at($proxies === '*' ? '*' : array_map('trim', explode(',', $proxies)));
         }
 
-        if (str_starts_with((string) config('app.url'), 'https://')) {
+        // Every link (platform callbacks, install pages, module downloads) is built from APP_URL, not from the
+        // address the request came in on: behind a proxy or tunnel (or the frontend's dev proxy) the request host is
+        // the internal one, which Shopify, WooCommerce, BigCommerce, Wix, eBay and the shop modules cannot reach.
+        $appUrl = rtrim((string) config('app.url'), '/');
+
+        if ($appUrl !== '') {
+            URL::forceRootUrl($appUrl);
+        }
+
+        if (str_starts_with($appUrl, 'https://')) {
             URL::forceScheme('https');
         }
     }

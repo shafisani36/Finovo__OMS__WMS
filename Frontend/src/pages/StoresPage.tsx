@@ -14,7 +14,8 @@ import {
   ShieldCheck,
   Loader2,
   Trash2,
-  Download
+  Download,
+  Warehouse as WarehouseIcon
 } from 'lucide-react';
 import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
@@ -23,13 +24,16 @@ import DataTable from '../components/common/DataTable';
 import type { Column } from '../components/common/DataTable';
 import { Alert } from '../components/common/Alert';
 import ConfirmDialog from '../components/common/ConfirmDialog';
+import RowActionsMenu from '../components/common/RowActionsMenu';
+import type { RowAction } from '../components/common/RowActionsMenu';
+import StoreWarehousesModal from '../components/stores/StoreWarehousesModal';
 import ConnectStoreModal from '../components/stores/ConnectStoreModal';
 import StoreConnectingOverlay from '../components/stores/StoreConnectingOverlay';
 import type { ConnectingMode } from '../components/stores/StoreConnectingOverlay';
 import { STORE_PLATFORMS, platformLabel } from '../components/stores/storePlatforms';
 import CustomDropdown from '../components/common/CustomDropdown';
 import omsService, { AUTO_IMPORT_PLATFORMS } from '../services/omsService';
-import type { StoreConnectionState, StoreModel, WarehouseModel } from '../services/omsService';
+import type { StoreKpis, StoreModel, StoreStatusFilter, WarehouseModel } from '../services/omsService';
 import { useActiveStore } from '../hooks/useActiveStore';
 import { useAuth } from '../hooks/useAuth';
 import { can } from '../types/auth';
@@ -40,13 +44,16 @@ const AUTHORIZED_ON_PLATFORM = ['shopify', 'woocommerce', 'bigcommerce', 'wix', 
 /** Platforms connected through a Finovo module installed on the shop; a connected shop can install its latest version. */
 const MODULE_PLATFORMS = ['prestashop', 'opencart'];
 
-/** Labels and order of the statuses a store can show (the server sends the same list for the filter). */
-const CONNECTION_STATES: { value: StoreConnectionState; label: string }[] = [
+/** Labels and order of the status filter (the server sends the same list). */
+const CONNECTION_STATES: { value: StoreStatusFilter; label: string }[] = [
   { value: 'connected', label: 'Connected' },
   { value: 'awaiting_authorization', label: 'Awaiting Authorization' },
   { value: 'setup_incomplete', label: 'Setup Incomplete' },
   { value: 'disconnected', label: 'Disconnected' },
+  { value: 'needs_attention', label: 'Needs Attention' },
 ];
+
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
 type Notice = { type: 'success' | 'error' | 'info'; message: string } | null;
 
@@ -60,10 +67,12 @@ export const StoresPage: React.FC = () => {
   const canDelete = can(user, 'stores.delete');
   const [stores, setStores] = useState<StoreModel[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseModel[]>([]);
-  const [kpis, setKpis] = useState({
+  const [kpis, setKpis] = useState<StoreKpis>({
     total_stores: 0,
     connected_stores: 0,
+    not_connected: 0,
     sync_issues: 0,
+    needs_attention: 0,
     orders_awaiting_sync: 0,
   });
   const [loading, setLoading] = useState(true);
@@ -81,6 +90,7 @@ export const StoresPage: React.FC = () => {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [storeToDelete, setStoreToDelete] = useState<StoreModel | null>(null);
+  const [linkingStore, setLinkingStore] = useState<StoreModel | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const [busyStoreId, setBusyStoreId] = useState<number | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -188,7 +198,7 @@ export const StoresPage: React.FC = () => {
       }
       setNotice({ type: 'info', message: next_action.message });
     } catch (err) {
-      setNotice({ type: 'error', message: err instanceof Error ? err.message : 'Could not start the authorization.' });
+      setNotice({ type: 'error', message: `${store.name}: ${err instanceof Error ? err.message : 'Could not start the authorization.'}` });
     } finally {
       setBusyStoreId(null);
     }
@@ -200,7 +210,7 @@ export const StoresPage: React.FC = () => {
       const res = await omsService.testStoreConnection(store.id);
       setNotice({ type: 'success', message: res.message });
     } catch (err) {
-      setNotice({ type: 'error', message: err instanceof Error ? err.message : 'Connection test failed.' });
+      setNotice({ type: 'error', message: `${store.name}: ${err instanceof Error ? err.message : 'Connection test failed.'}` });
     } finally {
       setBusyStoreId(null);
       fetchStores();
@@ -212,9 +222,10 @@ export const StoresPage: React.FC = () => {
     try {
       setBusyStoreId(store.id);
       const res = await omsService.enableStoreWebhooks(store.id);
-      setNotice({ type: 'success', message: res.message });
+      // "info": the store cannot notify Finovo as it is connected; its orders keep being read every minute.
+      setNotice({ type: res.status === 'info' ? 'info' : 'success', message: `${store.name}: ${res.message}` });
     } catch (err) {
-      setNotice({ type: 'error', message: err instanceof Error ? err.message : 'Automatic import could not be switched on.' });
+      setNotice({ type: 'error', message: `${store.name}: ${err instanceof Error ? err.message : 'Automatic import could not be switched on.'}` });
     } finally {
       setBusyStoreId(null);
       fetchStores();
@@ -228,7 +239,7 @@ export const StoresPage: React.FC = () => {
       const res = await omsService.syncStore(store.id);
       setNotice({ type: 'success', message: res.message });
     } catch (err) {
-      setNotice({ type: 'error', message: err instanceof Error ? err.message : 'Sync failed.' });
+      setNotice({ type: 'error', message: `${store.name}: ${err instanceof Error ? err.message : 'Sync failed.'}` });
     } finally {
       setBusyStoreId(null);
       fetchStores();
@@ -249,6 +260,40 @@ export const StoresPage: React.FC = () => {
       setBusyStoreId(null);
       setStoreToDelete(null);
     }
+  };
+
+  /** What the user can do with a store, in the row's menu. */
+  const rowActions = (store: StoreModel): RowAction[] => {
+    const connected = store.status === 'active';
+    const actions: RowAction[] = [];
+
+    if (canConnect) {
+      if (!connected && AUTHORIZED_ON_PLATFORM.includes(store.platform)) {
+        actions.push({ label: 'Connect', icon: PlugZap, onSelect: () => handleAuthorize(store) });
+      } else {
+        actions.push({ label: 'Test connection', icon: ShieldCheck, onSelect: () => handleTestConnection(store) });
+      }
+    }
+    if (canSync && connected && SYNC_SUPPORTED.includes(store.platform)) {
+      actions.push({ label: 'Sync now', icon: RefreshCw, onSelect: () => handleSync(store) });
+    }
+    if (canConnect && connected && AUTO_IMPORT_PLATFORMS.includes(store.platform) && store.settings?.webhooks?.status !== 'active') {
+      actions.push({ label: 'Turn on auto import', icon: PlugZap, onSelect: () => handleAutoImport(store) });
+    }
+    if (canConnect && connected && MODULE_PLATFORMS.includes(store.platform)) {
+      actions.push({ label: 'Download module', icon: Download, onSelect: () => handleAuthorize(store) });
+    }
+    if (canConnect) {
+      actions.push({ label: 'Warehouses', icon: WarehouseIcon, onSelect: () => setLinkingStore(store) });
+    }
+    if (connected && activeStore?.id !== store.id) {
+      actions.push({ label: 'Manage this store', icon: Settings, onSelect: () => handleManage(store) });
+    }
+    if (canDelete) {
+      actions.push({ label: 'Delete', icon: Trash2, onSelect: () => setStoreToDelete(store), danger: true });
+    }
+
+    return actions;
   };
 
   const columns: Column<StoreModel>[] = [
@@ -317,13 +362,16 @@ export const StoresPage: React.FC = () => {
       render: (row) => (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {row.warehouses && row.warehouses.length > 0 ? (
-            row.warehouses.map((wh) => (
-              <span key={wh.id} className="wh-tag">
+            row.warehouses.map((wh, index) => (
+              <span key={wh.id} className="wh-tag" title={index === 0 ? 'Main warehouse: orders go here first' : `Used when the warehouses before it lack stock`}>
+                {row.warehouses.length > 1 ? `${index + 1}. ` : ''}
                 {wh.name}
               </span>
             ))
           ) : (
-            <span style={{ fontSize: 12, color: '#94a3b8' }}>None linked</span>
+            <span style={{ fontSize: 12, color: '#94a3b8' }} title="Any active warehouse can fulfil its orders">
+              Any warehouse
+            </span>
           )}
         </div>
       ),
@@ -360,112 +408,27 @@ export const StoresPage: React.FC = () => {
       key: 'auto_import',
       header: 'Auto Import',
       render: (row) => {
-        if (row.connection_state !== 'connected' || !AUTO_IMPORT_PLATFORMS.includes(row.platform)) {
-          return <span style={{ fontSize: 12, color: '#94a3b8' }} title="New orders are imported every minute">Every minute</span>;
-        }
         const webhooks = row.settings?.webhooks;
-        if (webhooks?.status === 'active') {
+        if (row.connection_state === 'connected' && webhooks?.status === 'active') {
           return <span className="kpi-pill kpi-pill-green" title={webhooks.message}>On</span>;
         }
-        return canConnect ? (
-          <button
-            type="button"
-            className="btn-finovo-secondary"
-            style={{ padding: '4px 10px', fontSize: 11 }}
-            onClick={() => handleAutoImport(row)}
-            disabled={busyStoreId === row.id}
-            title={webhooks?.message ?? 'Import new orders and product changes the moment they happen'}
-          >
-            <PlugZap size={13} color="#1e56ff" />
-            <span>Turn on</span>
-          </button>
-        ) : (
-          <span style={{ fontSize: 12, color: '#94a3b8' }}>Off</span>
+        return (
+          <span style={{ fontSize: 12, color: '#94a3b8' }} title={webhooks?.message ?? 'New orders are imported every minute'}>
+            Every minute
+          </span>
         );
       },
     },
     {
       key: 'actions',
       header: 'Actions',
-      render: (row) => {
-        const busy = busyStoreId === row.id;
-        const needsAuthorization = row.status !== 'active' && AUTHORIZED_ON_PLATFORM.includes(row.platform);
-        return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            {!canConnect ? null : needsAuthorization ? (
-              <button
-                onClick={() => handleAuthorize(row)}
-                className="btn-finovo-primary"
-                style={{ padding: '6px 12px', fontSize: 12 }}
-                disabled={busy}
-                title={`Approve access on ${platformLabel(row.platform)}`}
-              >
-                {busy ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}
-                <span>Connect</span>
-              </button>
-            ) : (
-              <button
-                onClick={() => handleTestConnection(row)}
-                className="btn-finovo-secondary"
-                style={{ padding: '6px 12px', fontSize: 12 }}
-                disabled={busy}
-                title="Check the connection with the platform"
-              >
-                {busy ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} color="#1e56ff" />}
-                <span>Test</span>
-              </button>
-            )}
-            {canConnect && row.status === 'active' && MODULE_PLATFORMS.includes(row.platform) && (
-              <button
-                onClick={() => handleAuthorize(row)}
-                className="btn-finovo-secondary"
-                style={{ padding: '6px 12px', fontSize: 12 }}
-                disabled={busy}
-                title={`Download the latest Finovo module and install it over the old one in ${platformLabel(row.platform)}`}
-              >
-                <Download size={14} color="#1e56ff" />
-                <span>Module</span>
-              </button>
-            )}
-            {canSync && row.status === 'active' && SYNC_SUPPORTED.includes(row.platform) && (
-              <button
-                onClick={() => handleSync(row)}
-                className="btn-finovo-secondary"
-                style={{ padding: '6px 12px', fontSize: 12 }}
-                disabled={busy}
-                title="Import products, variants, stock and orders from this store"
-              >
-                <RefreshCw size={14} color="#1e56ff" className={busy ? 'animate-spin' : undefined} />
-                <span>Sync</span>
-              </button>
-            )}
-            {row.status === 'active' && (
-              <button
-                onClick={() => handleManage(row)}
-                className="btn-finovo-secondary"
-                style={{ padding: '6px 12px', fontSize: 12 }}
-                disabled={activeStore?.id === row.id}
-                title="Make this the store you are managing"
-              >
-                <Settings size={14} color="#1e56ff" />
-                <span>{activeStore?.id === row.id ? 'Managing' : 'Manage'}</span>
-              </button>
-            )}
-            {canDelete && (
-              <button
-                onClick={() => setStoreToDelete(row)}
-                className="btn-finovo-secondary"
-                style={{ padding: '6px 10px', fontSize: 12, color: '#dc2626' }}
-                disabled={busy}
-                title="Delete this store"
-                aria-label={`Delete ${row.name}`}
-              >
-                <Trash2 size={14} />
-              </button>
-            )}
-          </div>
-        );
-      },
+      align: 'right',
+      render: (row) =>
+        busyStoreId === row.id ? (
+          <Loader2 size={18} className="animate-spin" color="#1e56ff" aria-label={`Working on ${row.name}`} />
+        ) : (
+          <RowActionsMenu label={`Actions for ${row.name}`} actions={rowActions(row)} />
+        ),
     },
   ];
 
@@ -507,12 +470,21 @@ export const StoresPage: React.FC = () => {
       {notice && <Alert type={notice.type} message={notice.message} className="store-notice" />}
 
       {/* Attention Alert Banner matching Screenshot 2 */}
-      {showAlert && (
+      {showAlert && kpis.needs_attention > 0 && (
         <AlertBanner
-          title="Some stores need attention"
-          message="Review configuration, sync health, and linked warehouse allocations below."
-          actionText="View Detail"
-          onAction={() => {}}
+          title={`${plural(kpis.needs_attention, 'store')} need${kpis.needs_attention === 1 ? 's' : ''} attention`}
+          message={[
+            kpis.not_connected ? `${plural(kpis.not_connected, 'store')} not connected` : '',
+            kpis.sync_issues ? `${plural(kpis.sync_issues, 'store')} with a failed test or sync` : '',
+          ]
+            .filter(Boolean)
+            .join(', ')
+            .concat('. Open the store menu to test, connect or sync again.')}
+          actionText="Show them"
+          onAction={() => {
+            setStatusFilter('needs_attention');
+            setPage(1);
+          }}
           onDismiss={() => setShowAlert(false)}
         />
       )}
@@ -523,29 +495,29 @@ export const StoresPage: React.FC = () => {
           title="Total Stores"
           value={kpis.total_stores}
           icon={<StoreIcon size={20} />}
-          pillText="Active"
+          pillText="All Platforms"
           pillVariant="blue"
         />
         <MetricCard
           title="Connected Stores"
           value={kpis.connected_stores}
           icon={<LinkIcon size={20} />}
-          pillText="All Connected"
-          pillVariant="green"
+          pillText={kpis.not_connected === 0 ? 'All Connected' : `${kpis.not_connected} not connected`}
+          pillVariant={kpis.not_connected === 0 ? 'green' : 'amber'}
         />
         <MetricCard
           title="Sync Issues"
           value={kpis.sync_issues}
           icon={<RefreshCw size={20} />}
-          pillText="Healthy"
-          pillVariant="green"
+          pillText={kpis.sync_issues === 0 ? 'Healthy' : 'Needs attention'}
+          pillVariant={kpis.sync_issues === 0 ? 'green' : 'amber'}
         />
         <MetricCard
-          title="Order Awaiting Sync"
+          title="Orders Awaiting Sync"
           value={kpis.orders_awaiting_sync}
           icon={<ShoppingCart size={20} />}
-          pillText="Up to date"
-          pillVariant="green"
+          pillText={kpis.orders_awaiting_sync === 0 ? 'Up to date' : 'Waiting'}
+          pillVariant={kpis.orders_awaiting_sync === 0 ? 'green' : 'amber'}
         />
       </div>
 
@@ -651,6 +623,19 @@ export const StoresPage: React.FC = () => {
             // Leaving for the platform keeps the overlay up until the browser navigates away.
             if (connecting.mode !== 'redirecting') setConnecting(null);
             then();
+          }}
+        />
+      )}
+
+      {linkingStore && (
+        <StoreWarehousesModal
+          store={linkingStore}
+          warehouses={warehouses}
+          onClose={() => setLinkingStore(null)}
+          onSaved={(message) => {
+            setLinkingStore(null);
+            setNotice({ type: 'success', message });
+            fetchStores();
           }}
         />
       )}

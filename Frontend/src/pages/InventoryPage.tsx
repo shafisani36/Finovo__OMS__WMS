@@ -31,6 +31,7 @@ import { BarcodeLabel, BarcodeSettingsDialog } from '../components/barcode/Barco
 import MetricCard from '../components/common/MetricCard';
 import CustomDropdown from '../components/common/CustomDropdown';
 import DemandForecast from '../components/inventory/DemandForecast';
+import PutawayModal from '../components/inventory/PutawayModal';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import omsService from '../services/omsService';
 import { useAuth } from '../hooks/useAuth';
@@ -91,7 +92,7 @@ export const InventoryPage: React.FC = () => {
   const [receipts, setReceipts] = useState<InventoryReceiptModel[]>([]);
   const [showNewReceiptModal, setShowNewReceiptModal] = useState(false);
   const [showConfirmReceiptModal, setShowConfirmReceiptModal] = useState<InventoryReceiptModel | null>(null);
-  const [showPutawayModal, setShowPutawayModal] = useState<{ receiptId: number; itemId: number; sku?: string; maxQty?: number } | null>(null);
+  const [putawayReceipt, setPutawayReceipt] = useState<InventoryReceiptModel | null>(null);
 
   // Tab 3: Transfers State
   const [transfers, setTransfers] = useState<InventoryTransferModel[]>([]);
@@ -169,7 +170,7 @@ export const InventoryPage: React.FC = () => {
     try {
       setLoading(true);
       const whId = selectedWarehouseId !== 'all' ? Number(selectedWarehouseId) : undefined;
-      const res = await omsService.getInventoryReceipts({ warehouse_id: whId, per_page: 30 });
+      const res = await omsService.getInventoryReceipts({ warehouse_id: whId, store_id: activeStore?.id, per_page: 30 });
       setReceipts(res.data || []);
     } catch (err) {
       console.error(err);
@@ -181,7 +182,7 @@ export const InventoryPage: React.FC = () => {
   const fetchTransfers = async () => {
     try {
       setLoading(true);
-      const res = await omsService.getInventoryTransfers({ per_page: 30 });
+      const res = await omsService.getInventoryTransfers({ store_id: activeStore?.id, per_page: 30 });
       setTransfers(res.data || []);
     } catch (err) {
       console.error(err);
@@ -194,7 +195,7 @@ export const InventoryPage: React.FC = () => {
     try {
       setLoading(true);
       const whId = selectedWarehouseId !== 'all' ? Number(selectedWarehouseId) : undefined;
-      const res = await omsService.getInventoryAdjustments({ warehouse_id: whId, per_page: 30 });
+      const res = await omsService.getInventoryAdjustments({ warehouse_id: whId, store_id: activeStore?.id, per_page: 30 });
       setAdjustments(res.data || []);
     } catch (err) {
       console.error(err);
@@ -207,7 +208,7 @@ export const InventoryPage: React.FC = () => {
     try {
       setLoading(true);
       const whId = selectedWarehouseId !== 'all' ? Number(selectedWarehouseId) : undefined;
-      const res = await omsService.getCycleCounts({ warehouse_id: whId, per_page: 30 });
+      const res = await omsService.getCycleCounts({ warehouse_id: whId, store_id: activeStore?.id, per_page: 30 });
       setCycleCounts(res.data || []);
     } catch (err) {
       console.error(err);
@@ -220,7 +221,7 @@ export const InventoryPage: React.FC = () => {
     try {
       setLoading(true);
       const whId = selectedWarehouseId !== 'all' ? Number(selectedWarehouseId) : undefined;
-      const res = await omsService.getStockMovements({ warehouse_id: whId, per_page: 30 });
+      const res = await omsService.getStockMovements({ warehouse_id: whId, store_id: activeStore?.id, per_page: 30 });
       setMovements(res.data || []);
     } catch (err) {
       console.error(err);
@@ -233,7 +234,7 @@ export const InventoryPage: React.FC = () => {
     try {
       setLoading(true);
       const whId = selectedWarehouseId !== 'all' ? Number(selectedWarehouseId) : undefined;
-      const res = await omsService.getReplenishmentRecommendations(whId);
+      const res = await omsService.getReplenishmentRecommendations(whId, activeStore?.id);
       setRecommendations(res.data || []);
     } catch (err) {
       console.error(err);
@@ -353,9 +354,6 @@ export const InventoryPage: React.FC = () => {
     Record<number, { received_quantity: number; condition: string; lot_number: string; expiry_date: string }>
   >({});
 
-  // Form State: Putaway
-  const [putawayLocCode, setPutawayLocCode] = useState<string>('A-01-B-01');
-  const [putawayQty, setPutawayQty] = useState<number>(1);
 
   // Form State: Transfer
   const [transferFromWh, setTransferFromWh] = useState<string>('');
@@ -417,13 +415,6 @@ export const InventoryPage: React.FC = () => {
     }
   }, [showReceiveTransferModal]);
 
-  // Sync state when putaway modal opens
-  useEffect(() => {
-    if (showPutawayModal) {
-      setPutawayQty(showPutawayModal.maxQty || 1);
-      setPutawayLocCode('A-01-B-01');
-    }
-  }, [showPutawayModal]);
 
   // Submission Handlers
   const handleCreateReceipt = async (e: React.FormEvent) => {
@@ -482,27 +473,6 @@ export const InventoryPage: React.FC = () => {
       fetchKpis();
     } catch (err: any) {
       setFeedback({ type: 'error', text: err.message || 'Failed to confirm receipt.' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handlePutaway = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!showPutawayModal) return;
-    try {
-      setLoading(true);
-      await omsService.putawayReceiptItem(showPutawayModal.receiptId, {
-        item_id: showPutawayModal.itemId,
-        destination_location_code: putawayLocCode.trim(),
-        quantity: putawayQty,
-      });
-      setShowPutawayModal(null);
-      setFeedback({ type: 'success', text: `Item putaway completed into storage bin ${putawayLocCode.trim()}.` });
-      fetchReceipts();
-      fetchBalances();
-    } catch (err: any) {
-      setFeedback({ type: 'error', text: err.message || 'Failed to complete putaway.' });
     } finally {
       setLoading(false);
     }
@@ -1255,17 +1225,8 @@ export const InventoryPage: React.FC = () => {
                             )}
                             {r.status === 'received' && (
                               <button
-                                onClick={() => {
-                                  if (r.items && r.items.length > 0) {
-                                    const it = r.items[0];
-                                    setShowPutawayModal({
-                                      receiptId: r.id,
-                                      itemId: it.id,
-                                      sku: it.sku,
-                                      maxQty: it.received_quantity || it.expected_quantity,
-                                    });
-                                  }
-                                }}
+                                onClick={() => setPutawayReceipt(r)}
+                                disabled={!r.items?.length}
                                 className="btn-finovo-secondary"
                                 style={{ padding: '4px 8px', fontSize: 11 }}
                               >
@@ -2222,69 +2183,17 @@ export const InventoryPage: React.FC = () => {
       {/* ------------------------------------------------------------- */}
       {/* MODAL 3: PUTAWAY TO STORAGE BINS */}
       {/* ------------------------------------------------------------- */}
-      {showPutawayModal && (
-        <div className="modal-overlay" style={{ zIndex: 9999 }} onClick={() => setShowPutawayModal(null)}>
-          <div
-            className="modal-container"
-            style={{ maxWidth: 480, maxHeight: '90vh', overflowY: 'auto', backgroundColor: '#ffffff', padding: 24, borderRadius: 18, border: '1px solid #e2e8f0', boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.25)' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Putaway to Storage Bin</h3>
-                <p style={{ margin: '4px 0 0 0', fontSize: 12, color: '#64748b' }}>
-                  SKU: <strong>{showPutawayModal.sku || 'Selected Item'}</strong> | Max: <strong>{showPutawayModal.maxQty || 1} units</strong>
-                </p>
-              </div>
-              <button onClick={() => setShowPutawayModal(null)} className="btn-finovo-secondary" style={{ padding: 6 }}>
-                <X size={16} />
-              </button>
-            </div>
-
-            <form onSubmit={handlePutaway} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
-                  Destination Storage Bin Code *
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. A-01-B-01 or RACK-2-BIN-10"
-                  value={putawayLocCode}
-                  onChange={(e) => setPutawayLocCode(e.target.value)}
-                  required
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
-                />
-                <span style={{ fontSize: 11, color: '#64748b', marginTop: 4, display: 'block' }}>
-                  Moves stock physically from the dock receiving stage into the storage bin.
-                </span>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 4 }}>
-                  Putaway Quantity *
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  max={showPutawayModal.maxQty || 9999}
-                  value={putawayQty}
-                  onChange={(e) => setPutawayQty(Math.max(1, parseInt(e.target.value) || 1))}
-                  required
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 13, boxSizing: 'border-box' }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
-                <button type="button" onClick={() => setShowPutawayModal(null)} className="btn-finovo-secondary" style={{ padding: '8px 16px', fontSize: 13 }}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn-finovo-primary" style={{ padding: '8px 16px', fontSize: 13 }}>
-                  Complete Putaway
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {putawayReceipt && (
+        <PutawayModal
+          receipt={putawayReceipt}
+          onClose={() => setPutawayReceipt(null)}
+          onDone={(message) => {
+            setPutawayReceipt(null);
+            setFeedback({ type: 'success', text: message });
+            fetchReceipts();
+            fetchBalances();
+          }}
+        />
       )}
 
       {/* ------------------------------------------------------------- */}

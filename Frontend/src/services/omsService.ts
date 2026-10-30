@@ -28,10 +28,14 @@ export interface StoreModel {
   connection_error: string | null;
   connected_at: string | null;
   last_sync_at: string | null;
+  /** The warehouses the store ships from, main warehouse (priority 1) first. */
   warehouses: WarehouseModel[];
   settings?: {
-    /** Automatic import (webhooks): whether the store notifies Finovo of new orders and product changes. */
-    webhooks?: { status: 'active' | 'needs_public_url' | 'failed' | 'unsupported'; message: string; checked_at?: string };
+    /**
+     * Automatic import (webhooks): whether the store notifies Finovo of new orders and product changes.
+     * "unavailable": the store is connected in a way that cannot notify Finovo; its orders are read every minute.
+     */
+    webhooks?: { status: 'active' | 'needs_public_url' | 'failed' | 'unsupported' | 'unavailable'; message: string; checked_at?: string };
   } | null;
 }
 
@@ -49,10 +53,32 @@ export const AUTO_IMPORT_PLATFORMS: StorePlatform[] = ['shopify', 'woocommerce',
 
 export type StoreConnectionState = 'connected' | 'awaiting_authorization' | 'setup_incomplete' | 'disconnected';
 
+/** Store list filter: a connection state, or stores that are not connected or whose last test or sync failed. */
+export type StoreStatusFilter = StoreConnectionState | 'needs_attention';
+
+/** Counts shown above the store list. */
+export interface StoreKpis {
+  total_stores: number;
+  connected_stores: number;
+  not_connected: number;
+  sync_issues: number;
+  needs_attention: number;
+  orders_awaiting_sync: number;
+}
+
+/** A store a warehouse serves (warehouse detail). */
+export interface WarehouseStoreLink {
+  id: number;
+  name: string;
+  platform: StorePlatform;
+  code: string;
+}
+
 export interface ConnectStorePayload {
   name: string;
   platform: StorePlatform;
-  warehouse_id: number;
+  /** In priority order: the first is the store's main warehouse. */
+  warehouse_ids: number[];
   credentials: Record<string, string | number>;
 }
 
@@ -216,6 +242,8 @@ export interface WarehouseModel {
   locations_count?: number;
   memberships_count?: number;
   readiness?: WarehouseReadinessModel;
+  /** The stores the warehouse fulfils (warehouse detail only). */
+  stores?: WarehouseStoreLink[];
 }
 
 export interface StockMovementItem {
@@ -263,6 +291,9 @@ export interface PickLine {
   picked: number;
   packed: number;
   location: string | null;
+  /** Lot and expiry of the stock in that bin; picking takes the nearest expiry first (FEFO). */
+  expiry_date: string | null;
+  lot_number: string | null;
   /** False for a line without a Finovo product: it has no barcode and is checked by eye. */
   scannable: boolean;
 }
@@ -307,6 +338,8 @@ export interface PickWaveDetail {
     name: string;
     image_url: string | null;
     location: string | null;
+    expiry_date: string | null;
+    lot_number: string | null;
     quantity: number;
     picked: number;
     totes: { tote: number; order_number: string | null; quantity: number; picked: number }[];
@@ -408,6 +441,112 @@ export interface ClientInvoiceModel {
   lines?: ClientInvoiceLine[];
 }
 
+/** One WERC measure of a warehouse; value is null when the period has no data for it. */
+export interface WarehousePerformanceMeasure {
+  key: string;
+  label: string;
+  description: string;
+  value: number | null;
+  unit: string;
+  /** WERC 2025 best-in-class value; null for measures without an industry benchmark. */
+  benchmark: number | null;
+  better: 'higher' | 'lower';
+  meets: boolean | null;
+  sample: number;
+  sample_label: string;
+}
+
+export interface WarehousePerformance {
+  period: { from: string; to: string };
+  measures: WarehousePerformanceMeasure[];
+  summary: { meeting_benchmark: number; below_benchmark: number; no_data: number };
+}
+
+export type SlottingArea = 'picking' | 'bulk' | 'general';
+
+/** A bin as the slotting screens show it; room is null for a bin without a capacity in units. */
+export interface SlottingBin {
+  id: number;
+  code: string;
+  area: SlottingArea;
+  area_label: string;
+  units_in_bin: number;
+  room: number | null;
+}
+
+export interface SlottingItem {
+  product_variant_id: number;
+  sku: string | null;
+  name: string | null;
+  variant: string | null;
+  abc_class: 'A' | 'B' | 'C';
+  units_sold: number;
+  sales_value: number;
+  /** Percentage of the warehouse's sales value. */
+  value_share: number;
+  on_hand: number;
+  bins: { location_id: number; code: string; area: SlottingArea; lot_number: string | null; quantity: number }[];
+  preferred_area: SlottingArea;
+  misplaced_units: number;
+}
+
+export interface SlottingMove {
+  product_variant_id: number;
+  sku: string | null;
+  name: string | null;
+  abc_class: 'A' | 'C';
+  lot_number: string | null;
+  quantity: number;
+  from: { id: number; code: string; area: SlottingArea };
+  to: { id: number; code: string; area: SlottingArea };
+  reason: string;
+}
+
+export interface SlottingAnalysis {
+  days: number;
+  items: SlottingItem[];
+  moves: SlottingMove[];
+  summary: { a_items: number; b_items: number; c_items: number; misplaced_units: number; picking_bins: number; bulk_bins: number };
+}
+
+export interface PutawaySuggestion {
+  abc_class: 'A' | 'B' | 'C';
+  location: SlottingBin | null;
+  reason: string;
+  alternatives: SlottingBin[];
+}
+
+/** Work waiting in a warehouse, for the mobile app's home screen. */
+export interface MobileSummary {
+  to_pick: number;
+  to_pack: number;
+  open_waves: number;
+  to_receive: number;
+  to_put_away: number;
+  to_count: number;
+}
+
+/** A scanned product and the bins of the warehouse holding it, first expiry first. */
+export interface MobileProduct {
+  product_variant_id: number;
+  sku: string;
+  barcode: string | null;
+  name: string | null;
+  variant: string | null;
+  image_url: string | null;
+  bins: { location_id: number; code: string | null; location_type: string | null; lot_number: string | null; expiry_date: string | null; condition: string; quantity: number }[];
+}
+
+/** A scanned bin and what is in it. */
+export interface MobileLocation {
+  id: number;
+  code: string;
+  location_type: string;
+  putaway_eligible: boolean;
+  is_active: boolean;
+  stock: { product_variant_id: number; sku: string | null; name: string | null; lot_number: string | null; quantity: number }[];
+}
+
 export type MoneyByCurrency = { currency: string; amount: number }[];
 
 export interface ShipmentModel {
@@ -428,6 +567,53 @@ export interface ShipmentModel {
   shipped_at: string | null;
   delivered_at: string | null;
   dispatched_by: string | null;
+  /** Booked through one of the company's courier accounts (label and status come from the courier). */
+  booked_with_courier: boolean;
+  has_label: boolean;
+  courier_status: CourierParcelStatus | null;
+  courier_status_text: string | null;
+  courier_status_at: string | null;
+}
+
+export type CourierParcelStatus = 'booked' | 'in_transit' | 'out_for_delivery' | 'delivery_failed' | 'delivered' | 'returned' | 'cancelled';
+
+export interface CourierField {
+  key: string;
+  label: string;
+  required: boolean;
+}
+
+/** A courier Finovo books with, and what an account of it needs. */
+export interface CourierCarrier {
+  code: string;
+  name: string;
+  sandbox: boolean;
+  labels: boolean;
+  credentials: CourierField[];
+  settings: CourierField[];
+}
+
+export interface CourierAccountModel {
+  id: number;
+  carrier: string;
+  carrier_name: string;
+  name: string;
+  sandbox: boolean;
+  is_active: boolean;
+  last_error: string | null;
+  settings: Record<string, string>;
+  /** Which credentials are saved; their values are never sent back. */
+  credentials_set: Record<string, boolean>;
+  last_tracked_at: string | null;
+}
+
+export interface CourierAccountInput {
+  carrier?: string;
+  name: string;
+  sandbox: boolean;
+  is_active: boolean;
+  credentials: Record<string, string>;
+  settings: Record<string, string>;
 }
 
 export interface ShipmentKpis {
@@ -1173,7 +1359,7 @@ const omsService = {
   },
 
   /** Switch on (or check again) automatic import of the store's orders and products. */
-  async enableStoreWebhooks(storeId: number): Promise<{ message: string; data: StoreModel }> {
+  async enableStoreWebhooks(storeId: number): Promise<{ status: 'success' | 'info'; message: string; data: StoreModel }> {
     const { data } = await apiClient.post(`/stores/${storeId}/webhooks`);
     return data;
   },
@@ -1190,6 +1376,18 @@ const omsService = {
 
   async testStoreConnection(storeId: number): Promise<{ status: string; message: string; data: StoreModel }> {
     const { data } = await apiClient.post(`/stores/${storeId}/test-connection`);
+    return data;
+  },
+
+  /** Set the warehouses the store ships from, main warehouse first; an empty list lets any active warehouse fulfil it. */
+  async setStoreWarehouses(storeId: number, warehouseIds: number[]): Promise<{ message: string; data: StoreModel }> {
+    const { data } = await apiClient.put(`/stores/${storeId}/warehouses`, { warehouse_ids: warehouseIds });
+    return data;
+  },
+
+  /** Set the stores a warehouse serves. */
+  async setWarehouseStores(warehouseId: number, storeIds: number[]): Promise<{ message: string; data: WarehouseStoreLink[] }> {
+    const { data } = await apiClient.put(`/warehouses/${warehouseId}/stores`, { store_ids: storeIds });
     return data;
   },
 
@@ -1350,6 +1548,47 @@ const omsService = {
     return data;
   },
 
+  async getWarehousePerformance(warehouseId: number, params?: { from?: string; to?: string }): Promise<WarehousePerformance> {
+    const { data } = await apiClient.get(`/warehouses/${warehouseId}/performance`, { params });
+    return data.data;
+  },
+
+  async getWarehouseSlotting(warehouseId: number, days?: number): Promise<SlottingAnalysis> {
+    const { data } = await apiClient.get(`/warehouses/${warehouseId}/slotting`, { params: { days } });
+    return data.data;
+  },
+
+  /** The bin to put received units of a product in (same stock first, then the area for its ABC class). */
+  async getPutawaySuggestion(warehouseId: number, params: { product_variant_id: number; quantity?: number; lot_number?: string | null }): Promise<PutawaySuggestion> {
+    const { data } = await apiClient.get(`/warehouses/${warehouseId}/putaway-suggestion`, { params });
+    return data.data;
+  },
+
+  /** Move units of a product from one bin to another in a warehouse. */
+  async moveWarehouseStock(warehouseId: number, move: { product_variant_id: number; from_location_id: number; to_location_id: number; quantity: number; lot_number?: string | null }): Promise<{ message: string }> {
+    const { data } = await apiClient.post(`/warehouses/${warehouseId}/move-stock`, move);
+    return data;
+  },
+
+
+  // Mobile scanning app
+  /** Work waiting in the warehouse; with storeId, only that store's orders and products. */
+  async getMobileSummary(warehouseId: number, storeId?: number): Promise<MobileSummary> {
+    const { data } = await apiClient.get(`/mobile/warehouses/${warehouseId}/summary`, { params: { store_id: storeId } });
+    return data.data;
+  },
+
+  async scanMobileProduct(warehouseId: number, code: string): Promise<MobileProduct> {
+    const { data } = await apiClient.get(`/mobile/warehouses/${warehouseId}/product`, { params: { code } });
+    return data.data;
+  },
+
+  async scanMobileLocation(warehouseId: number, code: string): Promise<MobileLocation> {
+    const { data } = await apiClient.get(`/mobile/warehouses/${warehouseId}/location`, { params: { code } });
+    return data.data;
+  },
+
+
   // Stock Movements & Inventory
   async getStockMovements(params?: { store_id?: number; search?: string; type?: string; warehouse_id?: number; page?: number; per_page?: number }) {
     const { data } = await apiClient.get('/inventory/movements', { params });
@@ -1393,7 +1632,7 @@ const omsService = {
   },
 
   // Inbound Receipts & Putaway
-  async getInventoryReceipts(params?: { search?: string; warehouse_id?: number; status?: string; page?: number; per_page?: number }) {
+  async getInventoryReceipts(params?: { search?: string; warehouse_id?: number; store_id?: number; status?: string; page?: number; per_page?: number }) {
     const { data } = await apiClient.get('/inventory/receipts', { params });
     return data;
   },
@@ -1441,7 +1680,7 @@ const omsService = {
   },
 
   // Multi-Stage Transfers
-  async getInventoryTransfers(params?: { search?: string; status?: string; page?: number; per_page?: number }) {
+  async getInventoryTransfers(params?: { search?: string; store_id?: number; status?: string; page?: number; per_page?: number }) {
     const { data } = await apiClient.get('/inventory/transfers', { params });
     return data;
   },
@@ -1471,7 +1710,7 @@ const omsService = {
   },
 
   // Adjustments & Approvals
-  async getInventoryAdjustments(params?: { search?: string; warehouse_id?: number; status?: string; page?: number; per_page?: number }) {
+  async getInventoryAdjustments(params?: { search?: string; warehouse_id?: number; store_id?: number; status?: string; page?: number; per_page?: number }) {
     const { data } = await apiClient.get('/inventory/adjustments', { params });
     return data;
   },
@@ -1502,7 +1741,7 @@ const omsService = {
   },
 
   // Cycle Counts
-  async getCycleCounts(params?: { warehouse_id?: number; status?: string; page?: number; per_page?: number }) {
+  async getCycleCounts(params?: { warehouse_id?: number; store_id?: number; status?: string; page?: number; per_page?: number }) {
     const { data } = await apiClient.get('/inventory/cycle-counts', { params });
     return data;
   },
@@ -1529,8 +1768,8 @@ const omsService = {
   },
 
   // Replenishment & Reorder
-  async getReplenishmentRules() {
-    const { data } = await apiClient.get('/inventory/replenishment/rules');
+  async getReplenishmentRules(storeId?: number) {
+    const { data } = await apiClient.get('/inventory/replenishment/rules', { params: { store_id: storeId } });
     return data;
   },
 
@@ -1549,13 +1788,13 @@ const omsService = {
   },
 
   /** Out-of-stock and low-stock items for the notification bell (at most 50, worst first). */
-  async getStockAlerts(): Promise<StockAlertsResponse> {
-    const { data } = await apiClient.get('/inventory/replenishment/alerts');
+  async getStockAlerts(storeId?: number): Promise<StockAlertsResponse> {
+    const { data } = await apiClient.get('/inventory/replenishment/alerts', { params: { store_id: storeId } });
     return data;
   },
 
-  async getReplenishmentRecommendations(warehouseId?: number) {
-    const { data } = await apiClient.get('/inventory/replenishment/recommendations', { params: { warehouse_id: warehouseId } });
+  async getReplenishmentRecommendations(warehouseId?: number, storeId?: number) {
+    const { data } = await apiClient.get('/inventory/replenishment/recommendations', { params: { warehouse_id: warehouseId, store_id: storeId } });
     return data;
   },
 
@@ -1566,7 +1805,7 @@ const omsService = {
   },
 
   // Picking & Packing
-  async getPickingTasks(params?: { store_id?: number; search?: string; status?: string; page?: number; per_page?: number }) {
+  async getPickingTasks(params?: { store_id?: number; warehouse_id?: number; search?: string; status?: string; page?: number; per_page?: number }) {
     const { data } = await apiClient.get('/picking', { params });
     return data;
   },
@@ -1597,8 +1836,8 @@ const omsService = {
     return data;
   },
 
-  async getPickWaves(): Promise<PickWaveSummary[]> {
-    const { data } = await apiClient.get('/picking/waves');
+  async getPickWaves(params?: { warehouse_id?: number; store_id?: number }): Promise<PickWaveSummary[]> {
+    const { data } = await apiClient.get('/picking/waves', { params });
     return data.data;
   },
 
@@ -1633,8 +1872,67 @@ const omsService = {
     return data;
   },
 
-  async dispatchShipment(shipmentId: number, payload: { carrier: string; tracking_number?: string; tracking_url?: string }) {
+  /** Dispatch with a courier account (booked through its API) or with a carrier and tracking details. */
+  async dispatchShipment(shipmentId: number, payload: { courier_account_id?: number; carrier?: string; tracking_number?: string; tracking_url?: string }) {
     const { data } = await apiClient.post(`/shipments/${shipmentId}/dispatch`, payload);
+    return data;
+  },
+
+  /** Active courier accounts to book parcels with. */
+  async getShipmentCouriers(): Promise<{ id: number; carrier: string; name: string; carrier_name: string }[]> {
+    const { data } = await apiClient.get('/shipments/couriers');
+    return data.data;
+  },
+
+  /** Ask the couriers now for the status of every parcel on its way. */
+  async trackShipments(): Promise<{ message: string }> {
+    const { data } = await apiClient.post('/shipments/track');
+    return data;
+  },
+
+  /** Open the courier label: the courier's link, or the PDF downloaded from the courier. */
+  async openShipmentLabel(shipmentId: number, trackingNumber: string) {
+    const token = getAuthToken();
+    const response = await fetch(`/api/v1/shipments/${shipmentId}/label`, {
+      headers: { Accept: 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      credentials: 'include',
+    });
+    const type = response.headers.get('Content-Type') ?? '';
+    if (!response.ok || type.includes('json')) {
+      const body = await response.json().catch(() => null);
+      if (response.ok && body?.data?.url) {
+        window.open(body.data.url, '_blank', 'noopener');
+        return;
+      }
+      throw new Error(body?.message || 'The label could not be opened.');
+    }
+    const url = window.URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Label-${trackingNumber}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
+  async getCourierAccounts(): Promise<{ data: CourierAccountModel[]; carriers: CourierCarrier[] }> {
+    const { data } = await apiClient.get('/courier-accounts');
+    return data;
+  },
+
+  async saveCourierAccount(input: CourierAccountInput, accountId?: number): Promise<{ message: string; data: CourierAccountModel }> {
+    const { data } = accountId ? await apiClient.put(`/courier-accounts/${accountId}`, input) : await apiClient.post('/courier-accounts', input);
+    return data;
+  },
+
+  async deleteCourierAccount(accountId: number): Promise<{ message: string }> {
+    const { data } = await apiClient.delete(`/courier-accounts/${accountId}`);
+    return data;
+  },
+
+  async testCourierAccount(accountId: number): Promise<{ message: string; data: CourierAccountModel }> {
+    const { data } = await apiClient.post(`/courier-accounts/${accountId}/test`);
     return data;
   },
 

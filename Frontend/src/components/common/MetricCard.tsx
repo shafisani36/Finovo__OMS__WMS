@@ -28,7 +28,7 @@ export const MetricCard: React.FC<MetricCardProps> = ({
                 pillVariant === 'green'
                   ? 'kpi-pill-green'
                   : pillVariant === 'amber'
-                  ? 'bg-amber-50 text-amber-700'
+                  ? 'kpi-pill-amber'
                   : 'kpi-pill-blue'
               }`}
             >

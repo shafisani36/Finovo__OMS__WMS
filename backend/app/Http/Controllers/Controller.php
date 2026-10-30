@@ -45,6 +45,20 @@ abstract class Controller
     }
 
     /**
+     * With ?store_id=, limit a list to rows about products sold in that store (the store being managed). Several
+     * stores can share a warehouse; each only sees its own products. $relation leads from the row to its variant.
+     *
+     * @template TQuery of Builder|Relation
+     *
+     * @param  TQuery  $query
+     * @return TQuery
+     */
+    protected function forStoreProducts(Builder|Relation $query, Request $request, string $relation = 'variant'): Builder|Relation
+    {
+        return $query->when($request->integer('store_id'), fn ($q, int $storeId) => $q->whereHas("{$relation}.skuMappings", fn ($m) => $m->where('store_id', $storeId)));
+    }
+
+    /**
      * Rows per page from ?per_page=, kept between 1 and $max (100 unless a screen needs a full list).
      */
     protected function perPage(Request $request, int $default = 15, int $max = 100): int

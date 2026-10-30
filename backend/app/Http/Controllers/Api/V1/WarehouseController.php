@@ -9,14 +9,20 @@ use App\Models\WarehouseLocation;
 use App\Models\WarehouseMembership;
 use App\Services\AccessControl;
 use App\Services\EmailService;
+use App\Services\InventoryEngine;
+use App\Services\SlottingService;
+use App\Services\StoreWarehouseService;
 use App\Services\WarehouseInsights;
 use App\Services\WarehouseLayoutService;
 use App\Services\WarehouseOpeningStockService;
+use App\Services\WarehousePerformanceService;
 use App\Services\WarehouseReadinessService;
 use App\Services\WarehouseService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
+use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
 
 class WarehouseController extends Controller
@@ -29,6 +35,8 @@ class WarehouseController extends Controller
         protected EmailService $emails,
         protected AccessControl $access,
         protected WarehouseInsights $insights,
+        protected WarehousePerformanceService $performance,
+        protected SlottingService $slotting,
     ) {}
 
     /**
@@ -50,7 +58,7 @@ class WarehouseController extends Controller
             $filters['ids'] = $ids;
         }
 
-        $perPage = (int) $request->query('per_page', 10);
+        $perPage = $this->perPage($request, 10);
         $result = $this->warehouseService->listWarehouses($org->id, $filters, $perPage);
 
         return response()->json([
@@ -603,7 +611,7 @@ class WarehouseController extends Controller
 
         $logs = $warehouse->auditLogs()
             ->with('user:id,name,email')
-            ->paginate((int) $request->query('per_page', 25));
+            ->paginate($this->perPage($request, 25));
 
         return response()->json([
             'status' => 'success',
@@ -641,6 +649,120 @@ class WarehouseController extends Controller
         return response()->json([
             'status' => 'success',
             ...$this->insights->activity($warehouse, $validated['type'] ?? 'all', (int) ($validated['page'] ?? 1), $this->perPage($request, 20)),
+        ]);
+    }
+
+    /**
+     * WERC-style performance dashboard: accuracy, cycle times, productivity and capacity
+     * versus 2025 best-in-class benchmarks. Optional ?from=&to= (ISO dates, default last 30 days).
+     */
+    public function performance(Request $request, Warehouse $warehouse): JsonResponse
+    {
+        $this->authorizeWarehouse($request, $warehouse);
+        $validated = $request->validate([
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date', 'after_or_equal:from'],
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $this->performance->dashboard(
+                $warehouse,
+                $validated['from'] ?? null,
+                $validated['to'] ?? null,
+            ),
+        ]);
+    }
+
+    /**
+     * ABC slotting: each product's class from its sales value, where its stock is, and the moves that would put
+     * fast sellers in the picking area and slow sellers in bulk storage.
+     */
+    public function slotting(Request $request, Warehouse $warehouse): JsonResponse
+    {
+        $this->authorizeWarehouse($request, $warehouse);
+        $days = (int) ($request->validate(['days' => ['nullable', 'integer', 'in:30,60,90,180,365']])['days'] ?? SlottingService::LOOKBACK_DAYS);
+
+        return response()->json(['status' => 'success', 'data' => $this->slotting->analyse($warehouse, $days)]);
+    }
+
+    /**
+     * The bin to put received units of a product in.
+     */
+    public function putawaySuggestion(Request $request, Warehouse $warehouse): JsonResponse
+    {
+        $this->authorizeWarehouse($request, $warehouse);
+        $validated = $request->validate([
+            'product_variant_id' => ['required', 'integer', $this->inOrganization($request, 'product_variants')],
+            'quantity' => ['nullable', 'integer', 'min:1'],
+            'lot_number' => ['nullable', 'string', 'max:100'],
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $this->slotting->suggestPutaway($warehouse, (int) $validated['product_variant_id'], (int) ($validated['quantity'] ?? 1), $validated['lot_number'] ?? null),
+        ]);
+    }
+
+    /**
+     * Set the stores the warehouse serves. A newly linked store ships from it after its other warehouses.
+     */
+    public function updateStores(Request $request, Warehouse $warehouse, StoreWarehouseService $links): JsonResponse
+    {
+        $this->authorizeWarehouse($request, $warehouse);
+
+        $validated = $request->validate([
+            'store_ids' => ['present', 'array'],
+            'store_ids.*' => ['integer', 'distinct'],
+        ]);
+
+        $warehouse = $links->setWarehouseStores($warehouse, $validated['store_ids'], $request->user());
+        $names = $warehouse->stores->pluck('name');
+
+        return response()->json([
+            'status' => 'success',
+            'message' => $names->isEmpty()
+                ? "{$warehouse->name} is not linked to any store now."
+                : "{$warehouse->name} now fulfils orders of ".$names->implode(', ').'.',
+            'data' => $warehouse->stores,
+        ]);
+    }
+
+    /**
+     * Move units of a product from one bin to another in the warehouse (a slotting move or a manual re-bin).
+     */
+    public function moveStock(Request $request, Warehouse $warehouse, InventoryEngine $inventory): JsonResponse
+    {
+        $this->authorizeWarehouse($request, $warehouse);
+        $inWarehouse = Rule::exists('warehouse_locations', 'id')->where('warehouse_id', $warehouse->id);
+        $validated = $request->validate([
+            'product_variant_id' => ['required', 'integer', $this->inOrganization($request, 'product_variants')],
+            'from_location_id' => ['required', 'integer', $inWarehouse],
+            'to_location_id' => ['required', 'integer', 'different:from_location_id', $inWarehouse],
+            'quantity' => ['required', 'integer', 'min:1'],
+            'lot_number' => ['nullable', 'string', 'max:100'],
+        ]);
+
+        try {
+            $inventory->putawayStock(
+                organizationId: $warehouse->organization_id,
+                warehouseId: $warehouse->id,
+                productVariantId: $validated['product_variant_id'],
+                fromLocationId: $validated['from_location_id'],
+                toLocationId: $validated['to_location_id'],
+                quantity: $validated['quantity'],
+                lotNumber: $validated['lot_number'] ?? null,
+                userId: $request->user()->id,
+            );
+        } catch (RuntimeException $e) {
+            throw ValidationException::withMessages(['quantity' => $e->getMessage()]);
+        }
+
+        $codes = WarehouseLocation::whereIn('id', [$validated['from_location_id'], $validated['to_location_id']])->pluck('code', 'id');
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Moved {$validated['quantity']} units from {$codes[$validated['from_location_id']]} to {$codes[$validated['to_location_id']]}.",
         ]);
     }
 

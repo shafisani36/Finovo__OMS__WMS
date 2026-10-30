@@ -9,6 +9,7 @@ import omsService from '../../services/omsService';
 import type { OrderModel } from '../../services/omsService';
 import { formatDate, formatMoney } from '../../utils/format';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { useActiveStore } from '../../hooks/useActiveStore';
 
 const STATUS_TABS: { value: string; label: string }[] = [
   { value: '', label: 'All' },
@@ -23,6 +24,8 @@ const STATUS_TABS: { value: string; label: string }[] = [
  * Opening an order shows its workflow, so staff can pick, pack and dispatch from here.
  */
 export const WarehouseOrders: React.FC<{ warehouseId: number; onCountChange?: (count: number) => void }> = ({ warehouseId, onCountChange }) => {
+  const { activeStore } = useActiveStore();
+  const storeId = activeStore?.id;
   const [orders, setOrders] = useState<OrderModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +47,8 @@ export const WarehouseOrders: React.FC<{ warehouseId: number; onCountChange?: (c
       setError(null);
       const res = await omsService.getOrders({
         warehouse_id: warehouseId,
+        // Several stores can share the warehouse; only the managed store's orders are listed.
+        store_id: storeId,
         status: status || undefined,
         search: appliedSearch || undefined,
         page,
@@ -57,7 +62,7 @@ export const WarehouseOrders: React.FC<{ warehouseId: number; onCountChange?: (c
     } finally {
       setLoading(false);
     }
-  }, [warehouseId, status, appliedSearch, page, perPage, onCountChange]);
+  }, [warehouseId, storeId, status, appliedSearch, page, perPage, onCountChange]);
 
   useEffect(() => {
     fetchOrders();

@@ -10,8 +10,8 @@ import type { BillingStore, ClientCharges, ClientInput, ClientInvoiceLine, Clien
 import { platformLabel } from '../stores/storePlatforms';
 import { formatDate, formatMoney } from '../../utils/format';
 import './Billing.css';
+import { errorMessage } from '../../utils/errors';
 
-const errorText = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
 
 const isoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
@@ -187,7 +187,7 @@ export const ClientFormModal: React.FC<{ client: ClientModel | null; stores: Bil
       const res = await omsService.saveClient({ ...form, code: form.code.trim().toUpperCase(), currency: form.currency.trim().toUpperCase() }, client?.id);
       onSaved(res.message);
     } catch (err) {
-      setError(errorText(err, 'The client could not be saved.'));
+      setError(errorMessage(err, 'The client could not be saved.'));
     } finally {
       setSaving(false);
     }
@@ -328,7 +328,7 @@ export const ChargesModal: React.FC<{ client: ClientModel; canManage: boolean; o
     omsService
       .getClientCharges(client.id, period)
       .then((data) => current && (setCharges(data), setError(null)))
-      .catch((err) => current && setError(errorText(err, 'The charges could not be calculated.')));
+      .catch((err) => current && setError(errorMessage(err, 'The charges could not be calculated.')));
     return () => {
       current = false;
     };
@@ -340,7 +340,7 @@ export const ChargesModal: React.FC<{ client: ClientModel; canManage: boolean; o
       const res = await omsService.createClientInvoice({ client_id: client.id, period_start: period.from, period_end: period.to });
       onInvoiced(res.data, res.message);
     } catch (err) {
-      setError(errorText(err, 'The invoice could not be created.'));
+      setError(errorMessage(err, 'The invoice could not be created.'));
     } finally {
       setCreating(false);
     }
@@ -425,7 +425,7 @@ export const NewInvoiceModal: React.FC<{ clients: ClientModel[]; onClose: () => 
       const res = await omsService.createClientInvoice({ client_id: clientId, period_start: period.from, period_end: period.to });
       onCreated(res.data, res.message);
     } catch (err) {
-      setError(errorText(err, 'The invoice could not be created.'));
+      setError(errorMessage(err, 'The invoice could not be created.'));
     } finally {
       setSaving(false);
     }
@@ -484,7 +484,7 @@ export const InvoiceModal: React.FC<{ invoiceId: number; canManage: boolean; onC
     omsService
       .getClientInvoice(invoiceId)
       .then(setInvoice)
-      .catch((err) => setFeedback({ type: 'error', text: errorText(err, 'The invoice could not be loaded.') }));
+      .catch((err) => setFeedback({ type: 'error', text: errorMessage(err, 'The invoice could not be loaded.') }));
   }, [invoiceId]);
 
   const run = async (key: string, action: () => Promise<{ message: string; data: ClientInvoiceModel }>) => {
@@ -496,7 +496,7 @@ export const InvoiceModal: React.FC<{ invoiceId: number; canManage: boolean; onC
       onChanged(res.message);
       return true;
     } catch (err) {
-      setFeedback({ type: 'error', text: errorText(err, 'The invoice could not be updated.') });
+      setFeedback({ type: 'error', text: errorMessage(err, 'The invoice could not be updated.') });
       return false;
     } finally {
       setBusy(null);
@@ -514,7 +514,7 @@ export const InvoiceModal: React.FC<{ invoiceId: number; canManage: boolean; onC
       setBusy('pdf');
       await omsService.downloadClientInvoice(invoice.id, invoice.invoice_number);
     } catch (err) {
-      setFeedback({ type: 'error', text: errorText(err, 'Could not download the invoice.') });
+      setFeedback({ type: 'error', text: errorMessage(err, 'Could not download the invoice.') });
     } finally {
       setBusy(null);
     }

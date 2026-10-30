@@ -13,6 +13,16 @@ class ConnectStoreRequest extends FormRequest
         return true;
     }
 
+    /**
+     * Older clients send a single warehouse_id.
+     */
+    protected function prepareForValidation(): void
+    {
+        if (! $this->has('warehouse_ids') && $this->filled('warehouse_id')) {
+            $this->merge(['warehouse_ids' => [$this->input('warehouse_id')]]);
+        }
+    }
+
     public function rules(): array
     {
         $platform = StorePlatform::tryFrom((string) $this->input('platform'));
@@ -20,7 +30,9 @@ class ConnectStoreRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:255'],
             'platform' => ['required', Rule::enum(StorePlatform::class)],
-            'warehouse_id' => ['required', 'integer'],
+            // In priority order: the first is the store's main warehouse.
+            'warehouse_ids' => ['required', 'array', 'min:1'],
+            'warehouse_ids.*' => ['integer', 'distinct'],
             'credentials' => ['nullable', 'array'],
             ...($platform?->credentialRules() ?? []),
         ];
@@ -29,7 +41,8 @@ class ConnectStoreRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'warehouse_id.required' => 'Select the warehouse that fulfils this store\'s orders.',
+            'warehouse_ids.required' => 'Select at least one warehouse that fulfils this store\'s orders.',
+            'warehouse_ids.min' => 'Select at least one warehouse that fulfils this store\'s orders.',
             'credentials.shop_domain.required' => 'Enter your Shopify store address.',
             'credentials.site_url.required' => 'Enter the store website address.',
             'credentials.site_url.url' => 'Enter a full website address starting with http:// or https://.',

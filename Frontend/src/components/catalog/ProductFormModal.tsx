@@ -5,6 +5,7 @@ import omsService, { PRODUCT_PLATFORMS } from '../../services/omsService';
 import type { ProductDetail, ProductPayload, StoreModel } from '../../services/omsService';
 import { platformLabel } from '../stores/storePlatforms';
 import { useStoreList } from '../../hooks/useStoreList';
+import { useActiveStore } from '../../hooks/useActiveStore';
 import { errorMessage } from '../../utils/errors';
 import './CatalogForms.css';
 
@@ -31,8 +32,8 @@ const newRow = (values: Partial<VariantRow> = {}): VariantRow => ({
   ...values,
 });
 
-/** Form values from an existing product, or an empty form. */
-const initialState = (product?: ProductDetail | null) => ({
+/** Form values from an existing product, or an empty form (a new product is sold in the managed store). */
+const initialState = (product?: ProductDetail | null, storeId?: number) => ({
   name: product?.name ?? '',
   sku: product?.sku ?? '',
   category: product?.category ?? '',
@@ -53,7 +54,7 @@ const initialState = (product?: ProductDetail | null) => ({
         })
       )
     : [newRow()],
-  store_ids: product?.store_ids ?? [],
+  store_ids: product?.store_ids ?? (storeId ? [storeId] : []),
 });
 
 /** A product's details as the save request; used by the form and by archive / reactivate. */
@@ -76,7 +77,10 @@ export const productPayload = (product: ProductDetail, overrides: Partial<Produc
   ...overrides,
 });
 
-const canWriteTo = (store: StoreModel) => store.connection_state === 'connected' && PRODUCT_PLATFORMS.includes(store.platform);
+/** A store kept in Finovo only (no shop): its catalog is the products ticked for it here. */
+const isFinovoOnly = (store: StoreModel) => store.platform === 'manual';
+
+const canWriteTo = (store: StoreModel) => store.connection_state === 'connected' && (PRODUCT_PLATFORMS.includes(store.platform) || isFinovoOnly(store));
 
 interface Props {
   /** The product being edited; empty to add a new one. */
@@ -91,7 +95,8 @@ interface Props {
  */
 export const ProductFormModal: React.FC<Props> = ({ product, onClose, onSaved }) => {
   const stores = useStoreList();
-  const [form, setForm] = useState(() => initialState(product));
+  const { activeStore } = useActiveStore();
+  const [form, setForm] = useState(() => initialState(product, activeStore?.id));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasOptions = form.rows.length > 1 || Boolean(form.option_name.trim());
@@ -112,7 +117,8 @@ export const ProductFormModal: React.FC<Props> = ({ product, onClose, onSaved })
       description: form.description.trim() || null,
       image_url: form.image_url.trim() || undefined,
       is_active: form.is_active,
-      store_ids: form.store_ids.filter((id) => !linkedIds.has(id)),
+      // New stores only, and only those Finovo can add the product to.
+      store_ids: form.store_ids.filter((id) => !linkedIds.has(id) && stores.some((store) => store.id === id && canWriteTo(store))),
       variants: form.rows.map((row) => ({
         id: row.id,
         // A single variant without options takes the product SKU when none is typed.
@@ -271,7 +277,11 @@ export const ProductFormModal: React.FC<Props> = ({ product, onClose, onSaved })
                       <span>
                         {store.name}
                         <small>
-                          {linked
+                          {isFinovoOnly(store)
+                            ? linked
+                              ? 'Sold in this store'
+                              : 'Sell in this store (kept in Finovo)'
+                            : linked
                             ? `Already on ${platformLabel(store.platform)}; changes are sent there`
                             : writable
                               ? `Create it on ${platformLabel(store.platform)}`

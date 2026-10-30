@@ -78,7 +78,7 @@ export const PickingPage: React.FC = () => {
       setKpis(res.kpis);
       setTotal(res.meta.total);
       setLastPage(res.meta.last_page);
-      setWaves(await omsService.getPickWaves());
+      setWaves(await omsService.getPickWaves({ store_id: activeStore?.id }));
     } catch (err) {
       showError(err, 'Failed to load picking tasks.');
     } finally {
@@ -335,7 +335,7 @@ export const PickingPage: React.FC = () => {
           title="In Progress"
           value={kpis.in_progress}
           icon={<RefreshCw size={20} />}
-          pillText="On track"
+          pillText="Being picked"
           pillVariant="blue"
         />
         <MetricCard

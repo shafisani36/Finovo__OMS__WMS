@@ -58,7 +58,7 @@ class OrderController extends Controller
         $warehouseId = $request->validate(['warehouse_id' => ['nullable', 'integer', $this->accessibleWarehouse($request)]])['warehouse_id'] ?? null;
         $query->when($warehouseId, fn ($q) => $q->assignedToWarehouse($warehouseId));
 
-        $perPage = (int) $request->query('per_page', 10);
+        $perPage = $this->perPage($request, 10);
         $orders = $query->latest('placed_at')->paginate($perPage);
 
         // Metrics

@@ -234,7 +234,7 @@ class PrestaShopWriter extends PlatformWriter implements ProductWriter, WebhookS
     public function registerWebhooks(Store $store, string $callbackUrl): void
     {
         if (($store->settings['module_webhook_url'] ?? null) !== $callbackUrl) {
-            throw new RuntimeException('Install the latest Finovo module in PrestaShop (Stores → Module), then open Modules → Finovo OMS Connector → Configure and click Connect again, so the shop notifies Finovo of new orders at once.');
+            throw new AutomaticImportUnavailable('Install the latest Finovo module in PrestaShop (Stores → Module), then open Modules → Finovo OMS Connector → Configure and click Connect again, so the shop notifies Finovo of new orders at once.');
         }
     }
 

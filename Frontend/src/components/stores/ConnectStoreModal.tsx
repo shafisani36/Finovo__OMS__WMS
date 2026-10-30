@@ -20,7 +20,8 @@ type ResultStep =
   | { kind: 'install_app'; message: string }
   | { kind: 'install_module'; url: string; message: string };
 
-const EMPTY_FORM = { name: '', platform: 'shopify' as StorePlatform, warehouseId: null as number | null };
+/** warehouseIds in the order chosen: the first is the store's main warehouse. */
+const EMPTY_FORM = { name: '', platform: 'shopify' as StorePlatform, warehouseIds: [] as number[] };
 
 export const ConnectStoreModal: React.FC<ConnectStoreModalProps> = ({ warehouses, onClose, onConnected, onRedirect }) => {
   const [form, setForm] = useState(EMPTY_FORM);
@@ -87,8 +88,8 @@ export const ConnectStoreModal: React.FC<ConnectStoreModalProps> = ({ warehouses
     setFormError('');
     setFieldErrors({});
 
-    if (!form.warehouseId) {
-      setFieldErrors({ warehouse_id: 'Select the warehouse that fulfils this store\'s orders.' });
+    if (form.warehouseIds.length === 0) {
+      setFieldErrors({ warehouse_ids: 'Select at least one warehouse that fulfils this store\'s orders.' });
       return;
     }
 
@@ -97,7 +98,7 @@ export const ConnectStoreModal: React.FC<ConnectStoreModalProps> = ({ warehouses
       const response = await omsService.createStore({
         name: form.name.trim(),
         platform: form.platform,
-        warehouse_id: form.warehouseId,
+        warehouse_ids: form.warehouseIds,
         credentials: buildCredentials(),
       });
       handleResponse(response);
@@ -105,7 +106,7 @@ export const ConnectStoreModal: React.FC<ConnectStoreModalProps> = ({ warehouses
       if (err instanceof ApiError && err.errors) {
         const mapped: Record<string, string> = {};
         Object.entries(err.errors).forEach(([key, messages]) => {
-          mapped[key.replace(/^credentials\./, '')] = messages[0];
+          mapped[key.replace(/^credentials\./, '').replace(/^warehouse_ids\..*$/, 'warehouse_ids')] = messages[0];
         });
         setFieldErrors(mapped);
         setFormError(mapped.credentials || mapped.platform || '');
@@ -215,17 +216,24 @@ export const ConnectStoreModal: React.FC<ConnectStoreModalProps> = ({ warehouses
                 error={fieldErrors.platform}
               />
               <CustomDropdown
-                label="Fulfilling Warehouse"
+                label="Fulfilling Warehouses"
                 required
-                value={form.warehouseId}
-                onChange={(val: number) => setForm({ ...form, warehouseId: val })}
+                multiple
+                value={form.warehouseIds}
+                onMultiChange={(values) => setForm({ ...form, warehouseIds: values.map(Number) })}
                 options={warehouseOptions}
-                placeholder={warehouses.length ? 'Select warehouse' : 'No warehouses yet'}
+                placeholder={warehouses.length ? 'Select warehouses' : 'No warehouses yet'}
                 disabled={warehouses.length === 0}
                 searchable={warehouses.length > 6}
-                error={fieldErrors.warehouse_id}
+                error={fieldErrors.warehouse_ids}
               />
             </div>
+            {form.warehouseIds.length > 1 && (
+              <p className="store-connect-help">
+                Orders go to {warehouses.find((w) => w.id === form.warehouseIds[0])?.name} first, then to the next warehouse in the order you picked
+                them. You can change the order later from the store's menu (Warehouses).
+              </p>
+            )}
             {warehouses.length === 0 && (
               <p className="store-connect-help">Create a warehouse first (Warehouses → New Warehouse Wizard); every store ships from one.</p>
             )}

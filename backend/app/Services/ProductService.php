@@ -64,8 +64,31 @@ class ProductService
         });
 
         $stores = Store::where('organization_id', $organizationId)->whereIn('id', $storeIds)->get();
+        $product = $product->fresh('variants');
 
-        return [$product->fresh('variants'), $this->push->pushProduct($product->fresh('variants'), $stores)];
+        $this->linkToFinovoStores($product, $stores);
+
+        return [$product, $this->push->pushProduct($product, $stores)];
+    }
+
+    /**
+     * Put the product in the catalog of stores kept in Finovo only (no shop to create it on), so it is listed
+     * with that store's products, stock and movements. Stores it is already in also get its new variants.
+     *
+     * @param  Collection<int, Store>  $chosen
+     */
+    private function linkToFinovoStores(Product $product, Collection $chosen): void
+    {
+        $variantIds = $product->variants->pluck('id');
+        $alreadyIn = Store::whereIn('id', SkuMapping::whereIn('product_variant_id', $variantIds)->select('store_id'))->get();
+
+        $stores = $chosen->concat($alreadyIn)->unique('id')->filter(fn (Store $store) => $store->platform->keepsCatalogInFinovo());
+
+        foreach ($stores as $store) {
+            foreach ($product->variants as $variant) {
+                SkuMapping::addToFinovoStore($store, $variant->setRelation('product', $product));
+            }
+        }
     }
 
     /**

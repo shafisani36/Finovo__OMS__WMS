@@ -44,8 +44,11 @@ const linesOf = (order?: OrderModel | null): Line[] =>
       unitPrice: String(Number(item.unit_price)),
     }));
 
-/** Search the catalog and pick a variant to add to the order. */
-const ProductPicker: React.FC<{ onPick: (line: Line) => void }> = ({ onPick }) => {
+/**
+ * Search the catalog and pick a variant to add to the order: the store's own products, or any product for a store
+ * kept in Finovo only (the product joins that store's catalog with the order).
+ */
+const ProductPicker: React.FC<{ onPick: (line: Line) => void; storeId?: number }> = ({ onPick, storeId }) => {
   const [search, setSearch] = useState('');
   const term = useDebouncedValue(search.trim());
   const [results, setResults] = useState<ProductModel[]>([]);
@@ -57,13 +60,13 @@ const ProductPicker: React.FC<{ onPick: (line: Line) => void }> = ({ onPick }) =
     }
     let active = true;
     omsService
-      .getProducts({ search: term, per_page: 8 })
+      .getProducts({ search: term, store_id: storeId, per_page: 8 })
       .then((res) => active && setResults(res.data))
       .catch(() => active && setResults([]));
     return () => {
       active = false;
     };
-  }, [term]);
+  }, [term, storeId]);
 
   const options = results.flatMap((product) =>
     (product.variants ?? [])
@@ -122,7 +125,7 @@ interface Props {
   /** The order being edited; empty to create a new one. */
   order?: OrderModel | null;
   onClose: () => void;
-  onSaved: (message: string) => void;
+  onSaved: (message: string, order: OrderModel) => void;
 }
 
 /**
@@ -200,7 +203,7 @@ export const OrderFormModal: React.FC<Props> = ({ order, onClose, onSaved }) => 
       setSaving(true);
       setError(null);
       const res = order ? await omsService.updateOrder(order.id, payload) : await omsService.createOrder(payload);
-      onSaved(res.message);
+      onSaved(res.message, res.data);
     } catch (err) {
       setError(errorMessage(err, 'The order could not be saved.'));
     } finally {
@@ -232,7 +235,8 @@ export const OrderFormModal: React.FC<Props> = ({ order, onClose, onSaved }) => 
               <CustomDropdown
                 value={storeId === '' ? '' : String(storeId)}
                 onChange={(val) => setStoreId(val === '' ? '' : Number(val))}
-                disabled={onStore}
+                // New orders belong to the store being managed, so they show in its order list.
+                disabled={onStore || (!order && Boolean(activeStore))}
                 searchable={false}
                 options={[
                   { value: '', label: 'No store (Finovo only)', description: 'Walk-in, phone or wholesale' },
@@ -280,7 +284,7 @@ export const OrderFormModal: React.FC<Props> = ({ order, onClose, onSaved }) => 
           {onStore ? (
             <div className="cf-note">This order is on {order?.store?.name}, so its products and quantities are changed there.</div>
           ) : (
-            <ProductPicker onPick={addLine} />
+            <ProductPicker onPick={addLine} storeId={chosenStore && chosenStore.platform !== 'manual' ? chosenStore.id : undefined} />
           )}
 
           {lines.length > 0 && (
@@ -379,7 +383,7 @@ export const OrderFormModal: React.FC<Props> = ({ order, onClose, onSaved }) => 
             <textarea className="cf-input" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} placeholder="Delivery instructions or anything the team should know" />
           </label>
 
-          {chosenStore && !onStore && !(chosenStore.connection_state === 'connected' && ORDER_CREATE_PLATFORMS.includes(chosenStore.platform)) && (
+          {chosenStore && !onStore && chosenStore.platform !== 'manual' && !(chosenStore.connection_state === 'connected' && ORDER_CREATE_PLATFORMS.includes(chosenStore.platform)) && (
             <div className="cf-note">{chosenStore.name} cannot take orders from Finovo, so this order stays in Finovo only.</div>
           )}
         </div>

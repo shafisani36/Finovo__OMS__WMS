@@ -64,7 +64,7 @@ class InventoryController extends Controller
             }
         }
 
-        $perPage = (int) $request->query('per_page', 15);
+        $perPage = $this->perPage($request, 15);
         $balances = $query->orderBy('warehouse_id')->orderBy('available', 'desc')->paginate($perPage);
 
         // Fetch location breakdowns for displayed product variants & warehouses

@@ -6,7 +6,7 @@ import { useConfirmDialog } from '../common/ConfirmDialog';
 import omsService from '../../services/omsService';
 import type { WarehouseBin, WarehouseLocationModel, WarehouseZone } from '../../services/omsService';
 import { humanize } from '../../utils/format';
-import { errorText } from './warehouseTabs';
+import { errorMessage } from '../../utils/errors';
 
 const LOCATION_TYPES = [
   { value: 'zone', label: 'Zone', description: 'A top-level area' },
@@ -69,7 +69,7 @@ export const WarehouseLocationsTab: React.FC<Props> = ({ warehouseId, canManage,
       setZones(overview.data.zones);
       setLocations(list.data ?? []);
     } catch (err) {
-      setMessage({ type: 'error', text: errorText(err, 'Failed to load the locations.') });
+      setMessage({ type: 'error', text: errorMessage(err, 'Failed to load the locations.') });
       setZones([]);
     }
   }, [warehouseId]);
@@ -91,7 +91,7 @@ export const WarehouseLocationsTab: React.FC<Props> = ({ warehouseId, canManage,
       setMessage({ type: 'success', text: success });
       refresh();
     } catch (err) {
-      setMessage({ type: 'error', text: errorText(err, failure) });
+      setMessage({ type: 'error', text: errorMessage(err, failure) });
     } finally {
       setBusy(false);
     }
@@ -135,7 +135,7 @@ export const WarehouseLocationsTab: React.FC<Props> = ({ warehouseId, canManage,
       setMessage({ type: 'success', text: `${form.code.trim().toUpperCase()} added.` });
       refresh();
     } catch (err) {
-      setFormError(errorText(err, 'Failed to add the location.'));
+      setFormError(errorMessage(err, 'Failed to add the location.'));
     } finally {
       setBusy(false);
     }

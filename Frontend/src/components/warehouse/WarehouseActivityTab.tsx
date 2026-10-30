@@ -4,7 +4,7 @@ import { Alert } from '../common/Alert';
 import omsService from '../../services/omsService';
 import type { WarehouseActivityItem, WarehouseActivityType } from '../../services/omsService';
 import { formatDate } from '../../utils/format';
-import { errorText } from './warehouseTabs';
+import { errorMessage } from '../../utils/errors';
 
 const FILTERS: { value: WarehouseActivityType; label: string }[] = [
   { value: 'all', label: 'All' },
@@ -40,7 +40,7 @@ export const WarehouseActivityTab: React.FC<{ warehouseId: number }> = ({ wareho
         setPage(res.meta.current_page);
         setLastPage(res.meta.last_page);
       } catch (err) {
-        setError(errorText(err, 'Failed to load the activity.'));
+        setError(errorMessage(err, 'Failed to load the activity.'));
         setItems((prev) => prev ?? []);
       }
     },

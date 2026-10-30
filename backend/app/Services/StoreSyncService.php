@@ -32,6 +32,9 @@ use Throwable;
  */
 class StoreSyncService
 {
+    /** Longest a full sync may hold its lock (a large catalog can take many minutes). */
+    public const SYNC_LOCK_SECONDS = 1800;
+
     /** Orders changed shortly before the previous sync are read again, so none are missed between runs. */
     private const ORDER_OVERLAP_MINUTES = 10;
 
@@ -50,6 +53,27 @@ class StoreSyncService
     public function canSync(Store $store): bool
     {
         return $store->isConnected() && $this->sources->supports($store->platform);
+    }
+
+    /**
+     * Run a full sync now, unless one of this store is already running (then null). The Sync button and the
+     * scheduled background sync share the lock, so a store is never imported twice at the same time.
+     *
+     * @throws Throwable when the store cannot be read; the failure is recorded first
+     */
+    public function syncNow(Store $store): ?SyncResult
+    {
+        $lock = Cache::lock("store-sync:{$store->id}", self::SYNC_LOCK_SECONDS);
+
+        if (! $lock->get()) {
+            return null;
+        }
+
+        try {
+            return $this->sync($store);
+        } finally {
+            $lock->release();
+        }
     }
 
     /**

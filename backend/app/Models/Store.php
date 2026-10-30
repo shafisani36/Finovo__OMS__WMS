@@ -98,6 +98,16 @@ class Store extends Model
     }
 
     /**
+     * Stores that need the merchant: not connected, or connected but their last connection test or sync failed.
+     *
+     * @param  Builder<Store>  $query
+     */
+    public function scopeNeedsAttention(Builder $query): void
+    {
+        $query->where(fn (Builder $q) => $q->where('status', '!=', self::STATUS_ACTIVE)->orWhere('sync_status', 'sync_issues'));
+    }
+
+    /**
      * Stores in one of CONNECTION_STATES (same rules as the connection_state attribute).
      *
      * @param  Builder<Store>  $query
@@ -136,11 +146,13 @@ class Store extends Model
         return $this->belongsTo(Client::class);
     }
 
+    /** The warehouses the store ships from, main warehouse (priority 1) first. */
     public function warehouses(): BelongsToMany
     {
         return $this->belongsToMany(Warehouse::class, 'store_warehouse_assignments')
             ->withPivot(['is_default', 'priority'])
-            ->withTimestamps();
+            ->withTimestamps()
+            ->orderBy('store_warehouse_assignments.priority');
     }
 
     public function orders(): HasMany

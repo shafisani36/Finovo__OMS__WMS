@@ -2,6 +2,9 @@
 
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BarcodeController;
+use App\Http\Controllers\Api\V1\ClientController;
+use App\Http\Controllers\Api\V1\ClientInvoiceController;
+use App\Http\Controllers\Api\V1\CourierAccountController;
 use App\Http\Controllers\Api\V1\CustomBridgeWebhookController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\CycleCountController;
@@ -10,6 +13,7 @@ use App\Http\Controllers\Api\V1\GoodsReceivedNoteController;
 use App\Http\Controllers\Api\V1\InventoryController;
 use App\Http\Controllers\Api\V1\InventoryReceiptController;
 use App\Http\Controllers\Api\V1\InventoryTransferController;
+use App\Http\Controllers\Api\V1\MobileController;
 use App\Http\Controllers\Api\V1\OperationsController;
 use App\Http\Controllers\Api\V1\OrderController;
 use App\Http\Controllers\Api\V1\PasswordChangeController;
@@ -62,6 +66,7 @@ Route::prefix('v1')->group(function () {
     // Store notifications (webhooks): verified by the store's signature, processed after the answer is sent
     Route::prefix('webhooks')->middleware('throttle:600,1')->group(function () {
         Route::post('shopify/compliance', [StoreWebhookController::class, 'shopifyCompliance'])->name('webhooks.shopify.compliance');
+        Route::post('wix', [StoreWebhookController::class, 'wix'])->name('webhooks.wix');
         Route::post('{platform}/{store}', [StoreWebhookController::class, 'receive'])->whereNumber('store')->name('webhooks.store');
     });
 
@@ -73,7 +78,7 @@ Route::prefix('v1')->group(function () {
         Route::get('bigcommerce/callback', [StoreAuthorizationController::class, 'bigCommerceCallback'])->name('bigcommerce.callback');
         Route::get('bigcommerce/load', [StoreAuthorizationController::class, 'bigCommerceLoad'])->name('bigcommerce.load');
         Route::get('bigcommerce/uninstall', [StoreAuthorizationController::class, 'bigCommerceUninstall'])->name('bigcommerce.uninstall');
-        Route::get('modules/{store}', [StoreAuthorizationController::class, 'moduleDownload'])->middleware('signed')->name('module.download');
+        Route::get('modules/{store}', [StoreAuthorizationController::class, 'moduleDownload'])->middleware('signed:relative')->name('module.download');
         Route::post('prestashop/callback', [StoreAuthorizationController::class, 'prestaShopCallback'])->name('prestashop.callback');
         Route::post('opencart/callback', [StoreAuthorizationController::class, 'openCartCallback'])->name('opencart.callback');
         Route::get('wix/callback', [StoreAuthorizationController::class, 'wixCallback'])->name('wix.callback');
@@ -91,7 +96,9 @@ Route::prefix('v1')->group(function () {
         Route::get('stores/{store}/authorization', [StoreController::class, 'authorization'])->middleware('permission:stores.connect');
         Route::post('stores/{store}/test-connection', [StoreController::class, 'testConnection'])->middleware('permission:stores.connect');
         Route::post('stores/{store}/sync', [StoreController::class, 'sync'])->middleware('permission:stores.sync');
+        Route::post('stores/{store}/sync-orders', [StoreController::class, 'syncOrders'])->middleware('permission:orders.view');
         Route::post('stores/{store}/webhooks', [StoreController::class, 'enableWebhooks'])->middleware('permission:stores.connect');
+        Route::put('stores/{store}/warehouses', [StoreController::class, 'updateWarehouses'])->middleware('permission:stores.connect');
         Route::delete('stores/{store}', [StoreController::class, 'destroy'])->middleware('permission:stores.delete');
 
         // Warehouses (the list feeds warehouse pickers and only shows the employee's own warehouses)
@@ -105,9 +112,14 @@ Route::prefix('v1')->group(function () {
             Route::get('warehouses/{warehouse}/audit-logs', [WarehouseController::class, 'auditLogs']);
             Route::get('warehouses/{warehouse}/overview', [WarehouseController::class, 'overview']);
             Route::get('warehouses/{warehouse}/activity', [WarehouseController::class, 'activity']);
+            Route::get('warehouses/{warehouse}/performance', [WarehouseController::class, 'performance']);
+            Route::get('warehouses/{warehouse}/slotting', [WarehouseController::class, 'slotting']);
+            Route::get('warehouses/{warehouse}/putaway-suggestion', [WarehouseController::class, 'putawaySuggestion']);
         });
+        Route::post('warehouses/{warehouse}/move-stock', [WarehouseController::class, 'moveStock'])->middleware('permission:inventory.transfer');
         Route::middleware('permission:warehouses.manage')->group(function () {
             Route::put('warehouses/{warehouse}', [WarehouseController::class, 'update']);
+            Route::put('warehouses/{warehouse}/stores', [WarehouseController::class, 'updateStores']);
             Route::post('warehouses/{warehouse}/activate', [WarehouseController::class, 'activate']);
             Route::post('warehouses/{warehouse}/deactivate', [WarehouseController::class, 'deactivate']);
             Route::post('warehouses/{warehouse}/begin-closure', [WarehouseController::class, 'beginClosure']);
@@ -143,6 +155,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('replenishment/rules', [ReplenishmentController::class, 'rules']);
                 Route::get('replenishment/recommendations', [ReplenishmentController::class, 'recommendations']);
                 Route::get('replenishment/alerts', [ReplenishmentController::class, 'alerts']);
+                Route::get('replenishment/forecast', [ReplenishmentController::class, 'forecast']);
                 Route::get('movements', [StockMovementController::class, 'index']);
                 Route::get('availability', [StockMovementController::class, 'availability']);
             });
@@ -175,6 +188,29 @@ Route::prefix('v1')->group(function () {
             });
         });
 
+        // 3PL billing: clients, rate cards and invoices
+        Route::prefix('billing')->group(function () {
+            Route::middleware('permission:billing.view')->group(function () {
+                Route::get('clients', [ClientController::class, 'index']);
+                Route::get('clients/{client}/charges', [ClientController::class, 'charges']);
+                Route::get('invoices', [ClientInvoiceController::class, 'index']);
+                Route::get('invoices/{clientInvoice}', [ClientInvoiceController::class, 'show']);
+                Route::get('invoices/{clientInvoice}/pdf', [ClientInvoiceController::class, 'pdf']);
+            });
+            Route::middleware('permission:billing.manage')->group(function () {
+                Route::post('clients', [ClientController::class, 'store']);
+                Route::put('clients/{client}', [ClientController::class, 'update']);
+                Route::delete('clients/{client}', [ClientController::class, 'destroy']);
+                Route::post('invoices', [ClientInvoiceController::class, 'store']);
+                Route::post('invoices/{clientInvoice}/recalculate', [ClientInvoiceController::class, 'recalculate']);
+                Route::post('invoices/{clientInvoice}/lines', [ClientInvoiceController::class, 'addLine']);
+                Route::delete('invoices/{clientInvoice}/lines/{line}', [ClientInvoiceController::class, 'removeLine']);
+                Route::post('invoices/{clientInvoice}/issue', [ClientInvoiceController::class, 'issue']);
+                Route::post('invoices/{clientInvoice}/pay', [ClientInvoiceController::class, 'pay']);
+                Route::post('invoices/{clientInvoice}/void', [ClientInvoiceController::class, 'void']);
+            });
+        });
+
         // Customers
         Route::get('customers', [CustomerController::class, 'index'])->middleware('permission:customers.view');
         Route::get('customers/{customer}', [CustomerController::class, 'show'])->middleware('permission:customers.view');
@@ -191,17 +227,39 @@ Route::prefix('v1')->group(function () {
         Route::delete('orders/{order}', [OrderController::class, 'destroy'])->middleware('permission:orders.delete');
         Route::post('orders/{order}/allocate', [OrderController::class, 'allocate'])->middleware('permission:orders.allocate');
         Route::post('orders/{order}/cancel', [OrderController::class, 'cancel'])->middleware('permission:orders.cancel');
+        Route::post('orders/{order}/push', [OrderController::class, 'push'])->middleware('permission:orders.manage');
 
         // Picking & Packing
-        Route::get('picking', [PickingController::class, 'index'])->middleware('permission:picking.view');
+        Route::middleware('permission:picking.view')->group(function () {
+            Route::get('picking', [PickingController::class, 'index']);
+            Route::get('picking/waves', [PickingController::class, 'waves']);
+            Route::get('picking/waves/{pickWave}', [PickingController::class, 'showWave']);
+            Route::get('picking/{pickTask}/lines', [PickingController::class, 'lines']);
+        });
         Route::middleware('permission:picking.update')->group(function () {
             Route::put('picking/{pickTask}/status', [PickingController::class, 'updateStatus']);
             Route::post('picking/{pickTask}/complete', [PickingController::class, 'complete']);
             Route::post('picking/bulk-update', [PickingController::class, 'bulkUpdate']);
+            Route::post('picking/{pickTask}/scan', [PickingController::class, 'scan']);
+            Route::post('picking/waves', [PickingController::class, 'storeWave']);
+            Route::post('picking/waves/{pickWave}/scan', [PickingController::class, 'scanWave']);
+            Route::delete('picking/waves/{pickWave}', [PickingController::class, 'cancelWave']);
         });
 
         // Shipments (packed orders are dispatched from here)
         Route::get('shipments', [ShipmentController::class, 'index'])->middleware('permission:shipments.view');
+        Route::get('shipments/couriers', [ShipmentController::class, 'couriers'])->middleware('permission:shipments.view');
+        Route::get('shipments/{id}/label', [ShipmentController::class, 'label'])->middleware('permission:shipments.view');
+        Route::post('shipments/track', [ShipmentController::class, 'track'])->middleware('permission:shipments.dispatch');
+
+        // Courier accounts (Leopards, PostEx, TCS, Trax)
+        Route::middleware('permission:couriers.manage')->group(function () {
+            Route::get('courier-accounts', [CourierAccountController::class, 'index']);
+            Route::post('courier-accounts', [CourierAccountController::class, 'store']);
+            Route::put('courier-accounts/{courierAccount}', [CourierAccountController::class, 'update']);
+            Route::delete('courier-accounts/{courierAccount}', [CourierAccountController::class, 'destroy']);
+            Route::post('courier-accounts/{courierAccount}/test', [CourierAccountController::class, 'test']);
+        });
         Route::post('shipments/{id}/dispatch', [ShipmentController::class, 'dispatch'])->middleware('permission:shipments.dispatch');
         Route::post('shipments/{id}/deliver', [ShipmentController::class, 'deliver'])->middleware('permission:shipments.dispatch');
 
@@ -209,6 +267,13 @@ Route::prefix('v1')->group(function () {
         Route::get('barcode/settings', [BarcodeController::class, 'settings']);
         Route::put('barcode/settings', [BarcodeController::class, 'updateSettings'])->middleware('permission:settings.barcode');
         Route::get('barcode/scan', [BarcodeController::class, 'scan']);
+
+        // Mobile scanning app: work waiting in a warehouse and scanned products and bins
+        Route::prefix('mobile/warehouses/{warehouse}')->middleware('permission:inventory.view')->group(function () {
+            Route::get('summary', [MobileController::class, 'summary']);
+            Route::get('product', [MobileController::class, 'product']);
+            Route::get('location', [MobileController::class, 'location']);
+        });
 
         // Returns (customer RMAs, inspection and restocking)
         Route::prefix('returns')->group(function () {

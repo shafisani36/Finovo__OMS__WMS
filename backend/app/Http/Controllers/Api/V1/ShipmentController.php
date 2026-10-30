@@ -3,14 +3,20 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Integrations\Couriers\CourierStatus;
+use App\Models\CourierAccount;
 use App\Models\PickTask;
 use App\Models\Shipment;
+use App\Services\CourierService;
 use App\Services\EmailService;
 use App\Services\InventoryEngine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 /**
  * Packed orders waiting for dispatch, and the parcels already handed to a carrier.
@@ -22,7 +28,25 @@ class ShipmentController extends Controller
     public function __construct(
         protected InventoryEngine $inventoryEngine,
         protected EmailService $emails,
+        protected CourierService $couriers,
     ) {}
+
+    /**
+     * The company's active courier accounts, to book parcels with at dispatch.
+     */
+    public function couriers(Request $request): JsonResponse
+    {
+        $accounts = CourierAccount::where('organization_id', $request->user()->currentOrganization()->id)
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get(['id', 'carrier', 'name'])
+            ->map(fn (CourierAccount $account) => [
+                ...$account->only(['id', 'carrier', 'name']),
+                'carrier_name' => CourierService::CARRIERS[$account->carrier]['name'] ?? $account->carrier,
+            ]);
+
+        return response()->json(['status' => 'success', 'data' => $accounts]);
+    }
 
     /**
      * List shipments with KPIs. With ?store_id= only that store's orders are listed and counted.
@@ -76,25 +100,86 @@ class ShipmentController extends Controller
     public function dispatch(Request $request, int $id): JsonResponse
     {
         $validated = $request->validate([
-            'carrier' => 'required|string|max:100',
+            // Book the parcel with one of the company's courier accounts, or name the carrier and enter its details.
+            'courier_account_id' => ['nullable', 'integer', Rule::exists('courier_accounts', 'id')->where('organization_id', $request->user()->currentOrganization()->id)->where('is_active', true)],
+            'carrier' => 'required_without:courier_account_id|nullable|string|max:100',
             // Left empty, Finovo generates a unique tracking ID.
             'tracking_number' => 'nullable|string|max:100',
             'tracking_url' => 'nullable|url:http,https|max:500',
         ]);
 
-        $shipment = DB::transaction(function () use ($request, $id, $validated) {
+        $account = isset($validated['courier_account_id']) ? CourierAccount::find($validated['courier_account_id']) : null;
+        $booking = null;
+
+        if ($account) {
+            // The courier is called before the database work (and outside its transaction); a booking that cannot be
+            // saved afterwards is cancelled again.
+            $pending = $this->find($request, $id);
+            if ($pending->status !== 'pending') {
+                throw ValidationException::withMessages(['status' => 'This shipment has already been dispatched.']);
+            }
+            if (! $pending->order?->items()->where('status', 'allocated')->exists()) {
+                throw ValidationException::withMessages(['status' => "Order {$pending->order?->order_number} has no allocated items to dispatch."]);
+            }
+            $booking = $this->couriers->book($pending, $account);
+            $validated = [
+                'carrier' => CourierService::CARRIERS[$account->carrier]['name'],
+                'courier_account_id' => $account->id,
+                'tracking_number' => $booking->trackingNumber,
+                'tracking_url' => null,
+                'label_url' => $booking->labelUrl,
+                'courier_status' => CourierStatus::BOOKED,
+                'courier_status_text' => 'Booked',
+                'courier_status_at' => now(),
+            ];
+        }
+
+        try {
+            $shipment = $this->dispatchShipment($request, $id, $validated);
+        } catch (Throwable $e) {
+            if ($account && $booking) {
+                $this->couriers->cancelQuietly($account, $booking->trackingNumber);
+            }
+
+            throw $e;
+        }
+
+        $shipment = $shipment->fresh(['order.store', 'order.items', 'warehouse', 'dispatchedBy']);
+        $emailed = $this->emails->sendShipmentEmail($shipment);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Order {$shipment->order->order_number} dispatched with {$shipment->carrier} (tracking ID {$shipment->tracking_number}). ".match (true) {
+                $emailed => "Tracking details were emailed to {$shipment->order->customer_email}.",
+                blank($shipment->order->customer_email) => 'No tracking email was sent because the order has no customer email address.',
+                default => 'The tracking email could not be sent; check the mail settings.',
+            },
+            'data' => $this->present($shipment),
+            'customer_emailed' => $emailed,
+        ]);
+    }
+
+    /**
+     * Stock leaves the warehouse and the order is marked shipped, in one transaction.
+     *
+     * @param  array<string, mixed>  $details  carrier, tracking and courier fields to save on the shipment
+     */
+    private function dispatchShipment(Request $request, int $id, array $details): Shipment
+    {
+        return DB::transaction(function () use ($request, $id, $details) {
             $shipment = $this->find($request, $id, lock: true);
 
             if ($shipment->status !== 'pending') {
                 throw ValidationException::withMessages(['status' => 'This shipment has already been dispatched.']);
             }
 
-            $trackingNumber = trim((string) ($validated['tracking_number'] ?? ''));
+            $trackingNumber = trim((string) ($details['tracking_number'] ?? ''));
             if ($trackingNumber === '') {
                 $trackingNumber = $shipment->generateTrackingNumber();
             } elseif (Shipment::trackingNumberTaken($shipment->organization_id, $trackingNumber, $shipment->id)) {
                 throw ValidationException::withMessages(['tracking_number' => "Tracking ID {$trackingNumber} is already used by another shipment."]);
             }
+            $details['tracking_number'] = $trackingNumber;
 
             $order = $shipment->order()->with('items')->lockForUpdate()->firstOrFail();
             $shippable = $order->items->filter(fn ($item) => $item->status === 'allocated' && $item->allocated_warehouse_id && $item->product_variant_id);
@@ -123,8 +208,7 @@ class ShipmentController extends Controller
             $order->pickTasks()->whereNotIn('status', PickTask::CLOSED)->update(['status' => 'shipped']);
 
             $shipment->update([
-                ...$validated,
-                'tracking_number' => $trackingNumber,
+                ...$details,
                 'status' => 'shipped',
                 'shipped_at' => now(),
                 'dispatched_by_user_id' => $request->user()->id,
@@ -132,20 +216,6 @@ class ShipmentController extends Controller
 
             return $shipment;
         });
-
-        $shipment = $shipment->fresh(['order.store', 'order.items', 'warehouse', 'dispatchedBy']);
-        $emailed = $this->emails->sendShipmentEmail($shipment);
-
-        return response()->json([
-            'status' => 'success',
-            'message' => "Order {$shipment->order->order_number} dispatched with {$shipment->carrier} (tracking ID {$shipment->tracking_number}). ".match (true) {
-                $emailed => "Tracking details were emailed to {$shipment->order->customer_email}.",
-                blank($shipment->order->customer_email) => 'No tracking email was sent because the order has no customer email address.',
-                default => 'The tracking email could not be sent; check the mail settings.',
-            },
-            'data' => $this->present($shipment),
-            'customer_emailed' => $emailed,
-        ]);
     }
 
     /**
@@ -153,28 +223,58 @@ class ShipmentController extends Controller
      */
     public function deliver(Request $request, int $id): JsonResponse
     {
-        $shipment = DB::transaction(function () use ($request, $id) {
-            $shipment = $this->find($request, $id, lock: true);
+        $shipment = $this->find($request, $id);
 
-            if ($shipment->status !== 'shipped') {
-                throw ValidationException::withMessages(['status' => $shipment->status === 'delivered'
-                    ? 'This shipment is already marked as delivered.'
-                    : 'Dispatch the shipment before marking it delivered.']);
-            }
-
-            $shipment->update(['status' => 'delivered', 'delivered_at' => now()]);
-
-            if ($shipment->order->order_status === 'shipped') {
-                $shipment->order->update(['order_status' => 'delivered']);
-            }
-
-            return $shipment;
-        });
+        if (! $shipment->markDelivered()) {
+            throw ValidationException::withMessages(['status' => $shipment->status === 'delivered'
+                ? 'This shipment is already marked as delivered.'
+                : 'Dispatch the shipment before marking it delivered.']);
+        }
 
         return response()->json([
             'status' => 'success',
             'message' => "Order {$shipment->order->order_number} marked as delivered.",
             'data' => $this->present($shipment->fresh(['order.store', 'order.items', 'warehouse', 'dispatchedBy'])),
+        ]);
+    }
+
+    /**
+     * The courier's label for a booked parcel: a link to open, or the PDF.
+     */
+    public function label(Request $request, int $id): JsonResponse|Response
+    {
+        $shipment = $this->find($request, $id);
+        $label = $this->couriers->label($shipment);
+
+        if ($label->url) {
+            return response()->json(['status' => 'success', 'data' => ['url' => $label->url]]);
+        }
+
+        return response($label->pdf, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => "attachment; filename=\"Label-{$shipment->tracking_number}.pdf\"",
+        ]);
+    }
+
+    /**
+     * Ask the couriers now for the latest status of the parcels on their way.
+     */
+    public function track(Request $request): JsonResponse
+    {
+        $accounts = CourierAccount::where('organization_id', $request->user()->currentOrganization()->id)->where('is_active', true)->get();
+        $totals = ['checked' => 0, 'updated' => 0, 'delivered' => 0, 'failed_accounts' => 0];
+
+        foreach ($accounts as $account) {
+            foreach ($this->couriers->syncTracking($account) as $key => $count) {
+                $totals[$key] += $count;
+            }
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Checked {$totals['checked']} parcels with the couriers: {$totals['updated']} updated, {$totals['delivered']} delivered."
+                .($totals['failed_accounts'] ? " {$totals['failed_accounts']} courier account(s) could not be reached; see Courier Accounts." : ''),
+            'data' => $totals,
         ]);
     }
 
@@ -210,6 +310,11 @@ class ShipmentController extends Controller
             'shipped_at' => $shipment->shipped_at?->toIso8601String(),
             'delivered_at' => $shipment->delivered_at?->toIso8601String(),
             'dispatched_by' => $shipment->dispatchedBy?->name,
+            'booked_with_courier' => $shipment->courier_account_id !== null,
+            'has_label' => $shipment->label_url !== null || ($shipment->courier_account_id !== null && (CourierService::CARRIERS[$shipment->courierAccount?->carrier]['labels'] ?? false)),
+            'courier_status' => $shipment->courier_status,
+            'courier_status_text' => $shipment->courier_status_text,
+            'courier_status_at' => $shipment->courier_status_at?->toIso8601String(),
         ];
     }
 }

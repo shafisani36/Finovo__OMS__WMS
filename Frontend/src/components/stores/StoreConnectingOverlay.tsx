@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import gsap from 'gsap';
 import { Check, Store as StoreIcon, X } from 'lucide-react';
 
@@ -34,7 +34,9 @@ const TITLES: Record<ConnectingMode, (platform: string) => string> = {
 export const StoreConnectingOverlay: React.FC<StoreConnectingOverlayProps> = ({ mode, platform, storeName, message, onComplete }) => {
   const root = useRef<HTMLDivElement>(null);
   const done = useRef(onComplete);
-  done.current = onComplete;
+  useEffect(() => {
+    done.current = onComplete;
+  });
 
   const steps = STEPS[mode](platform, storeName || 'your store');
   const failed = mode === 'failed';

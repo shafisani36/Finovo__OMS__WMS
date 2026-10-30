@@ -156,12 +156,12 @@ class ProductController extends Controller
             $query->where('category', $category);
         }
 
-        // Store filter: products sold in the store being managed (linked through SKU mappings)
-        if ($storeId = $request->query('store_id')) {
-            $query->whereHas('variants.skuMappings', fn ($q) => $q->where('store_id', $storeId));
-        }
+        // Store filter: products sold in the store being managed (linked through SKU mappings); the figures
+        // above the list follow it.
+        $inStore = fn ($q) => $q->when($request->integer('store_id'), fn ($q, int $storeId) => $q->whereHas('variants.skuMappings', fn ($m) => $m->where('store_id', $storeId)));
+        $inStore($query);
 
-        $perPage = (int) $request->query('per_page', 15);
+        $perPage = $this->perPage($request, 15, 200); // Product pickers load up to 200 at once.
         $products = $query->latest()->paginate($perPage);
 
         $items = collect($products->items())->map(function ($p) {
@@ -212,8 +212,8 @@ class ProductController extends Controller
                 'total' => $products->total(),
             ],
             'kpis' => [
-                'total_products' => Product::where('organization_id', $org->id)->count(),
-                'active_products' => Product::where('organization_id', $org->id)->where('is_active', true)->count(),
+                'total_products' => $inStore(Product::where('organization_id', $org->id))->count(),
+                'active_products' => $inStore(Product::where('organization_id', $org->id))->where('is_active', true)->count(),
             ],
         ]);
     }
@@ -278,7 +278,8 @@ class ProductController extends Controller
                     'name' => $rows->first()->store?->name,
                     'platform' => $rows->first()->store?->platform,
                     'listings' => $rows->map(fn (SkuMapping $mapping) => [
-                        'external_id' => $mapping->external_id,
+                        // A store kept in Finovo only has no listing ID of its own.
+                        'external_id' => $mapping->isFinovoOnly() ? null : $mapping->external_id,
                         'external_sku' => $mapping->external_sku,
                         'external_name' => $mapping->external_name,
                     ])->values(),

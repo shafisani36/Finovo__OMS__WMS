@@ -16,3 +16,6 @@ Schedule::command('stores:import-orders')->everyMinute()->withoutOverlapping();
 
 // Send stock and shipment updates to stores, and retry failed ones (also sent right after each change)
 Schedule::command('stores:push-updates')->everyMinute()->withoutOverlapping();
+
+// Courier status of parcels on their way; delivered parcels are marked delivered
+Schedule::command('couriers:track')->everyThirtyMinutes()->withoutOverlapping();

@@ -55,6 +55,7 @@ enum Permission: string
     case PICKING_UPDATE = 'picking.update';
     case SHIPMENTS_VIEW = 'shipments.view';
     case SHIPMENTS_DISPATCH = 'shipments.dispatch';
+    case COURIERS_MANAGE = 'couriers.manage';
     case RETURNS_VIEW = 'returns.view';
     case RETURNS_MANAGE = 'returns.manage';
 
@@ -81,7 +82,7 @@ enum Permission: string
             'warehouses', 'warehouse' => 'Warehouses',
             'orders', 'customers' => 'Orders & Customers',
             'products', 'inventory' => 'Products & Inventory',
-            'picking', 'shipments', 'returns' => 'Fulfillment',
+            'picking', 'shipments', 'couriers', 'returns' => 'Fulfillment',
             'purchasing' => 'Purchasing',
             'billing' => 'Billing',
             'settings' => 'Settings',
@@ -126,6 +127,7 @@ enum Permission: string
             self::PICKING_UPDATE => 'Pick and pack orders',
             self::SHIPMENTS_VIEW => 'View shipments',
             self::SHIPMENTS_DISPATCH => 'Dispatch and deliver shipments',
+            self::COURIERS_MANAGE => 'Set up courier accounts (Leopards, PostEx, TCS, Trax)',
             self::RETURNS_VIEW => 'View returns',
             self::RETURNS_MANAGE => 'Create, receive and inspect returns',
             self::PURCHASING_VIEW => 'View purchase documents',

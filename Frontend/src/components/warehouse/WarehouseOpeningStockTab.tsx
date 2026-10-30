@@ -3,7 +3,7 @@ import { CheckCircle2, Loader2, Plus, Send, Trash2 } from 'lucide-react';
 import { Alert } from '../common/Alert';
 import { useConfirmDialog } from '../common/ConfirmDialog';
 import omsService from '../../services/omsService';
-import { errorText } from './warehouseTabs';
+import { errorMessage } from '../../utils/errors';
 
 interface StockLine {
   sku: string;
@@ -65,7 +65,7 @@ export const WarehouseOpeningStockTab: React.FC<Props> = ({ warehouseId, onChang
       );
     } catch (err) {
       setPreview(null);
-      setMessage({ type: 'error', text: errorText(err, 'The lines could not be checked.') });
+      setMessage({ type: 'error', text: errorMessage(err, 'The lines could not be checked.') });
     } finally {
       setBusy(false);
     }
@@ -89,7 +89,7 @@ export const WarehouseOpeningStockTab: React.FC<Props> = ({ warehouseId, onChang
       setPreview(null);
       onChanged();
     } catch (err) {
-      setMessage({ type: 'error', text: errorText(err, 'Failed to commit the opening stock.') });
+      setMessage({ type: 'error', text: errorMessage(err, 'Failed to commit the opening stock.') });
     } finally {
       setBusy(false);
     }

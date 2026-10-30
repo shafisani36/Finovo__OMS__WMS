@@ -10,6 +10,11 @@
   gap: 18px;
 }
 
+/* The body scrolls; its sections keep their height instead of being squeezed (the variants table collapsed to nothing). */
+.cf-body > * {
+  flex-shrink: 0;
+}
+
 .cf-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

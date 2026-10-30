@@ -87,8 +87,8 @@ class StoreConnectionTest extends TestCase
         $this->actingAs($this->admin)->postJson('/api/v1/stores', [
             'name' => 'Sneaky Store',
             'platform' => 'manual',
-            'warehouse_id' => $otherOrgWarehouse->id,
-        ])->assertUnprocessable()->assertJsonValidationErrors('warehouse_id');
+            'warehouse_ids' => [$otherOrgWarehouse->id],
+        ])->assertUnprocessable()->assertJsonValidationErrors('warehouse_ids');
 
         $this->assertDatabaseCount('stores', 0);
     }
@@ -457,6 +457,19 @@ class StoreConnectionTest extends TestCase
         $this->connect(['name' => 'Presta Shop', 'platform' => 'prestashop', 'credentials' => []])->assertCreated();
 
         $this->get('/api/v1/integrations/modules/'.Store::sole()->id)->assertForbidden();
+    }
+
+    public function test_module_download_link_works_behind_a_tunnel_or_proxy(): void
+    {
+        $url = $this->connect(['name' => 'Presta Shop', 'platform' => 'prestashop', 'credentials' => []])
+            ->assertCreated()
+            ->json('next_action.url');
+
+        // The tunnel hands the request to Finovo on its own (internal) address and scheme.
+        $internal = 'http://127.0.0.1:8001'.parse_url($url, PHP_URL_PATH).'?'.parse_url($url, PHP_URL_QUERY);
+
+        $this->get($internal)->assertOk()->assertDownload('finovo.zip');
+        $this->get(str_replace('signature=', 'signature=x', $internal))->assertForbidden();
     }
 
     public function test_installed_prestashop_module_connects_the_shop(): void

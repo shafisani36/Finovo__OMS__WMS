@@ -54,11 +54,12 @@ class ModulePackage
     }
 
     /**
-     * Download link that works without a Finovo login (a plain browser download), valid for one day.
+     * Download link that works without a Finovo login (a plain browser download), valid for one day. Only the
+     * path and query are signed, so the link stays valid behind a proxy or tunnel that changes the host or scheme.
      */
     public function downloadUrl(Store $store): string
     {
-        return URL::temporarySignedRoute('integrations.module.download', now()->addDay(), ['store' => $store->id]);
+        return url(URL::temporarySignedRoute('integrations.module.download', now()->addDay(), ['store' => $store->id], false));
     }
 
     public function filename(Store $store): string

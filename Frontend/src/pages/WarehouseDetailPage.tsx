@@ -10,14 +10,18 @@ import WarehouseLocationsTab from '../components/warehouse/WarehouseLocationsTab
 import WarehouseStaffTab from '../components/warehouse/WarehouseStaffTab';
 import WarehouseOpeningStockTab from '../components/warehouse/WarehouseOpeningStockTab';
 import WarehouseActivityTab from '../components/warehouse/WarehouseActivityTab';
-import { errorText, isWarehouseTab } from '../components/warehouse/warehouseTabs';
+import WarehousePerformanceTab from '../components/warehouse/WarehousePerformanceTab';
+import WarehouseSlottingTab from '../components/warehouse/WarehouseSlottingTab';
+import { isWarehouseTab } from '../components/warehouse/warehouseTabs';
 import type { WarehouseTab } from '../components/warehouse/warehouseTabs';
 import { Alert } from '../components/common/Alert';
 import { useConfirmDialog } from '../components/common/ConfirmDialog';
 import { useAuth } from '../hooks/useAuth';
+import { useActiveStore } from '../hooks/useActiveStore';
 import { can } from '../types/auth';
 import { humanize } from '../utils/format';
 import '../components/warehouse/WarehouseDetail.css';
+import { errorMessage } from '../utils/errors';
 
 /**
  * One warehouse, split into tabs: Overview, Orders, Locations, Staff, Opening Stock and Activity.
@@ -29,6 +33,8 @@ export const WarehouseDetailPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
+  const { activeStore } = useActiveStore();
+  const storeId = activeStore?.id;
   const { confirm, dialog } = useConfirmDialog();
 
   const permissions = {
@@ -52,6 +58,8 @@ export const WarehouseDetailPage: React.FC = () => {
     { id: 'overview', label: 'Overview', show: true },
     { id: 'orders', label: 'Orders', count: ordersCount, show: permissions.orders },
     { id: 'locations', label: 'Locations', count: warehouse?.locations_count, show: true },
+    { id: 'slotting', label: 'Slotting', show: true },
+    { id: 'performance', label: 'Performance', show: true },
     { id: 'staff', label: 'Staff', count: warehouse?.memberships_count, show: permissions.staff },
     { id: 'opening_stock', label: 'Opening Stock', show: permissions.manage },
     { id: 'activity', label: 'Activity', show: true },
@@ -69,14 +77,14 @@ export const WarehouseDetailPage: React.FC = () => {
       setWarehouse(detail.data);
       setReadiness(check.data);
       if (permissions.orders) {
-        omsService.getOrders({ warehouse_id: warehouseId, per_page: 1 }).then((res) => setOrdersCount(res.meta.total)).catch(() => setOrdersCount(null));
+        omsService.getOrders({ warehouse_id: warehouseId, store_id: storeId, per_page: 1 }).then((res) => setOrdersCount(res.meta.total)).catch(() => setOrdersCount(null));
       }
     } catch (err) {
-      setMessage({ type: 'error', text: errorText(err, 'Failed to load the warehouse.') });
+      setMessage({ type: 'error', text: errorMessage(err, 'Failed to load the warehouse.') });
     } finally {
       setLoading(false);
     }
-  }, [warehouseId, permissions.orders]);
+  }, [warehouseId, storeId, permissions.orders]);
 
   useEffect(() => {
     load();
@@ -101,7 +109,7 @@ export const WarehouseDetailPage: React.FC = () => {
       setMessage({ type: 'success', text: success });
       load();
     } catch (err) {
-      setMessage({ type: 'error', text: errorText(err, failure) });
+      setMessage({ type: 'error', text: errorMessage(err, failure) });
     } finally {
       setBusy(false);
     }
@@ -138,7 +146,7 @@ export const WarehouseDetailPage: React.FC = () => {
       await omsService.deleteWarehouse(warehouseId);
       navigate('/warehouses');
     } catch (err) {
-      setMessage({ type: 'error', text: errorText(err, 'Failed to delete the warehouse.') });
+      setMessage({ type: 'error', text: errorMessage(err, 'Failed to delete the warehouse.') });
       setBusy(false);
     }
   };
@@ -249,13 +257,25 @@ export const WarehouseDetailPage: React.FC = () => {
       {message && <Alert type={message.type} message={message.text} className="page-banner" />}
 
       <div role="tabpanel" aria-label={tabs.find((tab) => tab.id === activeTab)?.label}>
-        {activeTab === 'overview' && <WarehouseOverviewTab warehouse={warehouse} readiness={readiness} onOpenTab={openTab} />}
+        {activeTab === 'overview' && (
+          <WarehouseOverviewTab
+            warehouse={warehouse}
+            readiness={readiness}
+            onOpenTab={openTab}
+            onChanged={(text) => {
+              setMessage({ type: 'success', text });
+              load();
+            }}
+          />
+        )}
         {activeTab === 'orders' && (
           <div className="wh-card">
             <WarehouseOrders warehouseId={warehouseId} onCountChange={setOrdersCount} />
           </div>
         )}
         {activeTab === 'locations' && <WarehouseLocationsTab warehouseId={warehouseId} canManage={permissions.manage} onChanged={load} />}
+        {activeTab === 'slotting' && <WarehouseSlottingTab warehouseId={warehouseId} />}
+        {activeTab === 'performance' && <WarehousePerformanceTab warehouseId={warehouseId} />}
         {activeTab === 'staff' && <WarehouseStaffTab warehouseId={warehouseId} canAssign={permissions.assignStaff} onChanged={load} />}
         {activeTab === 'opening_stock' && <WarehouseOpeningStockTab warehouseId={warehouseId} onChanged={load} />}
         {activeTab === 'activity' && <WarehouseActivityTab warehouseId={warehouseId} />}

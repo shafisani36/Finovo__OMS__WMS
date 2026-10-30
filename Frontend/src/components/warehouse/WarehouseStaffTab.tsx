@@ -6,7 +6,7 @@ import { useConfirmDialog } from '../common/ConfirmDialog';
 import omsService from '../../services/omsService';
 import type { WarehouseStaffModel } from '../../services/omsService';
 import { formatDate, initials } from '../../utils/format';
-import { errorText } from './warehouseTabs';
+import { errorMessage } from '../../utils/errors';
 
 /** Roles a person can have inside one warehouse (the backend accepts the same list). */
 const WAREHOUSE_ROLES = [
@@ -45,7 +45,7 @@ export const WarehouseStaffTab: React.FC<Props> = ({ warehouseId, canAssign, onC
       setEligible(res.data.eligible_users);
     } catch (err) {
       setStaff([]);
-      setMessage({ type: 'error', text: errorText(err, 'Failed to load the staff.') });
+      setMessage({ type: 'error', text: errorMessage(err, 'Failed to load the staff.') });
     }
   }, [warehouseId]);
 
@@ -72,7 +72,7 @@ export const WarehouseStaffTab: React.FC<Props> = ({ warehouseId, canAssign, onC
       load();
       onChanged();
     } catch (err) {
-      setFormError(errorText(err, 'Failed to assign the employee.'));
+      setFormError(errorMessage(err, 'Failed to assign the employee.'));
     } finally {
       setBusy(false);
     }
@@ -94,7 +94,7 @@ export const WarehouseStaffTab: React.FC<Props> = ({ warehouseId, canAssign, onC
       load();
       onChanged();
     } catch (err) {
-      setMessage({ type: 'error', text: errorText(err, 'Failed to remove the employee.') });
+      setMessage({ type: 'error', text: errorMessage(err, 'Failed to remove the employee.') });
     } finally {
       setBusy(false);
     }

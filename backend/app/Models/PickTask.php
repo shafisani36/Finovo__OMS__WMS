@@ -30,6 +30,8 @@ class PickTask extends Model
         'priority',
         'notes',
         'scan_progress',
+        'pick_errors',
+        'pack_errors',
         'started_at',
         'completed_at',
     ];
@@ -39,6 +41,8 @@ class PickTask extends Model
         return [
             'items_count' => 'integer',
             'scan_progress' => 'array',
+            'pick_errors' => 'integer',
+            'pack_errors' => 'integer',
             'started_at' => 'datetime',
             'completed_at' => 'datetime',
         ];

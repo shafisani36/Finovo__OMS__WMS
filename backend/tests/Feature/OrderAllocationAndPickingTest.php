@@ -258,7 +258,8 @@ class OrderAllocationAndPickingTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.tracking_url', 'https://www.dhl.com/global-en/home/tracking/tracking-express.html?submit=1&tracking-id=1234567890');
 
-        $this->postJson('/api/v1/shipments/'.$this->packedShipment(null).'/dispatch', ['carrier' => 'Leopards Courier', 'tracking_number' => 'LP-1'])
+        // A carrier without a known tracking page gets no link.
+        $this->postJson('/api/v1/shipments/'.$this->packedShipment(null).'/dispatch', ['carrier' => 'City Express', 'tracking_number' => 'CE-1'])
             ->assertOk()
             ->assertJsonPath('customer_emailed', false)
             ->assertJsonPath('data.tracking_url', null);

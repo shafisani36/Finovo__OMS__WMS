@@ -6,18 +6,24 @@ import ProductThumb from '../catalog/ProductThumb';
 import { CameraScanner } from '../barcode/BarcodeScanner';
 import omsService from '../../services/omsService';
 import type { PickScanTask, PickWaveDetail } from '../../services/omsService';
+import { formatDate } from '../../utils/format';
 import '../barcode/Barcode.css';
 import './Picking.css';
+import { errorMessage } from '../../utils/errors';
 
 type Feedback = { type: 'success' | 'error'; text: string } | null;
 
-const errorText = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
 
 /**
  * Scan field for a USB/Bluetooth scanner (it types the code and presses Enter) or the device camera. It keeps
  * the focus, so the operator can scan one unit after another without touching the screen.
  */
-const ScanField: React.FC<{ busy: boolean; disabled?: boolean; onScan: (code: string) => void }> = ({ busy, disabled, onScan }) => {
+export const ScanField: React.FC<{ busy: boolean; disabled?: boolean; placeholder?: string; onScan: (code: string) => void }> = ({
+  busy,
+  disabled,
+  placeholder = 'Scan a unit, or type its SKU and press Enter',
+  onScan,
+}) => {
   const [code, setCode] = useState('');
   const [camera, setCamera] = useState(false);
   const input = useRef<HTMLInputElement>(null);
@@ -46,7 +52,7 @@ const ScanField: React.FC<{ busy: boolean; disabled?: boolean; onScan: (code: st
           ref={input}
           value={code}
           onChange={(e) => setCode(e.target.value)}
-          placeholder={disabled ? 'Nothing left to scan' : 'Scan a unit, or type its SKU and press Enter'}
+          placeholder={disabled ? 'Nothing left to scan' : placeholder}
           aria-label="Barcode"
           autoComplete="off"
           disabled={disabled}
@@ -123,10 +129,15 @@ const Progress: React.FC<{ done: number; total: number; label: string }> = ({ do
   </div>
 );
 
-const Location: React.FC<{ code: string | null }> = ({ code }) => (
-  <span className={`pick-location${code ? '' : ' is-empty'}`}>
-    <MapPin size={12} />
-    {code ?? 'No bin'}
+/** The bin to pick from, with the lot and expiry date of that stock (the nearest expiry is picked first). */
+const Location: React.FC<{ code: string | null; lot?: string | null; expiry?: string | null }> = ({ code, lot, expiry }) => (
+  <span className="pick-location-row">
+    <span className={`pick-location${code ? '' : ' is-empty'}`}>
+      <MapPin size={12} />
+      {code ?? 'No bin'}
+    </span>
+    {lot && <span className="pick-lot">Lot {lot}</span>}
+    {expiry && <span className="pick-lot">Expires {formatDate(expiry)}</span>}
   </span>
 );
 
@@ -148,7 +159,7 @@ export const PickScanModal: React.FC<{ taskId: number; canScan: boolean; onClose
     omsService
       .getPickLines(taskId)
       .then(setTask)
-      .catch((err) => setFeedback({ type: 'error', text: errorText(err, 'The order could not be loaded.') }));
+      .catch((err) => setFeedback({ type: 'error', text: errorMessage(err, 'The order could not be loaded.') }));
   }, [taskId]);
 
   const scan = async (code: string) => {
@@ -159,7 +170,7 @@ export const PickScanModal: React.FC<{ taskId: number; canScan: boolean; onClose
       setFeedback({ type: 'success', text: res.message });
       if (res.completed) onChanged(res.message);
     } catch (err) {
-      setFeedback({ type: 'error', text: errorText(err, 'The scan could not be saved.') });
+      setFeedback({ type: 'error', text: errorMessage(err, 'The scan could not be saved.') });
     } finally {
       setBusy(false);
     }
@@ -201,7 +212,11 @@ export const PickScanModal: React.FC<{ taskId: number; canScan: boolean; onClose
                       SKU {line.sku}
                       {line.barcode ? ` · ${line.barcode}` : ''}
                     </span>
-                    {line.scannable ? <Location code={line.location} /> : <span className="pick-line-note">Not a Finovo product: check it by eye.</span>}
+                    {line.scannable ? (
+                      <Location code={line.location} lot={line.lot_number} expiry={line.expiry_date} />
+                    ) : (
+                      <span className="pick-line-note">Not a Finovo product: check it by eye.</span>
+                    )}
                   </div>
                   <div className="pick-line-count">
                     {complete ? <CheckCircle2 size={18} color="#16a34a" /> : null}
@@ -239,7 +254,7 @@ export const PickWaveModal: React.FC<{ waveId: number; canScan: boolean; onClose
       omsService
         .getPickWave(waveId)
         .then(setWave)
-        .catch((err) => setFeedback({ type: 'error', text: errorText(err, 'The wave could not be loaded.') })),
+        .catch((err) => setFeedback({ type: 'error', text: errorMessage(err, 'The wave could not be loaded.') })),
     [waveId]
   );
 
@@ -257,7 +272,7 @@ export const PickWaveModal: React.FC<{ waveId: number; canScan: boolean; onClose
       if (res.data.status !== 'open') onChanged(`Wave ${res.data.wave_number} is picked; take the totes to packing.`);
     } catch (err) {
       setTote(null);
-      setFeedback({ type: 'error', text: errorText(err, 'The scan could not be saved.') });
+      setFeedback({ type: 'error', text: errorMessage(err, 'The scan could not be saved.') });
     } finally {
       setBusy(false);
     }
@@ -270,7 +285,7 @@ export const PickWaveModal: React.FC<{ waveId: number; canScan: boolean; onClose
       onChanged(res.message);
       onClose();
     } catch (err) {
-      setFeedback({ type: 'error', text: errorText(err, 'The wave could not be cancelled.') });
+      setFeedback({ type: 'error', text: errorMessage(err, 'The wave could not be cancelled.') });
     }
   };
 
@@ -327,7 +342,7 @@ export const PickWaveModal: React.FC<{ waveId: number; canScan: boolean; onClose
                   <div className="pick-line-main">
                     <strong>{line.name}</strong>
                     <span>SKU {line.sku}</span>
-                    <Location code={line.location} />
+                    <Location code={line.location} lot={line.lot_number} expiry={line.expiry_date} />
                     <span className="pick-line-totes">
                       {line.totes.map((t) => (
                         <span key={t.tote} className={t.picked >= t.quantity ? 'is-complete' : ''}>

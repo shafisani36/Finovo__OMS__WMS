@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\StorePlatform;
 use App\Integrations\ConnectorErrors;
+use App\Integrations\Push\AutomaticImportUnavailable;
 use App\Integrations\Push\BigCommerceWriter;
 use App\Integrations\Push\StoreWriterFactory;
 use App\Integrations\Sync\Contracts\FetchesSingleRecords;
@@ -97,7 +98,8 @@ class StoreWebhookService
     }
 
     /**
-     * Subscribe Finovo to the store's notifications and remember the outcome on the store.
+     * Subscribe Finovo to the store's notifications and remember the outcome on the store. Status: active,
+     * unsupported, needs_public_url, unavailable (the store cannot notify Finovo as connected) or failed.
      *
      * @return array{status: string, message: string}
      */
@@ -116,6 +118,9 @@ class StoreWebhookService
             try {
                 $writer->registerWebhooks($store, $url);
                 $outcome = ['status' => 'active', 'message' => 'New and changed orders and products are imported automatically.'];
+            } catch (AutomaticImportUnavailable $e) {
+                // How the store is connected, not a fault: its orders keep being read every minute.
+                $outcome = ['status' => 'unavailable', 'message' => $e->getMessage()];
             } catch (Throwable $e) {
                 $outcome = ['status' => 'failed', 'message' => $this->errors->record($store, 'webhooks', $e)];
             }

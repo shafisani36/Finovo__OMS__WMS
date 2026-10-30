@@ -23,6 +23,7 @@ export const ProductsPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const [perPage] = useState(10);
   const [total, setTotal] = useState(0);
+  const [kpis, setKpis] = useState({ total_products: 0, active_products: 0 });
   const [lastPage, setLastPage] = useState(1);
   const [searchParams] = useSearchParams();
   const [search, setSearch] = useState(searchParams.get('search') ?? '');
@@ -44,6 +45,7 @@ export const ProductsPage: React.FC = () => {
       });
       setProducts(res.data);
       setTotal(res.meta.total);
+      if (res.kpis) setKpis(res.kpis);
       setLastPage(res.meta.last_page);
     } catch (err) {
       console.error(err);
@@ -207,21 +209,29 @@ export const ProductsPage: React.FC = () => {
       {notice && <Alert type="success" message={notice} className="page-banner" />}
 
       <div className="kpi-grid">
-        <MetricCard title="Total Catalog SKUs" value={total} icon={<Package size={20} />} pillText="In System" />
-        <MetricCard title="Active Listings" value={products.filter((p) => p.is_active).length} icon={<CheckCircle2 size={20} />} pillText="Sellable" pillVariant="green" />
+        <MetricCard title="Total Products" value={kpis.total_products} icon={<Package size={20} />} pillText={activeStore?.name ?? 'All Stores'} />
+        <MetricCard
+          title="Active Products"
+          value={kpis.active_products}
+          icon={<CheckCircle2 size={20} />}
+          pillText={kpis.total_products - kpis.active_products > 0 ? `${kpis.total_products - kpis.active_products} archived` : 'All sellable'}
+          pillVariant={kpis.total_products - kpis.active_products > 0 ? 'amber' : 'green'}
+        />
       </div>
 
       <div className="content-card">
         <div className="content-card-header">
           <h3 className="content-card-title">All Products</h3>
-          <input
-            type="text"
-            placeholder="Search products or SKU..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="topbar-search-input"
-            style={{ width: 220 }}
-          />
+          <div style={{ display: 'flex', gap: 10 }}>
+            <input
+              type="text"
+              placeholder="Search products or SKU..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="topbar-search-input"
+              style={{ width: 220 }}
+            />
+          </div>
         </div>
 
         <DataTable

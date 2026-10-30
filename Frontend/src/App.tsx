@@ -26,6 +26,7 @@ import { EmployeesPage } from './pages/EmployeesPage';
 import { ProductDetailPage } from './pages/ProductDetailPage';
 import { CustomerDetailPage } from './pages/CustomerDetailPage';
 import { PurchaseOrdersPage } from './pages/PurchaseOrdersPage';
+import { MobileApp } from './pages/mobile/MobileApp';
 import { AppLayout } from './components/layout/AppLayout';
 import { AccessDenied } from './components/common/AccessDenied';
 import { can } from './types/auth';
@@ -113,6 +114,21 @@ export const App: React.FC = () => {
               <PublicOnlyRoute>
                 <ResetPasswordPage />
               </PublicOnlyRoute>
+            }
+          />
+
+          {/* Mobile scanning app: full screen, without the desktop sidebar */}
+          <Route
+            path="/mobile"
+            element={
+              <ProtectedRoute>
+                {/* Like the desktop, the app works for the store being managed. */}
+                <ActiveStoreProvider>
+                  <RequirePermission permission="inventory.view">
+                    <MobileApp />
+                  </RequirePermission>
+                </ActiveStoreProvider>
+              </ProtectedRoute>
             }
           />
 

@@ -188,7 +188,10 @@ export const CustomDropdown = <T extends any = any>({
   // Selected option(s) for trigger display
   const selectedOptions = useMemo(() => {
     if (multiple && Array.isArray(value)) {
-      return options.filter((opt) => value.some((v) => String(v) === String(opt.value)));
+      // In the order picked, so a list whose order matters (e.g. warehouse priority) reads the same as the value.
+      return value
+        .map((v) => options.find((opt) => String(opt.value) === String(v)))
+        .filter((opt): opt is DropdownOption<T> => opt !== undefined);
     }
     return options.filter((opt) => value !== undefined && value !== null && String(value) === String(opt.value));
   }, [options, value, multiple]);

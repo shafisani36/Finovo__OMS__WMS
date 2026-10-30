@@ -381,7 +381,7 @@ export const StockMovementsPage: React.FC = () => {
           title="Movements This Month"
           value={kpis.movements_this_month}
           icon={<Clock size={20} />}
-          pillText="On track"
+          pillText="In and out"
           pillVariant="blue"
         />
         {/* Yellow Best Practice Card */}

@@ -41,7 +41,8 @@ class SyncStoreJob implements ShouldBeUnique, ShouldQueue
         }
 
         try {
-            $errors->run($this->store, 'sync', fn () => $sync->sync($this->store));
+            // Skipped when a sync of this store is already running (e.g. started with the Sync button).
+            $errors->run($this->store, 'sync', fn () => $sync->syncNow($this->store));
         } catch (ValidationException) {
             // Already recorded on the store, where the Stores page shows it; the next sync tries again.
         }

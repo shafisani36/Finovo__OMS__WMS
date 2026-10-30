@@ -5,23 +5,27 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ConnectStoreRequest;
 use App\Integrations\ConnectorErrors;
-use App\Jobs\SyncStoreJob;
 use App\Models\Store;
 use App\Services\EmailService;
 use App\Services\StoreConnectionService;
 use App\Services\StoreSyncService;
+use App\Services\StoreWarehouseService;
 use App\Services\StoreWebhookService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class StoreController extends Controller
 {
+    /** Status filter for stores that are not connected or whose last test or sync failed. */
+    private const NEEDS_ATTENTION = 'needs_attention';
+
     public function __construct(
         protected StoreConnectionService $connections,
         protected EmailService $emails,
         protected StoreSyncService $syncService,
         protected ConnectorErrors $errors,
         protected StoreWebhookService $webhooks,
+        protected StoreWarehouseService $links,
     ) {}
 
     /**
@@ -42,11 +46,14 @@ class StoreController extends Controller
             });
         }
 
-        // Status filter: the connection states shown on the page (Connected, Awaiting Authorization...)
+        // Status filter: the connection states shown on the page (Connected, Awaiting Authorization...), or
+        // "needs_attention": not connected, or its last connection test or sync failed.
         if ($status = $request->query('status')) {
-            array_key_exists($status, Store::CONNECTION_STATES)
-                ? $query->inConnectionState($status)
-                : $query->where('status', $status);
+            match (true) {
+                $status === self::NEEDS_ATTENTION => $query->needsAttention(),
+                array_key_exists($status, Store::CONNECTION_STATES) => $query->inConnectionState($status),
+                default => $query->where('status', $status),
+            };
         }
 
         // Platform filter
@@ -54,14 +61,15 @@ class StoreController extends Controller
             $query->where('platform', $platform);
         }
 
-        $perPage = (int) $request->query('per_page', 10);
+        $perPage = $this->perPage($request, 10);
         $stores = $query->latest()->paginate($perPage);
 
         // Aggregated Metrics for KPI cards
-        $totalStores = Store::where('organization_id', $org->id)->count();
-        $connectedStores = Store::where('organization_id', $org->id)->where('status', 'active')->count();
-        $syncIssues = Store::where('organization_id', $org->id)->where('sync_status', 'sync_issues')->count();
-        $ordersAwaitingSync = (int) Store::where('organization_id', $org->id)->sum('orders_awaiting_sync');
+        $all = fn () => Store::where('organization_id', $org->id);
+        $totalStores = $all()->count();
+        $connectedStores = $all()->where('status', Store::STATUS_ACTIVE)->count();
+        $syncIssues = $all()->where('status', Store::STATUS_ACTIVE)->where('sync_status', 'sync_issues')->count();
+        $ordersAwaitingSync = (int) $all()->sum('orders_awaiting_sync');
 
         return response()->json([
             'status' => 'success',
@@ -75,10 +83,13 @@ class StoreController extends Controller
             'kpis' => [
                 'total_stores' => $totalStores,
                 'connected_stores' => $connectedStores,
+                'not_connected' => $totalStores - $connectedStores,
                 'sync_issues' => $syncIssues,
+                'needs_attention' => $all()->needsAttention()->count(),
                 'orders_awaiting_sync' => $ordersAwaitingSync,
             ],
-            'connection_states' => collect(Store::CONNECTION_STATES)->map(fn ($label, $value) => ['value' => $value, 'label' => $label])->values(),
+            'connection_states' => collect(Store::CONNECTION_STATES)->map(fn ($label, $value) => ['value' => $value, 'label' => $label])->values()
+                ->push(['value' => self::NEEDS_ATTENTION, 'label' => 'Needs Attention']),
         ]);
     }
 
@@ -107,7 +118,7 @@ class StoreController extends Controller
             'actor' => $request->user(),
             'details' => [
                 'Platform' => $store->platform->label(),
-                'Fulfilling warehouse' => $store->warehouses->first()?->name,
+                'Fulfilling warehouses' => $store->warehouses->pluck('name')->implode(', '),
                 'Connection status' => $store->isConnected() ? 'Connected' : 'Waiting for authorization on '.$store->platform->label(),
             ],
         ]);
@@ -175,8 +186,7 @@ class StoreController extends Controller
     }
 
     /**
-     * Import the store's products, variants, stock and orders.
-     * Runs in a background job; without a queue worker (QUEUE_CONNECTION=sync) it runs right away.
+     * Import the store's products, variants, stock and orders now (the Sync button).
      */
     public function sync(Request $request, Store $store): JsonResponse
     {
@@ -190,17 +200,19 @@ class StoreController extends Controller
             return response()->json(['status' => 'error', 'message' => "Finovo cannot import products and orders for {$store->platform->label()}."], 422);
         }
 
-        if (config('queue.default') !== 'sync') {
-            SyncStoreJob::dispatch($store);
+        // The Sync button imports right away, so products and orders show as soon as it finishes; a large catalog
+        // may take a few minutes, and the import completes even if the page is closed meanwhile.
+        ignore_user_abort(true);
+        set_time_limit(StoreSyncService::SYNC_LOCK_SECONDS);
 
+        $result = $this->errors->run($store, 'sync', fn () => $this->syncService->syncNow($store));
+
+        if ($result === null) {
             return response()->json([
-                'status' => 'success',
-                'message' => 'Sync started. Products and orders will appear in a few minutes.',
-                'data' => $store,
-            ], 202);
+                'status' => 'error',
+                'message' => "{$store->name} is already being synced. Its products and orders appear when that sync finishes.",
+            ], 409);
         }
-
-        $result = $this->errors->run($store, 'sync', fn () => $this->syncService->sync($store));
 
         return response()->json([
             'status' => 'success',
@@ -243,11 +255,42 @@ class StoreController extends Controller
 
         $outcome = $this->webhooks->register($store);
 
+        // A store that cannot notify Finovo as connected is not a failure: its orders keep being read every minute.
+        $failed = in_array($outcome['status'], ['failed', 'needs_public_url'], true);
+
         return response()->json([
-            'status' => $outcome['status'] === 'active' ? 'success' : 'error',
+            'status' => match (true) {
+                $outcome['status'] === 'active' => 'success',
+                $failed => 'error',
+                default => 'info',
+            },
             'message' => $outcome['message'],
-            'data' => $store->fresh(),
-        ], $outcome['status'] === 'active' ? 200 : 422);
+            'data' => $store->fresh('warehouses'),
+        ], $failed ? 422 : 200);
+    }
+
+    /**
+     * Set the warehouses the store ships from, main warehouse first (orders go to the first one with the stock).
+     */
+    public function updateWarehouses(Request $request, Store $store): JsonResponse
+    {
+        $this->ensureSameOrganization($request, $store);
+
+        $validated = $request->validate([
+            'warehouse_ids' => ['present', 'array'],
+            'warehouse_ids.*' => ['integer', 'distinct'],
+        ]);
+
+        $store = $this->links->setStoreWarehouses($store, $validated['warehouse_ids'], $request->user());
+        $names = $store->warehouses->pluck('name');
+
+        return response()->json([
+            'status' => 'success',
+            'message' => $names->isEmpty()
+                ? "{$store->name} has no warehouse of its own now, so any active warehouse can fulfil its orders."
+                : "{$store->name} ships from ".$names->implode(', ').' (in this order).',
+            'data' => $store,
+        ]);
     }
 
     /**

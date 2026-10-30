@@ -43,6 +43,15 @@ enum StorePlatform: string
     }
 
     /**
+     * Stores whose products and orders live only in Finovo (no shop to send them to): Finovo keeps their
+     * catalog itself instead of linking it to products on a shop.
+     */
+    public function keepsCatalogInFinovo(): bool
+    {
+        return $this === self::MANUAL;
+    }
+
+    /**
      * Platforms that have no remote system to connect to.
      */
     public function requiresConnection(): bool

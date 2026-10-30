@@ -15,14 +15,13 @@ use App\Integrations\ConnectorErrors;
 use App\Integrations\StoreConnectorFactory;
 use App\Models\Store;
 use App\Models\User;
-use App\Models\Warehouse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
 /**
- * Creates store connections, links them to a warehouse and keeps their connection status current.
+ * Creates store connections, links them to their warehouses and keeps their connection status current.
  */
 class StoreConnectionService
 {
@@ -36,12 +35,13 @@ class StoreConnectionService
         protected EbayAuthorization $ebay,
         protected ModulePackage $modules,
         protected AuditService $auditService,
+        protected StoreWarehouseService $links,
         protected ConnectorErrors $errors,
         protected StoreWebhookService $webhooks,
     ) {}
 
     /**
-     * Create a store for the user's organization and link it to a warehouse.
+     * Create a store for the user's organization and link it to the warehouses that fulfil it.
      *
      * Platforms with keys entered in Finovo are tested first and only saved when the test passes.
      * Platforms that authorize on their own site are saved as "setup_incomplete" and return a next step.
@@ -49,7 +49,7 @@ class StoreConnectionService
      * Adding a store that is already in Finovo but not connected yet (e.g. awaiting authorization) continues with
      * that store instead of creating a duplicate; a store that is already connected is refused.
      *
-     * @param  array{name: string, platform: string, warehouse_id: int, credentials?: array<string, mixed>}  $data
+     * @param  array{name: string, platform: string, warehouse_ids: list<int>, credentials?: array<string, mixed>}  $data  warehouse_ids in priority order
      * @param  string|null  $portalUrl  Finovo address the merchant is using, where the platform sends them back
      * @return array{store: Store, reused: bool, connection: ConnectionResult|null, next_action: array<string, string>|null, credentials: array<string, string>|null}
      */
@@ -92,10 +92,7 @@ class StoreConnectionService
             ]);
         }
 
-        $warehouse = Warehouse::where('organization_id', $organization->id)->find($data['warehouse_id']);
-        if (! $warehouse) {
-            throw ValidationException::withMessages(['warehouse_id' => 'Select a warehouse from your organization.']);
-        }
+        $warehouseIds = $this->links->warehousesOf($organization->id, $data['warehouse_ids'], 'warehouse_ids')->pluck('id')->all();
 
         $externalReference = $this->externalReference($platform, $input);
         $existing = $this->existingStore($organization->id, $platform, $externalReference, $data['name']);
@@ -143,9 +140,12 @@ class StoreConnectionService
             $store->connected_at = now();
         }
 
-        DB::transaction(function () use ($store, $warehouse) {
+        DB::transaction(function () use ($store, $warehouseIds, $existing) {
             $store->save();
-            $store->warehouses()->sync([$warehouse->id => ['is_default' => true, 'priority' => 1]]);
+            // A store connected again keeps the warehouses it already ships from; the chosen ones are added after them.
+            $existing
+                ? $this->links->addStoreWarehouses($store, $warehouseIds)
+                : $this->links->setLinks($store, $warehouseIds);
         });
 
         if ($store->isConnected()) {
@@ -155,7 +155,7 @@ class StoreConnectionService
         $this->auditService->record($existing ? 'store.connection_restarted' : 'store.created', $user->id, [
             'store_id' => $store->id,
             'platform' => $platform->value,
-            'warehouse_id' => $warehouse->id,
+            'warehouse_ids' => $warehouseIds,
         ]);
 
         return [

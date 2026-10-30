@@ -820,19 +820,8 @@ class InventoryEngine
             $balance->available = max(0, $balance->on_hand - $balance->reserved - $balance->damaged - ($balance->quarantined ?? 0));
             $balance->save();
 
-            // If location specified, decrement location balance
-            if ($locationId) {
-                $locBalance = InventoryLocationBalance::where('organization_id', $organizationId)
-                    ->where('warehouse_id', $warehouseId)
-                    ->where('warehouse_location_id', $locationId)
-                    ->where('product_variant_id', $productVariantId)
-                    ->lockForUpdate()
-                    ->first();
-                if ($locBalance) {
-                    $locBalance->quantity = max(0, $locBalance->quantity - $quantity);
-                    $locBalance->save();
-                }
-            }
+            // The bins lose the units too: the given bin, or else the bins in pick order (FEFO).
+            $this->takeFromBins($organizationId, $warehouseId, $productVariantId, $quantity, $locationId);
 
             // Mark active reservation as fulfilled
             $reservation = InventoryReservation::where('organization_id', $organizationId)
@@ -1051,5 +1040,30 @@ class InventoryEngine
             'discrepancy_count' => count($discrepancies),
             'discrepancies' => $discrepancies,
         ];
+    }
+
+    /**
+     * Take shipped units out of the bins: from the given bin, or across the bins in FEFO order (the order the
+     * picker is sent in), so bin stock keeps matching the shelves.
+     */
+    private function takeFromBins(int $organizationId, int $warehouseId, int $productVariantId, int $quantity, ?int $locationId): void
+    {
+        $bins = InventoryLocationBalance::where('organization_id', $organizationId)
+            ->when(
+                $locationId,
+                fn ($q) => $q->where('warehouse_id', $warehouseId)->where('warehouse_location_id', $locationId)->where('product_variant_id', $productVariantId),
+                fn ($q) => $q->fefo($warehouseId, $productVariantId),
+            )
+            ->lockForUpdate()
+            ->get();
+
+        foreach ($bins as $bin) {
+            if ($quantity <= 0) {
+                break;
+            }
+            $taken = min($quantity, (int) $bin->quantity);
+            $bin->decrement('quantity', $taken);
+            $quantity -= $taken;
+        }
     }
 }

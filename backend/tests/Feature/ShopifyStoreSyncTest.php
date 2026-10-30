@@ -217,12 +217,12 @@ class ShopifyStoreSyncTest extends TestCase
             ->assertJsonPath('message', 'Connect the store before syncing it.');
     }
 
-    public function test_with_a_queue_worker_the_sync_runs_in_the_background(): void
+    public function test_the_scheduled_sync_runs_in_the_background(): void
     {
         config(['queue.default' => 'database']);
         Queue::fake();
 
-        $this->actingAs($this->admin)->postJson("/api/v1/stores/{$this->store->id}/sync")->assertStatus(202);
+        $this->artisan('stores:sync')->assertSuccessful();
 
         Queue::assertPushed(SyncStoreJob::class, fn (SyncStoreJob $job) => $job->store->is($this->store));
     }

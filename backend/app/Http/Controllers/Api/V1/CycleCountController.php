@@ -27,6 +27,7 @@ class CycleCountController extends Controller
 
         $query = $this->inUserWarehouses(CycleCount::where('organization_id', $org->id), $request)
             ->with(['warehouse', 'createdBy', 'approvedBy', 'items.variant.product', 'items.location']);
+        $this->forStoreProducts($query, $request, 'items.variant');
 
         if ($warehouseId = $request->query('warehouse_id')) {
             $query->where('warehouse_id', $warehouseId);
@@ -36,7 +37,7 @@ class CycleCountController extends Controller
             $query->where('status', $status);
         }
 
-        $perPage = (int) $request->query('per_page', 15);
+        $perPage = $this->perPage($request, 15);
         $counts = $query->latest('id')->paginate($perPage);
 
         $items = collect($counts->items())->map(function ($c) {

@@ -51,7 +51,7 @@ class ActivityEmailTest extends TestCase
         foreach ([$this->admin, $secondAdmin] as $admin) {
             Mail::assertSent(Mailable::class, fn (Mailable $mail) => $mail->hasTo($admin->email)
                 && $mail->hasSubject('Store created: Walk-in Counter')
-                && str_contains($mail->render(), 'Fulfilling warehouse: Karachi DC'));
+                && str_contains($mail->render(), 'Fulfilling warehouses: Karachi DC'));
         }
         Mail::assertNotSent(Mailable::class, fn (Mailable $mail) => $mail->hasTo($operator->email) || $mail->hasTo($outsideAdmin->email));
     }

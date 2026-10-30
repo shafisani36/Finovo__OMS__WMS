@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\InventoryReservation;
 use App\Models\Order;
 use App\Models\ProductVariant;
+use App\Models\SkuMapping;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -45,6 +46,7 @@ class OrderService
                 'placed_at' => now(),
             ]);
             $this->saveLines($order, $data['items']);
+            $this->addToStoreCatalog($order);
 
             return $order;
         });
@@ -77,10 +79,29 @@ class OrderService
             if (isset($data['items'])) {
                 $order->items()->delete();
                 $this->saveLines($order, $data['items']);
+                $this->addToStoreCatalog($order);
             }
         });
 
         return [$order->fresh(['items', 'store']), $this->push->updateOrder($order->load('store'))];
+    }
+
+    /**
+     * Products sold in a store kept in Finovo only join its catalog, so they are listed with its products.
+     */
+    private function addToStoreCatalog(Order $order): void
+    {
+        $order->loadMissing('store', 'items.variant.product');
+
+        if (! $order->store) {
+            return;
+        }
+
+        foreach ($order->items as $item) {
+            if ($item->variant) {
+                SkuMapping::addToFinovoStore($order->store, $item->variant);
+            }
+        }
     }
 
     /**

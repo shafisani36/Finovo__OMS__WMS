@@ -100,7 +100,9 @@ export const OrdersPage: React.FC = () => {
 
   // The latest fetchOrders, for the timer below (it keeps the page, search and store the user is on).
   const fetchOrdersRef = useRef(fetchOrders);
-  fetchOrdersRef.current = fetchOrders;
+  useEffect(() => {
+    fetchOrdersRef.current = fetchOrders;
+  });
 
   // New orders of the managed store are imported when the page opens, every minute while it is visible and when
   // the tab is shown again, so they appear without pressing Sync. Orders sent by store notifications show up on
@@ -197,9 +199,7 @@ export const OrdersPage: React.FC = () => {
       key: 'order_number',
       header: 'Order #',
       render: (row) => (
-        <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
-          {row.order_number}
-        </span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{row.order_number}</span>
       ),
     },
     {
@@ -302,7 +302,7 @@ export const OrdersPage: React.FC = () => {
       {banner && <Alert type="success" message={banner} className="page-banner" />}
 
       <div className="kpi-grid">
-        <MetricCard title="Total Orders" value={kpis.total_orders} icon={<FileText size={20} />} pillText="All Channels" />
+        <MetricCard title="Total Orders" value={kpis.total_orders} icon={<FileText size={20} />} pillText={activeStore?.name ?? 'All Stores'} />
         <MetricCard title="Pending Allocation" value={kpis.pending} icon={<AlertCircle size={20} />} pillText="Action Req." pillVariant="amber" />
         <MetricCard title="Allocated Stock" value={kpis.allocated} icon={<CheckCircle size={20} />} pillText="Reserved" pillVariant="blue" />
         <MetricCard title="Shipped Orders" value={kpis.shipped} icon={<CheckCircle size={20} />} pillText="Dispatched" pillVariant="green" />

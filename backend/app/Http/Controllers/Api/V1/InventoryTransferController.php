@@ -28,6 +28,7 @@ class InventoryTransferController extends Controller
         $query = InventoryTransfer::where('organization_id', $org->id)
             ->when($ids !== null, fn ($q) => $q->where(fn ($q) => $q->whereIn('from_warehouse_id', $ids)->orWhereIn('to_warehouse_id', $ids)))
             ->with(['fromWarehouse', 'toWarehouse', 'fromLocation', 'toLocation', 'variant.product', 'user', 'receivedBy']);
+        $this->forStoreProducts($query, $request);
 
         if ($status = $request->query('status')) {
             $query->where('status', $status);
@@ -43,7 +44,7 @@ class InventoryTransferController extends Controller
             });
         }
 
-        $perPage = (int) $request->query('per_page', 15);
+        $perPage = $this->perPage($request, 15);
         $transfers = $query->latest('id')->paginate($perPage);
 
         $items = collect($transfers->items())->map(function ($t) {

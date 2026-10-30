@@ -40,6 +40,7 @@ export type Permission =
   | 'picking.update'
   | 'shipments.view'
   | 'shipments.dispatch'
+  | 'couriers.manage'
   | 'returns.view'
   | 'returns.manage'
   | 'purchasing.view'

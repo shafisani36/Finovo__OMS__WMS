@@ -2,6 +2,5 @@
 
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function () {
-    return view('welcome');
-});
+// The backend is an API; the React app (Frontend/) is the user interface.
+Route::get('/', fn () => response()->json(['name' => config('app.name'), 'api' => url('/api/v1')]));

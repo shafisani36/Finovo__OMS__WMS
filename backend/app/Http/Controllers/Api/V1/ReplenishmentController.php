@@ -22,7 +22,7 @@ class ReplenishmentController extends Controller
     {
         $org = $request->user()->currentOrganization();
 
-        $rules = $this->inUserWarehouses(ReorderRule::where('organization_id', $org->id), $request)
+        $rules = $this->forStoreProducts($this->inUserWarehouses(ReorderRule::where('organization_id', $org->id), $request), $request)
             ->with(['warehouse', 'variant.product'])
             ->get()
             ->map(function ($r) {
@@ -112,10 +112,14 @@ class ReplenishmentController extends Controller
             ->join('product_variants as v', fn ($join) => $join->on('v.id', '=', 'b.product_variant_id')->where('v.is_active', true))
             ->where('b.organization_id', $orgId)
             ->whereRaw('b.available <= COALESCE(r.reorder_point, ?)', [ReorderRule::DEFAULT_LOW_STOCK_THRESHOLD])
+            // With ?store_id=, only products sold in that store.
+            ->when($request->integer('store_id'), fn ($q, int $storeId) => $q->whereExists(fn ($m) => $m->from('sku_mappings')
+                ->whereColumn('sku_mappings.product_variant_id', 'b.product_variant_id')
+                ->where('sku_mappings.store_id', $storeId)))
             ->select('b.warehouse_id', 'b.product_variant_id', 'b.available', 'r.reorder_point');
 
         // A reorder rule for an item the warehouse has never held is an empty shelf too.
-        $neverStocked = $this->inUserWarehouses(ReorderRule::where('organization_id', $orgId), $request)
+        $neverStocked = $this->forStoreProducts($this->inUserWarehouses(ReorderRule::where('organization_id', $orgId), $request), $request)
             ->where('is_active', true)
             ->whereNotExists(fn ($q) => $q->from('inventory_balances')
                 ->whereColumn('inventory_balances.warehouse_id', 'reorder_rules.warehouse_id')
@@ -166,7 +170,8 @@ class ReplenishmentController extends Controller
         $org = $request->user()->currentOrganization();
         $warehouseId = $request->query('warehouse_id');
 
-        $rulesQuery = $this->inUserWarehouses(ReorderRule::where('organization_id', $org->id), $request)->where('is_active', true)->with(['warehouse', 'variant.product']);
+        $rulesQuery = $this->forStoreProducts($this->inUserWarehouses(ReorderRule::where('organization_id', $org->id), $request), $request)
+            ->where('is_active', true)->with(['warehouse', 'variant.product']);
         if ($warehouseId) {
             $rulesQuery->where('warehouse_id', $warehouseId);
         }

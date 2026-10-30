@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Loader2 } from 'lucide-react';
+import { AlertTriangle, Loader2, Store as StoreIcon } from 'lucide-react';
 import { Alert } from '../common/Alert';
 import omsService from '../../services/omsService';
 import type { WarehouseModel, WarehouseOverview, WarehouseReadinessModel } from '../../services/omsService';
 import { useAuth } from '../../hooks/useAuth';
 import { can } from '../../types/auth';
+import { useActiveStore } from '../../hooks/useActiveStore';
 import { humanize } from '../../utils/format';
+import { platformLabel } from '../stores/storePlatforms';
+import WarehouseStoresModal from './WarehouseStoresModal';
 import type { WarehouseTab } from './warehouseTabs';
 
 const DONUT_RADIUS = 68;
@@ -18,18 +21,23 @@ interface Props {
   warehouse: WarehouseModel;
   readiness: WarehouseReadinessModel | null;
   onOpenTab: (tab: WarehouseTab) => void;
+  /** After the warehouse changed here (e.g. its stores): reload it and show the message. */
+  onChanged: (message: string) => void;
 }
 
 /**
  * Overview tab: stock figures, stock by category, bin capacity, quick links to the other tabs and the
  * facility details. Every number comes from the warehouse's stock balances and locations.
  */
-export const WarehouseOverviewTab: React.FC<Props> = ({ warehouse, readiness, onOpenTab }) => {
+export const WarehouseOverviewTab: React.FC<Props> = ({ warehouse, readiness, onOpenTab, onChanged }) => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { activeStore } = useActiveStore();
   const [overview, setOverview] = useState<WarehouseOverview | null>(null);
   const [ordersToPick, setOrdersToPick] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editingStores, setEditingStores] = useState(false);
+  const linkedStores = warehouse.stores ?? [];
 
   useEffect(() => {
     let active = true;
@@ -40,7 +48,7 @@ export const WarehouseOverviewTab: React.FC<Props> = ({ warehouse, readiness, on
 
     if (can(user, 'orders.view')) {
       omsService
-        .getOrders({ warehouse_id: warehouse.id, status: 'allocated', per_page: 1 })
+        .getOrders({ warehouse_id: warehouse.id, store_id: activeStore?.id, status: 'allocated', per_page: 1 })
         .then((res) => active && setOrdersToPick(res.meta.total))
         .catch(() => active && setOrdersToPick(null));
     }
@@ -48,7 +56,7 @@ export const WarehouseOverviewTab: React.FC<Props> = ({ warehouse, readiness, on
     return () => {
       active = false;
     };
-  }, [warehouse.id, user]);
+  }, [warehouse.id, activeStore?.id, user]);
 
   if (error) return <Alert type="error" message={error} />;
   if (!overview) {
@@ -212,6 +220,44 @@ export const WarehouseOverviewTab: React.FC<Props> = ({ warehouse, readiness, on
             </button>
           ))}
       </div>
+
+      <section className="wh-card" aria-labelledby="wh-stores-title">
+        <div className="wh-card-head">
+          <div>
+            <h2 id="wh-stores-title" className="wh-card-title">Linked Stores</h2>
+            <p className="wh-card-subtitle">Orders of these stores can be fulfilled from this warehouse.</p>
+          </div>
+          {can(user, 'warehouses.manage') && (
+            <button type="button" className="wh-link" onClick={() => setEditingStores(true)}>
+              Manage stores
+            </button>
+          )}
+        </div>
+        {linkedStores.length === 0 ? (
+          <div className="wh-empty">No store is linked to this warehouse yet.</div>
+        ) : (
+          <div className="wh-store-chips">
+            {linkedStores.map((store) => (
+              <span key={store.id} className="wh-store-chip">
+                <StoreIcon size={14} aria-hidden="true" />
+                <strong>{store.name}</strong>
+                <small>{platformLabel(store.platform)}</small>
+              </span>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {editingStores && (
+        <WarehouseStoresModal
+          warehouse={warehouse}
+          onClose={() => setEditingStores(false)}
+          onSaved={(message) => {
+            setEditingStores(false);
+            onChanged(message);
+          }}
+        />
+      )}
 
       <section className="wh-card" aria-labelledby="wh-details-title">
         <div className="wh-card-head">

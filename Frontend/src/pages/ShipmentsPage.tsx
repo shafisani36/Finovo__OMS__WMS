@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, Loader2, PackageCheck, Search, Send, Truck, X } from 'lucide-react';
+import { CheckCircle2, Loader2, PackageCheck, Printer, RefreshCw, Search, Send, Settings2, Truck, X } from 'lucide-react';
 import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import DataTable from '../components/common/DataTable';
@@ -14,7 +14,9 @@ import { useAuth } from '../hooks/useAuth';
 import { can } from '../types/auth';
 import type { ShipmentKpis, ShipmentModel } from '../services/omsService';
 import { formatDate } from '../utils/format';
+import CourierAccountsModal from '../components/shipments/CourierAccountsModal';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { errorMessage } from '../utils/errors';
 
 const CARRIERS = ['TCS', 'Leopards Courier', 'M&P', 'PostEx', 'Trax', 'BlueEx', 'DHL', 'FedEx', 'UPS', 'Other'];
 
@@ -31,12 +33,18 @@ const STATUS_LABELS: Record<ShipmentModel['status'], string> = {
   delivered: 'Delivered',
 };
 
-const errorMessage = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
+/** Value of the "Send with" choice that means: enter the carrier and tracking details by hand. */
+const MANUAL = 'manual';
+
+const PROBLEM_STATUSES = ['delivery_failed', 'returned', 'cancelled'];
+
 
 export const ShipmentsPage: React.FC = () => {
   const { user } = useAuth();
   const canDispatch = can(user, 'shipments.dispatch');
+  const canManageCouriers = can(user, 'couriers.manage');
   const { activeStore } = useActiveStore();
+  const storeId = activeStore?.id;
   const { confirm, dialog } = useConfirmDialog();
 
   const [shipments, setShipments] = useState<ShipmentModel[]>([]);
@@ -51,8 +59,15 @@ export const ShipmentsPage: React.FC = () => {
   const [meta, setMeta] = useState({ total: 0, last_page: 1 });
   const [banner, setBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Courier accounts to book with, the accounts popup and the tracking refresh
+  const [couriers, setCouriers] = useState<{ id: number; name: string; carrier_name: string }[]>([]);
+  const [couriersOpen, setCouriersOpen] = useState(false);
+  const [tracking, setTracking] = useState(false);
+  const [labelId, setLabelId] = useState<number | null>(null);
+
   // Dispatch popup
   const [dispatching, setDispatching] = useState<ShipmentModel | null>(null);
+  const [sendWith, setSendWith] = useState<string>(MANUAL);
   const [carrier, setCarrier] = useState(CARRIERS[0]);
   const [otherCarrier, setOtherCarrier] = useState('');
   const [trackingNumber, setTrackingNumber] = useState('');
@@ -68,7 +83,7 @@ export const ShipmentsPage: React.FC = () => {
     try {
       setLoading(true);
       const res = await omsService.getShipments({
-        store_id: activeStore?.id,
+        store_id: storeId,
         status: statusFilter || undefined,
         search: appliedSearch || undefined,
         page,
@@ -82,14 +97,50 @@ export const ShipmentsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [activeStore?.id, statusFilter, appliedSearch, page, perPage]);
+  }, [storeId, statusFilter, appliedSearch, page, perPage]);
 
   useEffect(() => {
     fetchShipments();
   }, [fetchShipments]);
 
+  const loadCouriers = useCallback(() => {
+    omsService
+      .getShipmentCouriers()
+      .then(setCouriers)
+      .catch(() => setCouriers([]));
+  }, []);
+
+  useEffect(() => {
+    loadCouriers();
+  }, [loadCouriers]);
+
+  const handleTrack = async () => {
+    try {
+      setTracking(true);
+      const res = await omsService.trackShipments();
+      setBanner({ type: 'success', text: res.message });
+      fetchShipments();
+    } catch (err) {
+      setBanner({ type: 'error', text: errorMessage(err, 'The couriers could not be checked.') });
+    } finally {
+      setTracking(false);
+    }
+  };
+
+  const handleLabel = async (shipment: ShipmentModel) => {
+    try {
+      setLabelId(shipment.id);
+      await omsService.openShipmentLabel(shipment.id, shipment.tracking_number ?? String(shipment.id));
+    } catch (err) {
+      setBanner({ type: 'error', text: errorMessage(err, 'The label could not be opened.') });
+    } finally {
+      setLabelId(null);
+    }
+  };
+
   const openDispatch = (shipment: ShipmentModel) => {
     setDispatching(shipment);
+    setSendWith(couriers[0] ? String(couriers[0].id) : MANUAL);
     setCarrier(CARRIERS[0]);
     setOtherCarrier('');
     setTrackingNumber('');
@@ -105,19 +156,21 @@ export const ShipmentsPage: React.FC = () => {
     e.preventDefault();
     if (!dispatching) return;
 
+    const courierAccountId = sendWith === MANUAL ? undefined : Number(sendWith);
     const carrierName = carrier === 'Other' ? otherCarrier.trim() : carrier;
-    if (!carrierName) {
+    if (!courierAccountId && !carrierName) {
       setFormError('Choose the carrier to dispatch this order.');
       return;
     }
 
     try {
       setSubmitting(true);
-      const res = await omsService.dispatchShipment(dispatching.id, {
-        carrier: carrierName,
-        tracking_number: trackingNumber.trim() || undefined,
-        tracking_url: trackingUrl.trim() || undefined,
-      });
+      const res = await omsService.dispatchShipment(
+        dispatching.id,
+        courierAccountId
+          ? { courier_account_id: courierAccountId }
+          : { carrier: carrierName, tracking_number: trackingNumber.trim() || undefined, tracking_url: trackingUrl.trim() || undefined }
+      );
       setDispatching(null);
       setBanner({ type: 'success', text: res.message });
       fetchShipments();
@@ -200,6 +253,18 @@ export const ShipmentsPage: React.FC = () => {
             ) : (
               <span style={{ fontSize: 12, color: '#64748b', fontFamily: 'monospace' }}>{row.tracking_number}</span>
             )}
+            {row.courier_status_text && (
+              <span className={`shipment-courier-status${row.courier_status && PROBLEM_STATUSES.includes(row.courier_status) ? ' is-problem' : ''}`}>
+                {row.courier_status_text}
+                {row.courier_status_at ? ` · ${formatDate(row.courier_status_at, true)}` : ''}
+              </span>
+            )}
+            {row.has_label && (
+              <button type="button" className="wh-link" style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 4 }} onClick={() => handleLabel(row)} disabled={labelId === row.id}>
+                {labelId === row.id ? <Loader2 size={12} className="animate-spin" /> : <Printer size={12} />}
+                Label
+              </button>
+            )}
           </div>
         ) : (
           <span style={{ fontSize: 12, color: '#94a3b8' }}>Not dispatched yet</span>
@@ -279,6 +344,23 @@ export const ShipmentsPage: React.FC = () => {
           icon={<Truck size={18} />}
         />
       </div>
+
+      {(canManageCouriers || (canDispatch && couriers.length > 0)) && (
+        <div className="shipment-toolbar">
+          {canDispatch && couriers.length > 0 && (
+            <button type="button" className="btn-finovo-secondary" onClick={handleTrack} disabled={tracking}>
+              {tracking ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              <span>Update Courier Tracking</span>
+            </button>
+          )}
+          {canManageCouriers && (
+            <button type="button" className="btn-finovo-secondary" onClick={() => setCouriersOpen(true)}>
+              <Settings2 size={14} />
+              <span>Courier Accounts</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {banner && <Alert type={banner.type} message={banner.text} className="page-banner" />}
 
@@ -372,53 +454,72 @@ export const ShipmentsPage: React.FC = () => {
             <div className="procurement-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {formError && <Alert type="error" message={formError} />}
 
-              <div>
-                <label className="form-label">Carrier *</label>
-                <CustomDropdown value={carrier} onChange={(val) => setCarrier(String(val))} options={CARRIERS.map((c) => ({ value: c, label: c }))} />
-              </div>
-
-              {carrier === 'Other' && (
+              {couriers.length > 0 && (
                 <div>
-                  <label className="form-label">Carrier Name *</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={otherCarrier}
-                    onChange={(e) => setOtherCarrier(e.target.value)}
-                    placeholder="e.g. Local Rider"
-                    maxLength={100}
+                  <label className="form-label">Send with *</label>
+                  <CustomDropdown
+                    value={sendWith}
+                    onChange={(val) => setSendWith(String(val))}
+                    options={[
+                      ...couriers.map((c) => ({ value: String(c.id), label: `Book with ${c.name}`, description: `${c.carrier_name}: tracking number and label come from the courier` })),
+                      { value: MANUAL, label: 'Enter carrier details myself', description: 'For carriers without a courier account' },
+                    ]}
+                    searchable={false}
                   />
                 </div>
               )}
 
-              <div>
-                <label className="form-label">Tracking ID</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={trackingNumber}
-                  onChange={(e) => setTrackingNumber(e.target.value)}
-                  placeholder="Leave empty to generate a unique tracking ID"
-                  maxLength={100}
-                  autoFocus
-                />
-              </div>
+              {sendWith === MANUAL && (
+                <>
+                  <div>
+                    <label className="form-label">Carrier *</label>
+                    <CustomDropdown value={carrier} onChange={(val) => setCarrier(String(val))} options={CARRIERS.map((c) => ({ value: c, label: c }))} />
+                  </div>
 
-              <div>
-                <label className="form-label">Tracking Link</label>
-                <input
-                  type="url"
-                  className="form-input"
-                  value={trackingUrl}
-                  onChange={(e) => setTrackingUrl(e.target.value)}
-                  placeholder={
-                    ['DHL', 'FedEx', 'UPS'].includes(carrier)
-                      ? `Optional, ${carrier}'s tracking page is added automatically`
-                      : 'Optional, e.g. the courier tracking page for this parcel'
-                  }
-                  maxLength={500}
-                />
-              </div>
+                  {carrier === 'Other' && (
+                    <div>
+                      <label className="form-label">Carrier Name *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={otherCarrier}
+                        onChange={(e) => setOtherCarrier(e.target.value)}
+                        placeholder="e.g. Local Rider"
+                        maxLength={100}
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="form-label">Tracking ID</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={trackingNumber}
+                      onChange={(e) => setTrackingNumber(e.target.value)}
+                      placeholder="Leave empty to generate a unique tracking ID"
+                      maxLength={100}
+                      autoFocus
+                    />
+                  </div>
+
+                  <div>
+                    <label className="form-label">Tracking Link</label>
+                    <input
+                      type="url"
+                      className="form-input"
+                      value={trackingUrl}
+                      onChange={(e) => setTrackingUrl(e.target.value)}
+                      placeholder={
+                        ['DHL', 'FedEx', 'UPS'].includes(carrier)
+                          ? `Optional, ${carrier}'s tracking page is added automatically`
+                          : 'Optional, e.g. the courier tracking page for this parcel'
+                      }
+                      maxLength={500}
+                    />
+                  </div>
+                </>
+              )}
 
               <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
                 Dispatching removes these items from warehouse stock, marks the order as shipped and emails the customer the
@@ -440,6 +541,8 @@ export const ShipmentsPage: React.FC = () => {
           </form>
         </div>
       )}
+
+      {couriersOpen && <CourierAccountsModal onClose={() => setCouriersOpen(false)} onChanged={loadCouriers} />}
 
       {dialog}
     </div>

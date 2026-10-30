@@ -791,3 +791,91 @@
   gap: 10px;
   margin-top: 16px;
 }
+
+/* Performance tab */
+.wh-perf-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.wh-perf-card .wh-kpi {
+  height: 100%;
+}
+
+.wh-perf-description {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--finovo-text-muted);
+}
+
+.wh-perf-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--finovo-border-subtle);
+  font-size: 11px;
+  color: var(--finovo-text-muted);
+}
+
+/* Slotting tab */
+.wh-slot-note {
+  margin-top: 14px;
+}
+
+.wh-slot-muted {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--finovo-text-muted);
+}
+
+.wh-slot-move {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.wh-slot-wrap {
+  min-width: 180px;
+  white-space: normal !important;
+  font-size: 12px !important;
+}
+
+.wh-slot-warning {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #b45309;
+}
+
+/* Linked stores (Overview tab) */
+.wh-store-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wh-store-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #1e56ff;
+  font-size: 13px;
+}
+
+.wh-store-chip strong {
+  color: #0f172a;
+}
+
+.wh-store-chip small {
+  font-size: 11px;
+  color: #64748b;
+}

@@ -13,6 +13,7 @@ import omsService from '../services/omsService';
 import type { ReturnableOrder, ReturnKpis, ReturnModel } from '../services/omsService';
 import { formatDate } from '../utils/format';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { errorMessage } from '../utils/errors';
 
 const REASONS = ['Wrong size or variant', 'Damaged in transit', 'Defective product', 'Not as described', 'Changed mind', 'Other'];
 
@@ -38,10 +39,10 @@ const STATUS_LABELS: Record<ReturnModel['status'], string> = {
   rejected: 'Rejected',
 };
 
-const errorMessage = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
 
 export const ReturnsPage: React.FC = () => {
   const { activeStore } = useActiveStore();
+  const storeId = activeStore?.id;
   const { confirm, notify, dialog } = useConfirmDialog();
 
   const [returns, setReturns] = useState<ReturnModel[]>([]);
@@ -84,7 +85,7 @@ export const ReturnsPage: React.FC = () => {
     try {
       setLoading(true);
       const res = await omsService.getReturns({
-        store_id: activeStore?.id,
+        store_id: storeId,
         status: statusFilter || undefined,
         search: appliedSearch || undefined,
         page,
@@ -98,7 +99,7 @@ export const ReturnsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [activeStore?.id, statusFilter, appliedSearch, page, perPage]);
+  }, [storeId, statusFilter, appliedSearch, page, perPage]);
 
   useEffect(() => {
     fetchReturns();
@@ -116,7 +117,7 @@ export const ReturnsPage: React.FC = () => {
     setFormError(null);
     try {
       setOrdersLoading(true);
-      const res = await omsService.getReturnableOrders({ store_id: activeStore?.id });
+      const res = await omsService.getReturnableOrders({ store_id: storeId });
       setOrders(res.data);
     } catch (err) {
       setFormError(errorMessage(err, 'Failed to load shipped orders.'));

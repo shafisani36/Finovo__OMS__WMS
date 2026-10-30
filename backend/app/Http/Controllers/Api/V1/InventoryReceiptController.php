@@ -7,6 +7,7 @@ use App\Models\InventoryReceipt;
 use App\Models\Warehouse;
 use App\Models\WarehouseLocation;
 use App\Services\InventoryEngine;
+use App\Services\SlottingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -14,7 +15,8 @@ use Illuminate\Support\Facades\DB;
 class InventoryReceiptController extends Controller
 {
     public function __construct(
-        protected InventoryEngine $inventoryEngine
+        protected InventoryEngine $inventoryEngine,
+        protected SlottingService $slotting,
     ) {}
 
     /**
@@ -26,6 +28,7 @@ class InventoryReceiptController extends Controller
 
         $query = $this->inUserWarehouses(InventoryReceipt::where('organization_id', $org->id), $request)
             ->with(['warehouse', 'receivingLocation', 'receivedBy', 'items.variant.product']);
+        $this->forStoreProducts($query, $request, 'items.variant');
 
         if ($warehouseId = $request->query('warehouse_id')) {
             $query->where('warehouse_id', $warehouseId);
@@ -43,7 +46,7 @@ class InventoryReceiptController extends Controller
             });
         }
 
-        $perPage = (int) $request->query('per_page', 15);
+        $perPage = $this->perPage($request, 15);
         $receipts = $query->latest('id')->paginate($perPage);
 
         $items = collect($receipts->items())->map(function ($r) {
@@ -283,14 +286,26 @@ class InventoryReceiptController extends Controller
             $destLocId = $destLoc->id;
         }
 
+        $item = $receipt->items()->findOrFail($validated['item_id']);
+
+        // Without a destination, the units go to the suggested bin (same stock first, then the right area for
+        // the product's ABC class).
+        if (! $destLocId && $item->product_variant_id) {
+            $destLocId = $this->slotting->suggestPutaway(
+                Warehouse::findOrFail($receipt->warehouse_id),
+                (int) $item->product_variant_id,
+                (int) $validated['quantity'],
+                $item->lot_number,
+            )['location']['id'] ?? null;
+        }
+
         if (! $destLocId) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Please provide a valid destination location or location code.',
+                'message' => 'Choose the bin to put the units in; no putaway bin has room for them.',
             ], 422);
         }
 
-        $item = $receipt->items()->findOrFail($validated['item_id']);
         $fromLocId = $item->location_id ?: $receipt->receiving_location_id;
 
         if (! $fromLocId) {

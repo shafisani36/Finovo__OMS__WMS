@@ -210,7 +210,7 @@ class WixWriter extends PlatformWriter implements ProductWriter, WebhookSubscrib
     public function registerWebhooks(Store $store, string $callbackUrl): void
     {
         if (blank($store->credential('instance_id'))) {
-            throw new RuntimeException('This Wix site is connected with an API key. Connect it through the Finovo app for instant import; until then Finovo reads new orders every minute.');
+            throw new AutomaticImportUnavailable('This Wix site is connected with an API key. Connect it through the Finovo app for instant import; until then Finovo reads new orders every minute.');
         }
 
         if (blank(config('services.wix.webhook_public_key'))) {

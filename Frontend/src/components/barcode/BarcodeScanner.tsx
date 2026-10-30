@@ -11,8 +11,8 @@ import omsService from '../../services/omsService';
 import type { OrderFulfillment, ScanResult, ScannedProduct } from '../../services/omsService';
 import { formatMoney } from '../../utils/format';
 import './Barcode.css';
+import { errorMessage } from '../../utils/errors';
 
-const errorText = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
 
 /**
  * Live camera preview that reads barcodes and QR codes (phone back camera, or a laptop webcam).
@@ -21,7 +21,9 @@ const errorText = (err: unknown, fallback: string) => (err instanceof Error && e
 export const CameraScanner: React.FC<{ onDetected: (text: string) => void }> = ({ onDetected }) => {
   const video = useRef<HTMLVideoElement>(null);
   const detected = useRef(onDetected);
-  detected.current = onDetected;
+  useEffect(() => {
+    detected.current = onDetected;
+  });
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(true);
 
@@ -118,7 +120,7 @@ export const BarcodeScanner: React.FC = () => {
       setScannedCode(term);
     } catch (err) {
       setResult(null);
-      setError(errorText(err, 'Nothing matches this barcode.'));
+      setError(errorMessage(err, 'Nothing matches this barcode.'));
     } finally {
       setBusy(false);
       setCode('');

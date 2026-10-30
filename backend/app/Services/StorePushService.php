@@ -38,7 +38,10 @@ class StorePushService
         $product->loadMissing('variants');
         $report = new PushReport;
 
-        foreach ($this->linkedStores($product)->concat($stores)->unique('id') as $store) {
+        // Stores kept in Finovo only have nothing to send to; their catalog is linked in ProductService.
+        $targets = $this->linkedStores($product)->concat($stores)->unique('id')->reject(fn (Store $store) => $store->platform->keepsCatalogInFinovo());
+
+        foreach ($targets as $store) {
             $this->attempt($report, $store, $this->writers->products($store), 'product push', function (ProductWriter $writer) use ($store, $product) {
                 $link = StoreProductLink::where('store_id', $store->id)->where('product_id', $product->id)->first();
                 $pushed = $writer->saveProduct($store, $product, $link?->external_id);
@@ -94,7 +97,7 @@ class StorePushService
     {
         $report = new PushReport;
 
-        if ($order->store && ! $order->external_order_id) {
+        if ($order->store && ! $order->external_order_id && ! $order->store->platform->keepsCatalogInFinovo()) {
             $this->attempt($report, $order->store, $this->writers->for($order->store), 'order push', function (StoreWriter $writer) use ($order) {
                 $order->forceFill(['external_order_id' => $writer->createOrder($order->store, $order)])->save();
             });

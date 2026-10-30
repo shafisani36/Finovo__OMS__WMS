@@ -37,7 +37,7 @@ class PushReport
         }
 
         if ($this->skipped) {
-            $parts[] = implode(', ', $this->skipped).' must be changed on the store itself (Finovo cannot write to it).';
+            $parts[] = 'Finovo cannot write to '.implode(', ', $this->skipped)." (a store kept in Finovo only, or not connected), so it was not {$verb} there.";
         }
 
         return implode(' ', $parts);

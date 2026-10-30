@@ -23,6 +23,7 @@ import {
   ChevronRight,
   LogOut,
   Receipt,
+  Smartphone,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
@@ -59,6 +60,7 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
       { to: '/inventory', label: 'Inventory Engine', icon: Boxes, permission: 'inventory.view' },
       { to: '/shipments', label: 'Shipments', icon: Truck, permission: 'shipments.view' },
       { to: '/picking', label: 'Picking', icon: CheckSquare, permission: 'picking.view' },
+      { to: '/mobile', label: 'Mobile Scanner', icon: Smartphone, permission: 'inventory.view' },
       { to: '/purchase-orders', label: 'Purchase Orders', icon: FileSpreadsheet, permission: 'purchasing.view' },
       { to: '/stock-movements', label: 'Stock Movements', icon: ArrowLeftRight, permission: 'inventory.view' },
       { to: '/returns', label: 'Returns', icon: RotateCcw, permission: 'returns.view' },
@@ -80,6 +82,8 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
  */
 const StockAlertsBell: React.FC = () => {
   const navigate = useNavigate();
+  const { activeStore } = useActiveStore();
+  const storeId = activeStore?.id;
   const [alerts, setAlerts] = useState<StockAlert[]>([]);
   const [meta, setMeta] = useState<StockAlertsResponse['meta'] | null>(null);
   const [open, setOpen] = useState(false);
@@ -87,7 +91,7 @@ const StockAlertsBell: React.FC = () => {
 
   const load = useCallback(async () => {
     try {
-      const res = await omsService.getStockAlerts();
+      const res = await omsService.getStockAlerts(storeId);
       setAlerts(res.data);
       setMeta(res.meta);
 
@@ -102,7 +106,7 @@ const StockAlertsBell: React.FC = () => {
     } catch (err) {
       console.error(err);
     }
-  }, []);
+  }, [storeId]);
 
   useEffect(() => {
     load();

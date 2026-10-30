@@ -53,7 +53,7 @@ class GoodsReceivedNoteController extends Controller
             });
         }
 
-        $perPage = (int) $request->query('per_page', 15);
+        $perPage = $this->perPage($request, 15);
         $grns = $query->latest('id')->paginate($perPage);
 
         $byStatus = $scoped()->selectRaw('status, count(*) as total')->groupBy('status')->pluck('total', 'status');

@@ -25,6 +25,7 @@ class StockAdjustmentController extends Controller
 
         $query = $this->inUserWarehouses(StockAdjustment::where('organization_id', $org->id), $request)
             ->with(['warehouse', 'location', 'variant.product', 'user', 'approvedBy']);
+        $this->forStoreProducts($query, $request);
 
         if ($warehouseId = $request->query('warehouse_id')) {
             $query->where('warehouse_id', $warehouseId);
@@ -45,7 +46,7 @@ class StockAdjustmentController extends Controller
             });
         }
 
-        $perPage = (int) $request->query('per_page', 15);
+        $perPage = $this->perPage($request, 15);
         $adjustments = $query->latest('id')->paginate($perPage);
 
         $items = collect($adjustments->items())->map(function ($a) {

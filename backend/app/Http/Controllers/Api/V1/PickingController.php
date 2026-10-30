@@ -29,7 +29,8 @@ class PickingController extends Controller
         // Shipped and cancelled orders have left picking, so they are not listed.
         $scoped = fn () => $this->inUserWarehouses(PickTask::where('organization_id', $org->id), $request)
             ->whereNotIn('status', PickTask::CLOSED)
-            ->when($request->integer('store_id'), fn ($q, $storeId) => $q->whereHas('order', fn ($o) => $o->where('store_id', $storeId)));
+            ->when($request->integer('store_id'), fn ($q, $storeId) => $q->whereHas('order', fn ($o) => $o->where('store_id', $storeId)))
+            ->when($request->integer('warehouse_id'), fn ($q, $warehouseId) => $q->where('warehouse_id', $warehouseId));
 
         $query = $scoped()->with(['order.items.variant.product', 'warehouse', 'assignedUser', 'wave']);
 
@@ -195,6 +196,8 @@ class PickingController extends Controller
     {
         $waves = $this->inUserWarehouses(PickWave::where('organization_id', $request->user()->currentOrganization()->id), $request)
             ->where('status', PickWave::STATUS_OPEN)
+            ->when($request->integer('warehouse_id'), fn ($q, $warehouseId) => $q->where('warehouse_id', $warehouseId))
+            ->when($request->integer('store_id'), fn ($q, $storeId) => $q->whereHas('tasks.order', fn ($o) => $o->where('store_id', $storeId)))
             ->with('warehouse:id,name')
             ->withCount('tasks')
             ->latest('id')

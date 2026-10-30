@@ -17,7 +17,7 @@ class OrderAllocationEngine
 
     /**
      * Active warehouses that can fulfil the order: the store's linked warehouses, or every active warehouse
-     * when the store has none linked. Best priority first.
+     * when the store has none linked. In the store's warehouse order (or the warehouses' own priority).
      *
      * @return Collection<int, Warehouse>
      */
@@ -26,7 +26,7 @@ class OrderAllocationEngine
         $order->loadMissing('store.warehouses');
 
         return $order->store && $order->store->warehouses->isNotEmpty()
-            ? $order->store->warehouses()->where('is_active', true)->orderBy('priority', 'asc')->get()
+            ? $order->store->warehouses()->where('warehouses.is_active', true)->get()
             : Warehouse::where('organization_id', $order->organization_id)->where('is_active', true)->orderBy('priority', 'asc')->get();
     }
 
