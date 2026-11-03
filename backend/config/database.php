@@ -50,7 +50,7 @@ return [
             'host' => env('DB_HOST', '127.0.0.1'),
             // Read replicas (comma-separated) take the reads when traffic grows; writes, and reads right after a write
             // in the same request (sticky), go to DB_HOST. Without DB_READ_HOSTS everything uses DB_HOST.
-            'read' => ['host' => array_map('trim', explode(',', (string) env('DB_READ_HOSTS', env('DB_HOST', '127.0.0.1'))))],
+            'read' => ['host' => array_map('trim', explode(',', (string) (env('DB_READ_HOSTS') ?: env('DB_HOST', '127.0.0.1'))))],
             'write' => ['host' => [env('DB_HOST', '127.0.0.1')]],
             'sticky' => true,
             'port' => env('DB_PORT', '3306'),
