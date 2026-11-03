@@ -32,7 +32,8 @@ import StoreConnectingOverlay from '../components/stores/StoreConnectingOverlay'
 import type { ConnectingMode } from '../components/stores/StoreConnectingOverlay';
 import { STORE_PLATFORMS, platformLabel } from '../components/stores/storePlatforms';
 import CustomDropdown from '../components/common/CustomDropdown';
-import omsService, { AUTO_IMPORT_PLATFORMS } from '../services/omsService';
+import StatusPill from '../components/common/StatusPill';
+import omsService, { AUTO_IMPORT_PLATFORMS, POLLED_PLATFORMS } from '../services/omsService';
 import type { StoreKpis, StoreModel, StoreStatusFilter, WarehouseModel } from '../services/omsService';
 import { useActiveStore } from '../hooks/useActiveStore';
 import { useAuth } from '../hooks/useAuth';
@@ -409,12 +410,11 @@ export const StoresPage: React.FC = () => {
       header: 'Auto Import',
       render: (row) => {
         const webhooks = row.settings?.webhooks;
-        if (row.connection_state === 'connected' && webhooks?.status === 'active') {
-          return <span className="kpi-pill kpi-pill-green" title={webhooks.message}>On</span>;
-        }
+        const polled = POLLED_PLATFORMS.includes(row.platform);
+        const on = row.connection_state === 'connected' && (polled || webhooks?.status === 'active');
         return (
-          <span style={{ fontSize: 12, color: '#94a3b8' }} title={webhooks?.message ?? 'New orders are imported every minute'}>
-            Every minute
+          <span title={polled ? 'New orders are imported every minute' : webhooks?.message}>
+            <StatusPill status={on ? 'active' : 'off'} label={on ? 'On' : 'Off'} />
           </span>
         );
       },

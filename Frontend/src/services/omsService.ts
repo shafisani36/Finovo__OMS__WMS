@@ -1,5 +1,6 @@
-import apiClient, { getAuthToken } from './apiClient';
+import apiClient, { getAuthToken, request } from './apiClient';
 import type { Permission, UserRole } from '../types/auth';
+import type { AddressParts } from '../utils/format';
 
 export type StorePlatform =
   | 'shopify'
@@ -49,7 +50,11 @@ export const ORDER_CREATE_PLATFORMS: StorePlatform[] = ORDER_PLATFORMS.filter((p
 export const PRODUCT_PLATFORMS: StorePlatform[] = ORDER_PLATFORMS;
 
 /** Store platforms that notify Finovo of new orders and product changes at once (the others are read every minute). */
+/** Platforms that tell Finovo at once about new orders (webhooks), after auto import is turned on. */
 export const AUTO_IMPORT_PLATFORMS: StorePlatform[] = ['shopify', 'woocommerce', 'bigcommerce', 'prestashop', 'opencart', 'wix'];
+
+/** Platforms without webhooks: once connected, Finovo reads their new orders every minute by itself. */
+export const POLLED_PLATFORMS: StorePlatform[] = ['ebay', 'oscommerce', 'magento'];
 
 export type StoreConnectionState = 'connected' | 'awaiting_authorization' | 'setup_incomplete' | 'disconnected';
 
@@ -346,6 +351,77 @@ export interface PickWaveDetail {
   }[];
 }
 
+export interface PortalStockRow {
+  sku: string | null;
+  product_name: string | null;
+  on_hand: number;
+  reserved: number;
+  available: number;
+}
+
+export interface PortalOrder {
+  id: number;
+  order_number: string;
+  store: string | null;
+  customer: string | null;
+  status: string;
+  total_amount: number;
+  currency: string | null;
+  placed_at: string | null;
+  shipment: { status: string; carrier: string | null; tracking_number: string | null; tracking_url: string | null } | null;
+}
+
+export type StockMovementClass = 'fast' | 'slow' | 'non_moving';
+export type AgingBuckets = Record<'0_30' | '31_60' | '61_90' | 'over_90', number>;
+
+export interface StockAgingRow {
+  product_variant_id: number;
+  sku: string | null;
+  product_name: string | null;
+  warehouse: string | null;
+  on_hand: number;
+  buckets: AgingBuckets;
+  oldest_days: number;
+  last_sold_at: string | null;
+  sold_90_days: number;
+  movement: StockMovementClass;
+}
+
+export interface CycleCountSchedule {
+  id: number;
+  warehouse_id: number;
+  warehouse?: { id: number; name: string };
+  title: string;
+  scope_type: 'full' | 'zone' | 'location';
+  scope_value: string | null;
+  every_days: number;
+  next_run_on: string;
+}
+
+export type ValuationMethod = 'fifo' | 'lifo' | 'avco';
+export type ValuationMode = 'perpetual' | 'periodic';
+
+/** One product's stock value over the period (quantities in units, values in the company's currency). */
+export interface ValuationRow {
+  opening_quantity: number;
+  opening_value: number;
+  in_quantity: number;
+  in_value: number;
+  out_quantity: number;
+  cost_of_goods_sold: number;
+  closing_quantity: number;
+  closing_value: number;
+}
+
+export interface ValuationReport {
+  method: ValuationMethod;
+  mode: ValuationMode;
+  from: string;
+  to: string;
+  data: (ValuationRow & { variant_id: number; sku: string | null; product_name: string | null; unit_cost: number })[];
+  totals: ValuationRow;
+}
+
 export interface DemandForecastRow {
   warehouse_id: number;
   warehouse_name: string | null;
@@ -562,17 +638,90 @@ export interface ShipmentModel {
   carrier: string | null;
   tracking_number: string | null;
   tracking_url: string | null;
-  status: 'pending' | 'shipped' | 'delivered';
+  status: ShipmentStatus;
+  city: string | null;
+  /** Parcel as handed to the courier; weight is null until dispatch (the courier account's default is used). */
+  weight_kg: number | null;
+  /** Length, width and height in cm from the packing station. */
+  dimensions_cm: [number, number, number] | null;
+  pieces: number;
+  /** Cash the courier collects: as entered at dispatch, otherwise the order total unless it is paid. */
+  cod_amount: number;
   packed_at: string | null;
   shipped_at: string | null;
   delivered_at: string | null;
+  returned_at: string | null;
   dispatched_by: string | null;
   /** Booked through one of the company's courier accounts (label and status come from the courier). */
   booked_with_courier: boolean;
   has_label: boolean;
+  /** Dispatched but not collected by the courier yet, so the dispatch can be taken back. */
+  can_cancel_dispatch: boolean;
   courier_status: CourierParcelStatus | null;
   courier_status_text: string | null;
   courier_status_at: string | null;
+}
+
+export type ShipmentStatus = 'pending' | 'shipped' | 'delivered' | 'returned';
+
+export const SHIPMENT_STATUS_LABELS: Record<ShipmentStatus, string> = {
+  pending: 'Ready to Dispatch',
+  shipped: 'In Transit',
+  delivered: 'Delivered',
+  returned: 'Returned',
+};
+
+/** List filter: a shipment status, or parcels the courier could not deliver or cancelled. */
+export type ShipmentFilter = ShipmentStatus | 'issues';
+
+export interface ShipmentEventModel {
+  id: number;
+  type: 'dispatched' | 'courier' | 'delivered' | 'returned' | 'dispatch_cancelled';
+  courier_status: CourierParcelStatus | null;
+  description: string;
+  user: string | null;
+  happened_at: string;
+}
+
+/** One shipment with its order lines, address and timeline (shipment detail). */
+export interface ShipmentDetail extends ShipmentModel {
+  customer_email: string | null;
+  customer_phone: string | null;
+  shipping_address: AddressParts | null;
+  payment_status: string | null;
+  notes: string | null;
+  items: { id: number; product_name: string; sku: string | null; quantity: number; status: string }[];
+  events: ShipmentEventModel[];
+}
+
+/** A company courier account parcels can be booked with. */
+export interface ShipmentCourier {
+  id: number;
+  name: string;
+  carrier: string;
+  carrier_name: string;
+  default_weight_kg: number;
+}
+
+/** Carrier, tracking and parcel details sent when dispatching. */
+export interface DispatchPayload {
+  courier_account_id?: number;
+  carrier?: string;
+  tracking_number?: string;
+  tracking_url?: string;
+  weight_kg?: number;
+  length_cm?: number;
+  width_cm?: number;
+  height_cm?: number;
+  pieces?: number;
+  cod_amount?: number;
+}
+
+export interface BulkDispatchResult {
+  id: number;
+  order_number: string | null;
+  dispatched: boolean;
+  message: string;
 }
 
 export type CourierParcelStatus = 'booked' | 'in_transit' | 'out_for_delivery' | 'delivery_failed' | 'delivered' | 'returned' | 'cancelled';
@@ -620,7 +769,9 @@ export interface ShipmentKpis {
   ready_to_dispatch: number;
   dispatched_today: number;
   in_transit: number;
+  issues: number;
   delivered: number;
+  returned: number;
 }
 
 export interface ReturnModel {
@@ -634,6 +785,13 @@ export interface ReturnModel {
   status: 'requested' | 'received' | 'completed' | 'rejected';
   reason: string | null;
   disposition: 'sellable' | 'damaged' | 'quarantine' | 'disposed' | null;
+  /** How a completed return was settled: money back or the items sent again. */
+  resolution: 'refund' | 'replacement' | null;
+  refund_amount: string | null;
+  refund_method: string | null;
+  replacement_order: { id: number; order_number: string } | null;
+  currency: string | null;
+  payment_status: string | null;
   notes: string | null;
   items_count: number;
   items: { product_name: string; sku: string | null; quantity: number }[];
@@ -668,6 +826,8 @@ export interface EmployeeModel {
   name: string;
   email: string;
   role: EmployeeRole;
+  /** The 3PL client of a client-portal user. */
+  client_id: number | null;
   role_label: string;
   status: EmployeeStatus;
   warehouse_access: WarehouseAccess;
@@ -696,11 +856,14 @@ export interface EmployeePayload {
   warehouse_access: WarehouseAccess;
   /** Sent only with "assigned" access; left out, current assignments are kept. */
   warehouse_ids?: number[];
+  /** Required for the client role: the 3PL client whose portal the user sees. */
+  client_id?: number | null;
 }
 
 export interface EmployeeOptions {
   roles: { value: EmployeeRole; label: string; description: string }[];
   warehouses: { id: number; name: string; code: string | null }[];
+  clients: { id: number; name: string }[];
 }
 
 export type PermissionEffect = 'allow' | 'deny' | 'inherit';
@@ -1108,21 +1271,6 @@ export interface CycleCountModel {
   }>;
 }
 
-export interface ReorderRuleModel {
-  id: number;
-  warehouse_id: number;
-  warehouse_name: string;
-  product_variant_id: number;
-  product_name: string;
-  sku: string;
-  min_quantity: number;
-  reorder_point: number;
-  reorder_quantity: number;
-  safety_stock: number;
-  lead_time_days: number;
-  preferred_supplier?: string | null;
-  is_active: boolean;
-}
 
 export interface ReplenishmentRecommendationModel {
   rule_id: number;
@@ -1220,8 +1368,101 @@ export interface OrderModel {
   /** Other facts the store gave (tags, sales channel...), by label. */
   details?: Record<string, PlatformDetail> | null;
   placed_at: string;
+  /** Why the order may not be allocated, picked or dispatched yet; empty when it is free to go. */
+  hold_type?: OrderHoldType | null;
+  hold_reason?: string | null;
+  /** The company's own status (see CustomOrderStatus). */
+  custom_status?: string | null;
   store?: { id: number; name: string; platform: StorePlatform } | null;
   items?: OrderItemModel[];
+}
+
+export type OrderHoldType = 'manual' | 'approval' | 'credit';
+
+export type CustomStatusColor = 'grey' | 'blue' | 'green' | 'amber' | 'red' | 'purple';
+
+/** A status the company adds to its orders (e.g. "Awaiting stock"), shown next to the system status. */
+export interface CustomOrderStatus {
+  key: string;
+  label: string;
+  color: CustomStatusColor;
+}
+
+export type BulkOrderAction = 'allocate' | 'hold' | 'release' | 'cancel' | 'set_status';
+
+export interface BulkOrderResult {
+  done: string[];
+  failed: { order_number: string; message: string }[];
+}
+
+export type RecurringInterval = 'weekly' | 'fortnightly' | 'monthly';
+
+export const RECURRING_INTERVAL_LABELS: Record<RecurringInterval, string> = { weekly: 'Every week', fortnightly: 'Every 2 weeks', monthly: 'Every month' };
+
+export interface RecurringOrderModel {
+  id: number;
+  customer_name: string | null;
+  customer_email: string | null;
+  currency: string | null;
+  items: { product_variant_id: number; quantity: number; unit_price: number }[];
+  total: number;
+  interval: RecurringInterval;
+  next_run_at: string;
+  last_run_at: string | null;
+  last_error: string | null;
+  active: boolean;
+  orders_count: number;
+  created_by: string | null;
+}
+
+/** What a customer sees of their order on the self-service page. */
+export interface TrackedOrder {
+  order_number: string;
+  status: string;
+  placed_at: string | null;
+  total: string;
+  currency: string;
+  store: string | null;
+  on_hold: boolean;
+  can_cancel: boolean;
+  items: { item_id: number; name: string; quantity: number; returnable_quantity: number }[];
+  shipments: { carrier: string | null; tracking_number: string | null; tracking_url: string | null; status: string; events: { description: string; at: string }[] }[];
+  returns: { return_number: string; status: string; resolution: string | null }[];
+}
+
+/** Same rule as the backend's OrderControlService::WAITING: orders with nothing reserved or picked yet. */
+export const ORDER_WAITING_STATUSES = ['imported', 'pending', 'exception'];
+
+/** Whether an order made in Finovo can still be split or merged (its status may be newer than the order's). */
+export const canSplitOrMerge = (order: OrderModel, status = order.order_status): boolean =>
+  !order.external_order_id && ORDER_WAITING_STATUSES.includes(status);
+
+export interface OrderTimelineEvent {
+  type: string;
+  description: string;
+  user: string | null;
+  at: string;
+}
+
+export interface OrderControlSettings {
+  /** Orders at or above this total wait for approval; empty for no approval. */
+  approval_threshold: number | null;
+  /** Hours an order may take to ship. */
+  sla_hours: number;
+}
+
+export interface SlaOrder {
+  id: number;
+  order_number: string;
+  customer: string | null;
+  status: string;
+  hours_left: number;
+}
+
+export interface SlaReport {
+  sla_hours: number;
+  breached: SlaOrder[];
+  at_risk: SlaOrder[];
 }
 
 export interface StockAlert {
@@ -1316,6 +1557,8 @@ export interface CustomerDetailModel {
   email: string | null;
   phone: string | null;
   default_address: CustomerAddress | null;
+  /** Most the customer may owe on unpaid orders; empty for no limit. */
+  credit_limit: string | null;
   created_at: string;
   stats: {
     orders_count: number;
@@ -1329,19 +1572,9 @@ export interface CustomerDetailModel {
   orders: CustomerOrderModel[];
 }
 
-export /** Downloads a PDF from the API (with the signed-in user's token) under the name the server gives it. */
-const downloadPdf = async (path: string, fallbackName: string, failure: string) => {
-  const token = getAuthToken();
-  const response = await fetch(path, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    credentials: 'include',
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => null);
-    throw new Error(body?.message || failure);
-  }
-  const filename = /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') ?? '')?.[1] ?? fallbackName;
-  const url = window.URL.createObjectURL(await response.blob());
+/** Saves a downloaded file in the browser. */
+const saveBlob = (blob: Blob, filename: string) => {
+  const url = window.URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;
@@ -1349,6 +1582,30 @@ const downloadPdf = async (path: string, fallbackName: string, failure: string) 
   link.click();
   link.remove();
   window.URL.revokeObjectURL(url);
+};
+
+/**
+ * Downloads a PDF from the API (with the signed-in user's token) under the name the server gives it. With a body,
+ * the PDF is requested with POST (e.g. for a list of IDs).
+ */
+const downloadPdf = async (path: string, fallbackName: string, failure: string, body?: unknown) => {
+  const token = getAuthToken();
+  const response = await fetch(path, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: {
+      Accept: 'application/pdf, application/json',
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => null);
+    throw new Error(error?.message || failure);
+  }
+  const filename = /filename="([^"]+)"/.exec(response.headers.get('Content-Disposition') ?? '')?.[1] ?? fallbackName;
+  saveBlob(await response.blob(), filename);
 };
 
 const omsService = {
@@ -1408,11 +1665,6 @@ const omsService = {
   },
 
   // Warehouses
-  async getWarehouseMetadata() {
-    const { data } = await apiClient.get('/warehouses/metadata');
-    return data;
-  },
-
   async getWarehouses(params?: { search?: string; status?: string; type?: string }) {
     const { data } = await apiClient.get('/warehouses', { params });
     return data;
@@ -1425,11 +1677,6 @@ const omsService = {
 
   async createWarehouse(payload: any) {
     const { data } = await apiClient.post('/warehouses', payload);
-    return data;
-  },
-
-  async updateWarehouse(id: number, payload: any) {
-    const { data } = await apiClient.put(`/warehouses/${id}`, payload);
     return data;
   },
 
@@ -1453,11 +1700,6 @@ const omsService = {
     return data;
   },
 
-  async closeWarehouse(id: number, notes?: string) {
-    const { data } = await apiClient.post(`/warehouses/${id}/close`, { notes });
-    return data;
-  },
-
   // Physical Layout & Locations
   async getWarehouseLocations(warehouseId: number, params?: { parent_id?: number; location_type?: string; per_page?: number }) {
     const { data } = await apiClient.get(`/warehouses/${warehouseId}/locations`, { params });
@@ -1466,11 +1708,6 @@ const omsService = {
 
   async createWarehouseLocation(warehouseId: number, payload: any) {
     const { data } = await apiClient.post(`/warehouses/${warehouseId}/locations`, payload);
-    return data;
-  },
-
-  async updateWarehouseLocation(warehouseId: number, locationId: number, payload: any) {
-    const { data } = await apiClient.put(`/warehouses/${warehouseId}/locations/${locationId}`, payload);
     return data;
   },
 
@@ -1757,22 +1994,12 @@ const omsService = {
     return data;
   },
 
-  async recordCycleCounts(countId: number, counts: Array<{ item_id: number; counted_quantity: number; notes?: string }>) {
-    const { data } = await apiClient.put(`/inventory/cycle-counts/${countId}/record-counts`, { counts });
-    return data;
-  },
-
   async approveAndPostCycleCount(countId: number) {
     const { data } = await apiClient.post(`/inventory/cycle-counts/${countId}/approve-and-post`);
     return data;
   },
 
   // Replenishment & Reorder
-  async getReplenishmentRules(storeId?: number) {
-    const { data } = await apiClient.get('/inventory/replenishment/rules', { params: { store_id: storeId } });
-    return data;
-  },
-
   async saveReplenishmentRule(payload: {
     warehouse_id: number;
     product_variant_id: number;
@@ -1801,6 +2028,73 @@ const omsService = {
   /** Sales speed, days of stock left and the quantity to order, per item and warehouse. */
   async getDemandForecast(params: { warehouse_id?: number; days?: number; cover_days?: number }): Promise<{ data: DemandForecastRow[]; meta: { days: number; cover_days: number; order_now: number; order_soon: number } }> {
     const { data } = await apiClient.get('/inventory/replenishment/forecast', { params });
+    return data;
+  },
+
+  /** Inventory value with FIFO, LIFO or AVCO (the company's method unless one is given), perpetual or periodic. */
+  async getInventoryValuation(params: { method?: ValuationMethod; mode?: ValuationMode; months?: number; warehouse_id?: number; store_id?: number }): Promise<ValuationReport> {
+    const { data } = await apiClient.get('/inventory/valuation', { params });
+    return data;
+  },
+
+  /** Read-only AI assistant: an answer and the records it was built from. */
+  async askAssistant(question: string): Promise<{ answer: string; sources: string[] }> {
+    const { data } = await apiClient.post('/ai/ask', { question });
+    return data;
+  },
+
+  /** Likely duplicate orders and unusual stock events. */
+  async getInsights(): Promise<{ data: { duplicate_orders: { customer: string | null; total_amount: number; order_numbers: string[] }[]; anomalies: { type: 'negative_stock' | 'large_adjustment'; sku?: string | null; reference?: string | null; warehouse: string | null; detail: string }[] } }> {
+    const { data } = await apiClient.get('/insights');
+    return data;
+  },
+
+  // 3PL client portal (client accounts only)
+  async getPortalStock(): Promise<{ client: { name: string }; data: PortalStockRow[] }> {
+    const { data } = await apiClient.get('/portal/stock');
+    return data;
+  },
+
+  async getPortalOrders(params: { search?: string; page?: number }): Promise<{ data: PortalOrder[]; meta: { current_page: number; last_page: number; total: number } }> {
+    const { data } = await apiClient.get('/portal/orders', { params });
+    return data;
+  },
+
+  async getPortalActivity(): Promise<{ data: { id: number; order_number: string | null; description: string; happened_at: string | null }[] }> {
+    const { data } = await apiClient.get('/portal/activity');
+    return data;
+  },
+
+  /** Units on hand by age, last sale and how fast each product moves. */
+  async getStockAging(params: { warehouse_id?: number; store_id?: number; movement?: StockMovementClass }): Promise<{ data: StockAgingRow[]; totals: { on_hand: number; buckets: AgingBuckets } }> {
+    const { data } = await apiClient.get('/inventory/aging', { params });
+    return data;
+  },
+
+  async getCycleCountSchedules(warehouseId?: number): Promise<CycleCountSchedule[]> {
+    const { data } = await apiClient.get('/inventory/cycle-count-schedules', { params: { warehouse_id: warehouseId } });
+    return data.data;
+  },
+
+  async createCycleCountSchedule(payload: Omit<CycleCountSchedule, 'id' | 'warehouse'>): Promise<{ message: string }> {
+    const { data } = await apiClient.post('/inventory/cycle-count-schedules', payload);
+    return data;
+  },
+
+  async deleteCycleCountSchedule(id: number): Promise<{ message: string }> {
+    const { data } = await apiClient.delete(`/inventory/cycle-count-schedules/${id}`);
+    return data;
+  },
+
+  /** Gives a pick task to a worker. */
+  async assignPickTask(taskId: number, userId: number): Promise<{ message: string }> {
+    const { data } = await apiClient.put(`/picking/${taskId}/assign`, { user_id: userId });
+    return data;
+  },
+
+  /** Saves the company's inventory valuation method. */
+  async setValuationMethod(method: ValuationMethod): Promise<{ message: string; method: ValuationMethod }> {
+    const { data } = await apiClient.put('/inventory/valuation/method', { method });
     return data;
   },
 
@@ -1863,7 +2157,7 @@ const omsService = {
   },
 
   // Shipments
-  async getShipments(params?: { store_id?: number; search?: string; status?: string; page?: number; per_page?: number }): Promise<{
+  async getShipments(params?: { store_id?: number; search?: string; status?: ShipmentFilter; page?: number; per_page?: number }): Promise<{
     data: ShipmentModel[];
     meta: { current_page: number; last_page: number; per_page: number; total: number };
     kpis: ShipmentKpis;
@@ -1873,15 +2167,42 @@ const omsService = {
   },
 
   /** Dispatch with a courier account (booked through its API) or with a carrier and tracking details. */
-  async dispatchShipment(shipmentId: number, payload: { courier_account_id?: number; carrier?: string; tracking_number?: string; tracking_url?: string }) {
+  async getShipment(shipmentId: number): Promise<ShipmentDetail> {
+    const { data } = await apiClient.get(`/shipments/${shipmentId}`);
+    return data.data;
+  },
+
+  async dispatchShipment(shipmentId: number, payload: DispatchPayload): Promise<{ message: string; data: ShipmentModel }> {
     const { data } = await apiClient.post(`/shipments/${shipmentId}/dispatch`, payload);
     return data;
   },
 
-  /** Active courier accounts to book parcels with. */
-  async getShipmentCouriers(): Promise<{ id: number; carrier: string; name: string; carrier_name: string }[]> {
+  /** Dispatch several packed orders with one carrier; each order is reported on its own. */
+  async dispatchShipments(shipmentIds: number[], payload: Omit<DispatchPayload, 'tracking_number' | 'tracking_url' | 'cod_amount'>): Promise<{ message: string; data: BulkDispatchResult[] }> {
+    const { data } = await apiClient.post('/shipments/dispatch', { shipment_ids: shipmentIds, ...payload });
+    return data;
+  },
+
+  /** Take back a dispatch the courier has not collected yet. */
+  async cancelShipmentDispatch(shipmentId: number): Promise<{ message: string; data: ShipmentModel }> {
+    const { data } = await apiClient.post(`/shipments/${shipmentId}/cancel-dispatch`);
+    return data;
+  },
+
+  /** Finovo shipping labels (4×6 inch, one per parcel) for dispatched shipments. */
+  async downloadShippingLabels(shipmentIds: number[]) {
+    await downloadPdf('/api/v1/shipments/labels', 'Shipping-labels.pdf', 'The labels could not be printed.', { shipment_ids: shipmentIds });
+  },
+
+  /** The courier's load sheet for dispatched shipments, one page per carrier. */
+  async downloadLoadSheet(shipmentIds: number[]) {
+    await downloadPdf('/api/v1/shipments/load-sheet', 'Load-sheet.pdf', 'The load sheet could not be printed.', { shipment_ids: shipmentIds });
+  },
+
+  /** Active courier accounts to book parcels with, and the carriers that can be entered by hand. */
+  async getShipmentCouriers(): Promise<{ data: ShipmentCourier[]; carriers: string[] }> {
     const { data } = await apiClient.get('/shipments/couriers');
-    return data.data;
+    return data;
   },
 
   /** Ask the couriers now for the status of every parcel on its way. */
@@ -1906,14 +2227,7 @@ const omsService = {
       }
       throw new Error(body?.message || 'The label could not be opened.');
     }
-    const url = window.URL.createObjectURL(await response.blob());
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `Label-${trackingNumber}.pdf`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.URL.revokeObjectURL(url);
+    saveBlob(await response.blob(), `Label-${trackingNumber}.pdf`);
   },
 
   async getCourierAccounts(): Promise<{ data: CourierAccountModel[]; carriers: CourierCarrier[] }> {
@@ -1936,7 +2250,7 @@ const omsService = {
     return data;
   },
 
-  async deliverShipment(shipmentId: number) {
+  async deliverShipment(shipmentId: number): Promise<{ message: string; data: ShipmentModel }> {
     const { data } = await apiClient.post(`/shipments/${shipmentId}/deliver`);
     return data;
   },
@@ -2053,7 +2367,7 @@ const omsService = {
   },
 
   // Orders
-  async getOrders(params?: { search?: string; status?: string; store_id?: number; warehouse_id?: number; page?: number; per_page?: number }) {
+  async getOrders(params?: { search?: string; status?: string; custom_status?: string; hold?: OrderHoldType | 'any'; store_id?: number; warehouse_id?: number; page?: number; per_page?: number }) {
     const { data } = await apiClient.get('/orders', { params });
     return data;
   },
@@ -2159,6 +2473,133 @@ const omsService = {
 
   async deleteOrder(orderId: number): Promise<{ message: string }> {
     const { data } = await apiClient.delete(`/orders/${orderId}`);
+    return data;
+  },
+
+  async holdOrder(orderId: number, reason: string): Promise<{ message: string }> {
+    const { data } = await apiClient.post(`/orders/${orderId}/hold`, { reason });
+    return data;
+  },
+
+  /** Releases the hold; releasing an approval hold approves the order. */
+  async releaseOrder(orderId: number): Promise<{ message: string }> {
+    const { data } = await apiClient.post(`/orders/${orderId}/release`);
+    return data;
+  },
+
+  async getOrderTimeline(orderId: number): Promise<OrderTimelineEvent[]> {
+    const { data } = await apiClient.get(`/orders/${orderId}/timeline`);
+    return data.data;
+  },
+
+  /** Moves the given quantities into a new order. */
+  async splitOrder(orderId: number, items: { item_id: number; quantity: number }[]): Promise<{ message: string; data: OrderModel }> {
+    const { data } = await apiClient.post(`/orders/${orderId}/split`, { items });
+    return data;
+  },
+
+  /** Combines orders of one customer into the first of them; the others are cancelled. */
+  async mergeOrders(orderIds: number[]): Promise<{ message: string; data: OrderModel }> {
+    const { data } = await apiClient.post('/orders/merge', { order_ids: orderIds });
+    return data;
+  },
+
+  async getOrderSla(storeId?: number): Promise<SlaReport> {
+    const { data } = await apiClient.get('/orders/sla', { params: { store_id: storeId } });
+    return data.data;
+  },
+
+  async getOrderControlSettings(): Promise<OrderControlSettings> {
+    const { data } = await apiClient.get('/orders/settings');
+    return data.data;
+  },
+
+  async saveOrderControlSettings(settings: OrderControlSettings): Promise<{ message: string }> {
+    const { data } = await apiClient.put('/orders/settings', settings);
+    return data;
+  },
+
+  /** One action on many orders; each order is reported as done or failed with the reason. */
+  async bulkOrders(action: BulkOrderAction, orderIds: number[], options: { reason?: string; custom_status?: string | null } = {}): Promise<{ message: string; data: BulkOrderResult }> {
+    const { data } = await apiClient.post('/orders/bulk', { action, order_ids: orderIds, ...options });
+    return data;
+  },
+
+  /** Creates orders from a CSV file; nothing is created when any row is wrong. */
+  async importOrders(file: File, storeId?: number): Promise<{ message: string; data: string[] }> {
+    const body = new FormData();
+    body.append('file', file);
+    if (storeId) body.append('store_id', String(storeId));
+    return request('/orders/import', { method: 'POST', body }) as Promise<{ message: string; data: string[] }>;
+  },
+
+  async getCustomStatuses(): Promise<CustomOrderStatus[]> {
+    const { data } = await apiClient.get('/orders/statuses');
+    return data.data;
+  },
+
+  async saveCustomStatuses(statuses: CustomOrderStatus[]): Promise<{ message: string }> {
+    const { data } = await apiClient.put('/orders/statuses', { statuses });
+    return data;
+  },
+
+  async setOrderCustomStatus(orderId: number, customStatus: string | null): Promise<{ message: string }> {
+    const { data } = await apiClient.put(`/orders/${orderId}/custom-status`, { custom_status: customStatus });
+    return data;
+  },
+
+  /** Places the order again on a schedule, from the given date. */
+  async repeatOrder(orderId: number, interval: RecurringInterval, startsOn: string): Promise<{ message: string }> {
+    const { data } = await apiClient.post(`/orders/${orderId}/repeat`, { interval, starts_on: startsOn });
+    return data;
+  },
+
+  async getRecurringOrders(): Promise<RecurringOrderModel[]> {
+    const { data } = await apiClient.get('/recurring-orders');
+    return data.data;
+  },
+
+  async updateRecurringOrder(planId: number, changes: { interval?: RecurringInterval; active?: boolean; next_run_on?: string }): Promise<{ message: string }> {
+    const { data } = await apiClient.put(`/recurring-orders/${planId}`, changes);
+    return data;
+  },
+
+  async deleteRecurringOrder(planId: number): Promise<{ message: string }> {
+    const { data } = await apiClient.delete(`/recurring-orders/${planId}`);
+    return data;
+  },
+
+  /** Places the order now without changing the schedule. */
+  async runRecurringOrder(planId: number): Promise<{ message: string }> {
+    const { data } = await apiClient.post(`/recurring-orders/${planId}/run`);
+    return data;
+  },
+
+  /** Settles a completed return: refund money or send the items again on a free order. */
+  async resolveReturn(returnId: number, payload: { resolution: 'refund' | 'replacement'; amount?: number; method?: string }): Promise<{ message: string }> {
+    const { data } = await apiClient.post(`/returns/${returnId}/resolve`, payload);
+    return data;
+  },
+
+  // Customer self-service (no sign-in: the order number and email open the order)
+  async trackOrder(orderNumber: string, email: string): Promise<TrackedOrder> {
+    const { data } = await apiClient.post('/public/orders/track', { order_number: orderNumber, email });
+    return data.data;
+  },
+
+  async requestOrderCancellation(orderNumber: string, email: string, reason: string): Promise<{ message: string }> {
+    const { data } = await apiClient.post('/public/orders/cancel-request', { order_number: orderNumber, email, reason });
+    return data;
+  },
+
+  async requestOrderReturn(orderNumber: string, email: string, reason: string, items: { item_id: number; quantity: number }[]): Promise<{ message: string }> {
+    const { data } = await apiClient.post('/public/orders/return-request', { order_number: orderNumber, email, reason, items });
+    return data;
+  },
+
+  /** Most the customer may owe on unpaid orders; empty for no limit. */
+  async saveCustomerCreditLimit(customerId: number, creditLimit: number | null): Promise<{ message: string }> {
+    const { data } = await apiClient.put(`/customers/${customerId}/credit-limit`, { credit_limit: creditLimit });
     return data;
   },
 
@@ -2347,11 +2788,6 @@ const omsService = {
 
   async getPurchaseOrder(id: number) {
     const { data } = await apiClient.get(`/purchase-orders/${id}`);
-    return data;
-  },
-
-  async issuePurchaseOrder(id: number) {
-    const { data } = await apiClient.post(`/purchase-orders/${id}/issue`);
     return data;
   },
 

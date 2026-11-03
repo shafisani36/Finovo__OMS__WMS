@@ -56,7 +56,17 @@ return [
 
     // React app address; platform authorization callbacks send the merchant back here
     'frontend_url' => rtrim((string) env('FRONTEND_URL', 'http://localhost:3000'), '/'),
-    
+
+    /*
+    | Refuse store, courier and image addresses inside a private network (on by default in production).
+    */
+    'block_private_hosts' => (bool) env('BLOCK_PRIVATE_HOSTS', env('APP_ENV') === 'production'),
+
+    /*
+    | Requests per minute each signed-in user may make to the API.
+    */
+    'api_rate_limit' => (int) env('API_RATE_LIMIT', 300),
+
     // Load balancer / reverse proxy addresses ("*" for any) whose X-Forwarded-* headers are trusted,
     // so HTTPS is detected correctly behind them (platform callbacks and signed download links need it)
     'trusted_proxies' => env('TRUSTED_PROXIES'),

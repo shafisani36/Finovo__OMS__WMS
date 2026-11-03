@@ -6,15 +6,56 @@ use App\Services\StoreSyncOutbox;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
 /**
- * An order on its way to the customer: pending (packed, waiting for dispatch) → shipped → delivered.
+ * An order on its way to the customer: pending (packed, waiting for dispatch) → shipped → delivered, or
+ * returned when the courier brings the parcel back. Cancelling a dispatch puts a shipped parcel back to pending.
  */
 class Shipment extends Model
 {
     use HasFactory;
+
+    public const PENDING = 'pending';
+
+    public const SHIPPED = 'shipped';
+
+    public const DELIVERED = 'delivered';
+
+    public const RETURNED = 'returned';
+
+    public const STATUSES = [self::PENDING, self::SHIPPED, self::DELIVERED, self::RETURNED];
+
+    /**
+     * Carriers offered when the details are entered by hand, with their tracking page ({number} is replaced),
+     * or null when the carrier has no tracking page by number. The single list for the app and the API.
+     */
+    public const CARRIERS = [
+        'TCS' => 'https://www.tcsexpress.com/track/{number}',
+        'Leopards Courier' => 'https://www.leopardscourier.com/tracking?cn={number}',
+        'M&P' => 'https://www.mulphilog.com/tracking/{number}',
+        'PostEx' => 'https://merchant.postex.pk/?cn={number}',
+        'Trax (Sonic)' => 'https://sonic.pk/tracking?tracking_number={number}',
+        'Call Courier' => 'https://callcourier.com.pk/tracking/?tc={number}',
+        'BlueEx' => null,
+        'DHL' => 'https://www.dhl.com/global-en/home/tracking/tracking-express.html?submit=1&tracking-id={number}',
+        'FedEx' => 'https://www.fedex.com/fedextrack/?trknbr={number}',
+        'UPS' => 'https://www.ups.com/track?tracknum={number}',
+    ];
+
+    /** Other spellings people type for the carriers above. */
+    private const CARRIER_ALIASES = [
+        'leopard' => 'Leopards Courier',
+        'leopards' => 'Leopards Courier',
+        'tcs express' => 'TCS',
+        'post ex' => 'PostEx',
+        'trax' => 'Trax (Sonic)',
+        'sonic' => 'Trax (Sonic)',
+        'mnp' => 'M&P',
+        'callcourier' => 'Call Courier',
+        'blue ex' => 'BlueEx',
+    ];
 
     protected static function booted(): void
     {
@@ -34,19 +75,6 @@ class Shipment extends Model
     /** Random IDs tried before falling back to one built from the shipment's own ID. */
     private const TRACKING_ATTEMPTS = 5;
 
-    /** Carriers whose tracking page takes the tracking number in the address; {number} is replaced. */
-    private const TRACKING_PAGES = [
-        'leopards' => 'https://www.leopardscourier.com/tracking?cn={number}',
-        'tcs' => 'https://www.tcsexpress.com/track/{number}',
-        'postex' => 'https://merchant.postex.pk/?cn={number}',
-        'trax' => 'https://sonic.pk/tracking?tracking_number={number}',
-        'mnp' => 'https://www.mulphilog.com/tracking/{number}',
-        'call_courier' => 'https://callcourier.com.pk/tracking/?tc={number}',
-        'dhl' => 'https://www.dhl.com/global-en/home/tracking/tracking-express.html?submit=1&tracking-id={number}',
-        'fedex' => 'https://www.fedex.com/fedextrack/?trknbr={number}',
-        'ups' => 'https://www.ups.com/track?tracknum={number}',
-    ];
-
     protected $fillable = [
         'organization_id',
         'order_id',
@@ -54,9 +82,16 @@ class Shipment extends Model
         'tracking_number',
         'tracking_url',
         'carrier',
+        'weight_kg',
+        'length_cm',
+        'width_cm',
+        'height_cm',
+        'pieces',
+        'cod_amount',
         'status',
         'shipped_at',
         'delivered_at',
+        'returned_at',
         'dispatched_by_user_id',
         'courier_account_id',
         'label_url',
@@ -65,24 +100,19 @@ class Shipment extends Model
         'courier_status_at',
     ];
 
-    /** Carrier names people type at dispatch, and the courier names Finovo books with, as tracking page keys. */
-    private const CARRIER_ALIASES = [
-        'leopard' => 'leopards',
-        'leopards courier' => 'leopards',
-        'tcs express' => 'tcs',
-        'post ex' => 'postex',
-        'sonic' => 'trax',
-        'trax (sonic)' => 'trax',
-        'm&p' => 'mnp',
-        'callcourier' => 'call_courier',
-    ];
-
     protected function casts(): array
     {
         return [
             'shipped_at' => 'datetime',
             'delivered_at' => 'datetime',
+            'returned_at' => 'datetime',
             'courier_status_at' => 'datetime',
+            'weight_kg' => 'decimal:2',
+            'length_cm' => 'decimal:1',
+            'width_cm' => 'decimal:1',
+            'height_cm' => 'decimal:1',
+            'pieces' => 'integer',
+            'cod_amount' => 'decimal:2',
         ];
     }
 
@@ -112,25 +142,31 @@ class Shipment extends Model
         return $this->belongsTo(CourierAccount::class);
     }
 
-    /**
-     * Mark a dispatched parcel delivered (by staff or by the courier's tracking); a fully shipped order becomes
-     * delivered too. Returns false when the shipment was not on its way.
-     */
-    public function markDelivered(): bool
+    /** Cash the courier collects: as entered at dispatch, otherwise the order total unless it is already paid. */
+    public function cashToCollect(): float
     {
-        return DB::transaction(function () {
-            $shipment = self::whereKey($this->id)->lockForUpdate()->first();
+        if ($this->cod_amount !== null) {
+            return (float) $this->cod_amount;
+        }
 
-            if ($shipment?->status !== 'shipped') {
-                return false;
-            }
+        return $this->order?->payment_status === 'paid' ? 0.0 : round((float) $this->order?->total_amount, 2);
+    }
 
-            $shipment->update(['status' => 'delivered', 'delivered_at' => now()]);
-            $shipment->order()->where('order_status', 'shipped')->first()?->update(['order_status' => 'delivered']);
-            $this->setRawAttributes($shipment->getAttributes(), true);
+    /** The shipment's timeline, oldest first. */
+    public function events(): HasMany
+    {
+        return $this->hasMany(ShipmentEvent::class)->orderBy('happened_at')->orderBy('id');
+    }
 
-            return true;
-        });
+    public function record(string $type, string $description, ?int $userId = null, ?string $courierStatus = null, mixed $at = null): ShipmentEvent
+    {
+        return $this->events()->create([
+            'type' => $type,
+            'description' => mb_substr($description, 0, 255),
+            'courier_status' => $courierStatus,
+            'user_id' => $userId,
+            'happened_at' => $at ?? now(),
+        ]);
     }
 
     /**
@@ -143,11 +179,25 @@ class Shipment extends Model
             return $this->tracking_url;
         }
 
-        $carrier = strtolower(trim((string) $this->carrier));
-        $carrier = self::CARRIER_ALIASES[$carrier] ?? $carrier;
-        $page = self::TRACKING_PAGES[$carrier] ?? null;
+        $page = self::CARRIERS[self::carrierName((string) $this->carrier)] ?? null;
 
         return $page && $this->tracking_number ? str_replace('{number}', rawurlencode($this->tracking_number), $page) : null;
+    }
+
+    /**
+     * The carrier's name as listed in CARRIERS (any spelling or case), or the name as given when it is not listed.
+     */
+    public static function carrierName(string $carrier): string
+    {
+        $key = strtolower(trim($carrier));
+
+        foreach (array_keys(self::CARRIERS) as $name) {
+            if (strtolower($name) === $key) {
+                return $name;
+            }
+        }
+
+        return self::CARRIER_ALIASES[$key] ?? trim($carrier);
     }
 
     /**

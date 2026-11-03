@@ -44,12 +44,4 @@ class ShopifyClient
     {
         return str_starts_with((string) $id, 'gid://') ? (string) $id : "gid://shopify/{$type}/{$id}";
     }
-
-    /**
-     * "123" from "gid://shopify/Product/123".
-     */
-    public static function legacyId(?string $gid): ?string
-    {
-        return $gid === null ? null : (string) last(explode('/', $gid));
-    }
 }

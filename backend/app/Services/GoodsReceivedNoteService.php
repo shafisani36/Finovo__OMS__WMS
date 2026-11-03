@@ -245,11 +245,13 @@ class GoodsReceivedNoteService
             $orgId = $grn->organization_id;
             $whId = $grn->warehouse_id;
 
-            foreach ($grn->items as $grnItem) {
+            foreach ($grn->loadMissing('items.purchaseOrderItem')->items as $grnItem) {
                 $variantId = $grnItem->product_variant_id;
                 $destLocationId = $grnItem->destination_location_id ?: $grn->receiving_location_id;
                 $lotNumber = $grnItem->lot_number;
                 $expiryDate = $grnItem->expiry_date ? $grnItem->expiry_date->format('Y-m-d') : null;
+                // The purchase price is the cost of these units in the inventory valuation (0 means not entered).
+                $unitCost = (float) $grnItem->purchaseOrderItem?->unit_cost ?: null;
 
                 // 1. Post Accepted Quantities (condition = 'available')
                 if ($grnItem->accepted_quantity > 0) {
@@ -264,7 +266,8 @@ class GoodsReceivedNoteService
                         condition: 'available',
                         referenceDoc: "GRN: {$grn->grn_number} (PO: {$po->po_number})",
                         userId: $user->id,
-                        idempotencyKey: "GRN-POST-{$grn->id}-ITEM-{$grnItem->id}-ACCEPTED"
+                        idempotencyKey: "GRN-POST-{$grn->id}-ITEM-{$grnItem->id}-ACCEPTED",
+                        unitCost: $unitCost
                     );
                 }
 
@@ -281,7 +284,8 @@ class GoodsReceivedNoteService
                         condition: 'damaged',
                         referenceDoc: "GRN: {$grn->grn_number} (Damaged)",
                         userId: $user->id,
-                        idempotencyKey: "GRN-POST-{$grn->id}-ITEM-{$grnItem->id}-DAMAGED"
+                        idempotencyKey: "GRN-POST-{$grn->id}-ITEM-{$grnItem->id}-DAMAGED",
+                        unitCost: $unitCost
                     );
                 }
 
@@ -298,7 +302,8 @@ class GoodsReceivedNoteService
                         condition: 'quarantined',
                         referenceDoc: "GRN: {$grn->grn_number} (Quarantined)",
                         userId: $user->id,
-                        idempotencyKey: "GRN-POST-{$grn->id}-ITEM-{$grnItem->id}-QUARANTINE"
+                        idempotencyKey: "GRN-POST-{$grn->id}-ITEM-{$grnItem->id}-QUARANTINE",
+                        unitCost: $unitCost
                     );
                 }
 

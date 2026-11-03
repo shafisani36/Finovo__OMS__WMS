@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\InventoryReceipt;
 use App\Models\Warehouse;
 use App\Models\WarehouseLocation;
+use App\Services\CrossDockService;
 use App\Services\InventoryEngine;
 use App\Services\SlottingService;
 use Illuminate\Http\JsonResponse;
@@ -17,6 +18,7 @@ class InventoryReceiptController extends Controller
     public function __construct(
         protected InventoryEngine $inventoryEngine,
         protected SlottingService $slotting,
+        protected CrossDockService $crossDock,
     ) {}
 
     /**
@@ -222,7 +224,8 @@ class InventoryReceiptController extends Controller
                     condition: $condition,
                     referenceDoc: $receipt->receipt_number,
                     userId: $request->user()->id,
-                    idempotencyKey: "receipt-{$receipt->id}-item-{$item->id}"
+                    idempotencyKey: "receipt-{$receipt->id}-item-{$item->id}",
+                    unitCost: (float) $item->unit_cost ?: null
                 );
 
                 $item->update([
@@ -242,10 +245,13 @@ class InventoryReceiptController extends Controller
             ]);
         });
 
+        $crossDock = $this->crossDock->allocateWaiting($receipt->organization_id, $receipt->warehouse_id, $receipt->items->pluck('product_variant_id')->unique()->values()->all());
+
         return response()->json([
             'status' => 'success',
-            'message' => "Receipt '{$receipt->receipt_number}' successfully confirmed into inventory.",
+            'message' => "Receipt '{$receipt->receipt_number}' successfully confirmed into inventory.".($crossDock ? ' Send to packing first (cross-dock): '.implode(', ', $crossDock).'.' : ''),
             'data' => $receipt->fresh('items.variant.product'),
+            'cross_dock' => $crossDock,
         ]);
     }
 

@@ -2,6 +2,8 @@
 
 namespace App\Enums;
 
+use App\Rules\PublicUrl;
+
 enum StorePlatform: string
 {
     case SHOPIFY = 'shopify';
@@ -52,14 +54,6 @@ enum StorePlatform: string
     }
 
     /**
-     * Platforms that have no remote system to connect to.
-     */
-    public function requiresConnection(): bool
-    {
-        return $this !== self::MANUAL;
-    }
-
-    /**
      * Validation rules for the platform-specific "credentials" payload.
      *
      * @return array<string, array<int, string>>
@@ -68,14 +62,14 @@ enum StorePlatform: string
     {
         $databaseName = ['string', 'max:64', 'regex:/^[A-Za-z0-9_\-]+$/'];
         $database = [
-            'credentials.db_host' => ['nullable', 'string', 'max:255'],
+            'credentials.db_host' => ['nullable', 'string', 'max:255', new PublicUrl(hostOnly: true)],
             'credentials.db_port' => ['nullable', 'integer', 'between:1,65535'],
             'credentials.db_name' => ['required', ...$databaseName],
             'credentials.db_username' => ['nullable', 'string', 'max:255'],
             'credentials.db_password' => ['nullable', 'string', 'max:255'],
             'credentials.table_prefix' => ['nullable', 'string', 'max:20', 'regex:/^[A-Za-z0-9_]*$/'],
             // The shop's public address, used to build product image links (it is not stored in the shop database).
-            'credentials.site_url' => ['nullable', 'url', 'max:255'],
+            'credentials.site_url' => ['nullable', 'url', 'max:255', new PublicUrl],
         ];
 
         return match ($this) {
@@ -83,7 +77,7 @@ enum StorePlatform: string
                 'credentials.shop_domain' => ['required', 'string', 'max:255'],
             ],
             self::WOOCOMMERCE => [
-                'credentials.site_url' => ['required', 'url', 'max:255'],
+                'credentials.site_url' => ['required', 'url', 'max:255', new PublicUrl],
                 // Optional: REST API keys created in WooCommerce. Without them the merchant approves access in WordPress.
                 'credentials.consumer_key' => ['nullable', 'required_with:credentials.consumer_secret', 'string', 'max:255'],
                 'credentials.consumer_secret' => ['nullable', 'required_with:credentials.consumer_key', 'string', 'max:255'],
@@ -95,7 +89,7 @@ enum StorePlatform: string
             ],
             self::PRESTASHOP => [
                 // Optional with the Finovo module (the module reports the shop address); required with a webservice key.
-                'credentials.site_url' => ['nullable', 'required_with:credentials.webservice_key', 'url', 'max:255'],
+                'credentials.site_url' => ['nullable', 'required_with:credentials.webservice_key', 'url', 'max:255', new PublicUrl],
                 'credentials.webservice_key' => ['nullable', 'string', 'max:255'],
             ],
             self::WIX => [
@@ -104,14 +98,14 @@ enum StorePlatform: string
                 'credentials.api_key' => ['nullable', 'string', 'max:4096'],
             ],
             self::MAGENTO => [
-                'credentials.site_url' => ['required', 'url', 'max:255'],
+                'credentials.site_url' => ['required', 'url', 'max:255', new PublicUrl],
                 'credentials.access_token' => ['required', 'string', 'max:255'],
             ],
             // Optional with the Finovo module; the database details are for connecting without it.
             self::OPENCART => array_merge($database, ['credentials.db_name' => ['nullable', ...$databaseName]]),
             self::OSCOMMERCE => $database,
             self::CUSTOM_BRIDGE => [
-                'credentials.bridge_url' => ['required', 'url', 'max:255'],
+                'credentials.bridge_url' => ['required', 'url', 'max:255', new PublicUrl],
             ],
             self::EBAY, self::MANUAL => [],
         };

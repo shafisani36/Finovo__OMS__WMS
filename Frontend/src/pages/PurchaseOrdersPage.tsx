@@ -563,8 +563,9 @@ export const PurchaseOrdersPage: React.FC = () => {
 
   const openCreateGrnFromPo = (po: any) => {
     setSelectedPo(po);
-    setGrnDeliveryNote(`DN-${Math.floor(100000 + Math.random() * 900000)}`);
-    setGrnCarrier('FedEx Ground');
+    // Taken from the supplier's paperwork, never made up.
+    setGrnDeliveryNote('');
+    setGrnCarrier('');
     setGrnVehicle('');
     setGrnAllowOverReceipt(false);
 
@@ -577,7 +578,7 @@ export const PurchaseOrdersPage: React.FC = () => {
         damaged: 0,
         quarantined: 0,
         rejected: 0,
-        lot_number: `LOT-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
+        lot_number: '',
         expiry_date: '',
       };
     });

@@ -477,6 +477,8 @@ class PurchaseRequisitionAndGrnTest extends TestCase
             ->get();
 
         $this->assertCount(3, $ledgerEntries); // 1 for available (7), 1 for damaged (2), 1 for quarantined (1)
+        // Each line carries the purchase price, the cost used by FIFO / LIFO / AVCO valuation.
+        $this->assertEquals([(float) $po->items->first()->unit_cost], $ledgerEntries->map(fn ($entry) => (float) $entry->unit_cost)->unique()->values()->all());
 
         // Verify PO status updated to 'received' because all 10 ordered units were received
         $poFresh = $po->fresh();

@@ -9,6 +9,7 @@ use App\Models\OrderItem;
 use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Models\SkuMapping;
+use App\Rules\PublicUrl;
 use App\Services\ProductService;
 use App\Services\StorePushService;
 use Illuminate\Http\JsonResponse;
@@ -85,7 +86,7 @@ class ProductController extends Controller
             'sku' => ['required', 'string', 'max:100', Rule::unique('products', 'sku')->where('organization_id', $orgId)->ignore($product?->id)],
             'category' => ['nullable', 'string', 'max:100'],
             'description' => ['nullable', 'string', 'max:10000'],
-            'image_url' => ['nullable', 'url:https,http', 'max:2000'],
+            'image_url' => ['nullable', 'url:https,http', 'max:2000', new PublicUrl],
             'is_active' => ['sometimes', 'boolean'],
             'variants' => ['required', 'array', 'min:1', 'max:100'],
             'variants.*.id' => ['nullable', 'integer', Rule::in($variantIds)],

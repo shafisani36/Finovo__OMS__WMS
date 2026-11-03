@@ -14,6 +14,7 @@ import type {
 } from '../../services/omsService';
 import { formatDate } from '../../utils/format';
 import { errorMessage } from '../../utils/errors';
+import { isOffline, submitScan } from '../../services/offlineQueue';
 
 type Feedback = { type: 'success' | 'error'; text: string } | null;
 
@@ -25,6 +26,40 @@ export interface ScreenProps {
   canAct: boolean;
 }
 
+const PRODUCT_CODES_KEY = 'finovo.mobile.product-codes';
+
+type ScannedProduct = Pick<MobileProduct, 'product_variant_id' | 'sku'>;
+
+/**
+ * The product of a scanned code: from the server, or without a connection from codes this phone scanned before
+ * and the SKUs of the document being worked on.
+ */
+const findProduct = async (warehouseId: number, code: string, lines: ScannedProduct[]): Promise<ScannedProduct> => {
+  let known: Record<string, ScannedProduct> = {};
+  try {
+    known = JSON.parse(window.localStorage.getItem(PRODUCT_CODES_KEY) ?? '{}');
+  } catch {
+    // No saved codes on this device.
+  }
+
+  try {
+    const product = await omsService.scanMobileProduct(warehouseId, code);
+    try {
+      window.localStorage.setItem(PRODUCT_CODES_KEY, JSON.stringify({ ...known, [code]: { product_variant_id: product.product_variant_id, sku: product.sku } }));
+    } catch {
+      // Not kept for offline use.
+    }
+    return product;
+  } catch (err) {
+    const match = known[code] ?? lines.find((line) => line.sku.toLowerCase() === code.toLowerCase());
+    if (!isOffline(err)) throw err;
+    if (!match) throw new Error('No connection, and this code was not scanned on this phone before. Scan the SKU label instead.');
+    return match;
+  }
+};
+
+/** Message after work was sent, or kept on the phone to be sent later. */
+const savedMessage = (queued: boolean, sent: string) => (queued ? `${sent} Saved on this phone; it is sent when the signal is back.` : sent);
 
 /**
  * Quantities typed or scanned on the phone are kept on the device until they are sent, so a dropped Wi-Fi
@@ -203,7 +238,9 @@ export const ReceiveScreen: React.FC<ScreenProps> = ({ warehouseId, storeId, can
         onDone={(message) => {
           setReceipt(null);
           setFeedback({ type: 'success', text: message });
-          load();
+          // Offline the list stays as it was, without the delivery just done.
+          if (navigator.onLine) load();
+          else setReceipts((list) => list?.filter((r) => r.id !== receipt.id) ?? null);
         }}
       />
     );
@@ -235,7 +272,7 @@ const ReceiveReceipt: React.FC<{ warehouseId: number; receipt: InventoryReceiptM
   const scan = async (code: string) => {
     try {
       setBusy(true);
-      const product = await omsService.scanMobileProduct(warehouseId, code);
+      const product = await findProduct(warehouseId, code, items);
       const item = items.find((it) => it.product_variant_id === product.product_variant_id);
       if (!item) {
         setFeedback({ type: 'error', text: `${product.sku} is not on ${receipt.receipt_number}. Keep it aside.` });
@@ -253,11 +290,11 @@ const ReceiveReceipt: React.FC<{ warehouseId: number; receipt: InventoryReceiptM
   const confirm = async () => {
     try {
       setBusy(true);
-      const res = await omsService.confirmInventoryReceipt(receipt.id, {
+      const res = await submitScan('receiving', `${receipt.receipt_number}: ${total} units`, 'POST', `/inventory/receipts/${receipt.id}/confirm`, {
         items: items.filter((item) => (counts[item.id] ?? 0) > 0).map((item) => ({ item_id: item.id, received_quantity: counts[item.id] })),
       });
       clear();
-      onDone(res.message ?? `${receipt.receipt_number} received.`);
+      onDone(res.queued ? savedMessage(true, `${receipt.receipt_number}: ${total} units counted.`) : (res.data.message ?? `${receipt.receipt_number} received.`));
     } catch (err) {
       setFeedback({ type: 'error', text: errorMessage(err, 'The delivery could not be confirmed.') });
     } finally {
@@ -336,7 +373,7 @@ export const PutAwayScreen: React.FC<ScreenProps> = ({ warehouseId, storeId, can
           onDone={(message) => {
             setSelected(null);
             setFeedback({ type: 'success', text: message });
-            load();
+            if (navigator.onLine) load();
           }}
         />
       );
@@ -380,7 +417,7 @@ const PutAwayItem: React.FC<{ warehouseId: number; receipt: InventoryReceiptMode
 }) => {
   const [quantity, setQuantity] = useState(item.received_quantity || item.expected_quantity);
   const [suggestion, setSuggestion] = useState<PutawaySuggestion | null>(null);
-  const [bin, setBin] = useState<MobileLocation | null>(null);
+  const [bin, setBin] = useState<Pick<MobileLocation, 'code' | 'putaway_eligible'> | null>(null);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>(null);
 
@@ -394,7 +431,11 @@ const PutAwayItem: React.FC<{ warehouseId: number; receipt: InventoryReceiptMode
   const scanBin = async (code: string) => {
     try {
       setBusy(true);
-      const location = await omsService.scanMobileLocation(warehouseId, code);
+      // Without a connection the bin is taken as scanned; the server checks it when the putaway is sent.
+      const location = await omsService.scanMobileLocation(warehouseId, code).catch((err) => {
+        if (isOffline(err)) return { code: code.toUpperCase(), putaway_eligible: true };
+        throw err;
+      });
       setBin(location);
       setFeedback(
         location.putaway_eligible
@@ -412,8 +453,12 @@ const PutAwayItem: React.FC<{ warehouseId: number; receipt: InventoryReceiptMode
     if (!bin) return;
     try {
       setBusy(true);
-      await omsService.putawayReceiptItem(receipt.id, { item_id: item.id, destination_location_code: bin.code, quantity });
-      onDone(`${quantity} × ${item.sku} put away into ${bin.code}.`);
+      const res = await submitScan('putaway', `${quantity} × ${item.sku} into ${bin.code}`, 'POST', `/inventory/receipts/${receipt.id}/putaway`, {
+        item_id: item.id,
+        destination_location_code: bin.code,
+        quantity,
+      });
+      onDone(savedMessage(res.queued, `${quantity} × ${item.sku} put away into ${bin.code}.`));
     } catch (err) {
       setFeedback({ type: 'error', text: errorMessage(err, 'The putaway could not be saved.') });
     } finally {
@@ -582,7 +627,9 @@ export const CountScreen: React.FC<ScreenProps> = ({ warehouseId, storeId, canAc
         onDone={(message) => {
           setCount(null);
           setFeedback({ type: 'success', text: message });
-          load();
+          // Offline the list stays as it was, without the count just sent.
+          if (navigator.onLine) load();
+          else setCounts((list) => list?.filter((c) => c.id !== count.id) ?? null);
         }}
       />
     );
@@ -620,7 +667,7 @@ const CountSheet: React.FC<{ warehouseId: number; count: CycleCountModel; canAct
         setFeedback({ type: 'success', text: `Counting bin ${code}. Scan each unit in it.` });
         return;
       }
-      const product = await omsService.scanMobileProduct(warehouseId, code);
+      const product = await findProduct(warehouseId, code, items);
       const item = items.find((it) => it.product_variant_id === product.product_variant_id && (!bin || it.location_code === bin));
       if (!item) {
         setFeedback({ type: 'error', text: `${product.sku} is not on this count${bin ? ` for bin ${bin}` : ''}. Put it aside and tell your supervisor.` });
@@ -638,12 +685,11 @@ const CountSheet: React.FC<{ warehouseId: number; count: CycleCountModel; canAct
   const submit = async () => {
     try {
       setBusy(true);
-      await omsService.recordCycleCounts(
-        count.id,
-        items.filter((item) => values[item.id] !== undefined).map((item) => ({ item_id: item.id, counted_quantity: values[item.id] }))
-      );
+      const res = await submitScan('count', `${count.count_number}: ${counted} of ${items.length} lines`, 'PUT', `/inventory/cycle-counts/${count.id}/record-counts`, {
+        counts: items.filter((item) => values[item.id] !== undefined).map((item) => ({ item_id: item.id, counted_quantity: values[item.id] })),
+      });
       clear();
-      onDone(`${count.count_number} sent for review (${counted} of ${items.length} lines counted).`);
+      onDone(savedMessage(res.queued, `${count.count_number} sent for review (${counted} of ${items.length} lines counted).`));
     } catch (err) {
       setFeedback({ type: 'error', text: errorMessage(err, 'The counts could not be sent.') });
     } finally {

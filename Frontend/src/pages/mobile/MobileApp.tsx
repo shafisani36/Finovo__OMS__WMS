@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, ArrowLeftRight, ClipboardCheck, Download, Layers, PackageCheck, ScanLine, Search, Truck, WifiOff } from 'lucide-react';
+import { ArrowLeft, ArrowLeftRight, ClipboardCheck, CloudUpload, Download, Layers, Loader2, PackageCheck, ScanLine, Search, Truck, WifiOff, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import CustomDropdown from '../../components/common/CustomDropdown';
 import { Alert } from '../../components/common/Alert';
@@ -8,6 +8,8 @@ import omsService from '../../services/omsService';
 import type { MobileSummary, WarehouseModel } from '../../services/omsService';
 import { useAuth } from '../../hooks/useAuth';
 import { useActiveStore } from '../../hooks/useActiveStore';
+import { useOfflineQueue } from '../../hooks/useOfflineQueue';
+import { OFFLINE_MODULES, OFFLINE_MODULE_LABELS, dismissConflict } from '../../services/offlineQueue';
 import { can } from '../../types/auth';
 import type { Permission } from '../../types/auth';
 import { CountScreen, LookupScreen, MoveScreen, PickScreen, PutAwayScreen, ReceiveScreen } from './MobileScreens';
@@ -68,6 +70,7 @@ export const MobileApp: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [online, setOnline] = useState(navigator.onLine);
   const [install, setInstall] = useState<InstallPrompt | null>(null);
+  const queue = useOfflineQueue();
 
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
@@ -147,9 +150,42 @@ export const MobileApp: React.FC = () => {
 
       {!online && (
         <div className="m-offline">
-          <WifiOff size={14} /> No connection. Scans are kept on this phone; send them when the signal is back.
+          <WifiOff size={14} /> No connection. Scans are kept on this phone and sent when the signal is back.
         </div>
       )}
+
+      {queue.total > 0 && (
+        <div className="m-queue">
+          <CloudUpload size={16} />
+          <span>
+            {queue.total} scan{queue.total > 1 ? 's' : ''} waiting:{' '}
+            {OFFLINE_MODULES.filter((module) => queue.waiting[module] > 0)
+              .map((module) => `${OFFLINE_MODULE_LABELS[module]} ${queue.waiting[module]}`)
+              .join(', ')}
+          </span>
+          <button type="button" className="btn-outline" onClick={queue.syncNow} disabled={!online || queue.syncing}>
+            {queue.syncing ? <Loader2 size={14} className="animate-spin" /> : 'Send now'}
+          </button>
+        </div>
+      )}
+
+      {queue.lastResult && queue.total === 0 && queue.conflicts.length === 0 && (
+        <div className="m-queue is-done">{queue.lastResult.sent} offline scan{queue.lastResult.sent > 1 ? 's' : ''} sent.</div>
+      )}
+
+      {queue.conflicts.map((conflict) => (
+        <div key={conflict.id} className="m-queue is-conflict" role="alert">
+          <div>
+            <strong>
+              {OFFLINE_MODULE_LABELS[conflict.module]}: {conflict.label}
+            </strong>
+            <span>Not applied: {conflict.message}</span>
+          </div>
+          <button type="button" className="m-icon-button" onClick={() => dismissConflict(conflict.id)} aria-label="Dismiss">
+            <X size={16} />
+          </button>
+        </div>
+      ))}
 
       <main className="m-main">
         {error && <Alert type="error" message={error} />}

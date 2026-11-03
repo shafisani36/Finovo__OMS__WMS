@@ -314,3 +314,48 @@
   padding: 32px 0;
   color: #1e56ff;
 }
+
+/* Offline scan queues: scans waiting to be sent and scans the server turned down */
+.m-queue {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 12px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e3a8a;
+  font-size: 13px;
+}
+
+.m-queue > span,
+.m-queue > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.m-queue > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.m-queue .btn-outline {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.m-queue.is-done {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #166534;
+}
+
+.m-queue.is-conflict {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #9a3412;
+}

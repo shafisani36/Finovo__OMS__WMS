@@ -59,6 +59,29 @@ return [
         'environment' => env('EBAY_ENV', 'sandbox'),
     ],
 
+    // AI assistant (read-only answers from the company's records); the key never reaches the browser.
+    'openrouter' => [
+        'key' => env('OPENROUTER_API_KEY'),
+        'model' => env('OPENROUTER_MODEL', 'openai/gpt-4o-mini'),
+        'url' => env('OPENROUTER_URL', 'https://openrouter.ai/api/v1'),
+    ],
+
+    // Single sign-on. Microsoft: an app registration in Entra ID (tenant id, or "common" for any work account).
+    // oidc: any OpenID Connect provider (Okta, Google Workspace, Keycloak, ...) by its issuer address.
+    'sso' => [
+        'microsoft' => [
+            'client_id' => env('MICROSOFT_CLIENT_ID'),
+            'client_secret' => env('MICROSOFT_CLIENT_SECRET'),
+            'tenant' => env('MICROSOFT_TENANT_ID', 'common'),
+        ],
+        'oidc' => [
+            'client_id' => env('OIDC_CLIENT_ID'),
+            'client_secret' => env('OIDC_CLIENT_SECRET'),
+            'issuer' => env('OIDC_ISSUER'),
+            'label' => env('OIDC_LABEL', 'Enterprise SSO'),
+        ],
+    ],
+
     'wix' => [
         // Finovo app from the Wix app dashboard (More Actions → View ID & keys). Enables one-click install.
         'app_id' => env('WIX_APP_ID'),

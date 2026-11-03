@@ -39,7 +39,7 @@ const STATUS_TABS: { value: '' | EmployeeStatus; label: string; kpi: keyof Emplo
 
 type EmployeeForm = Required<EmployeePayload>;
 
-const EMPTY_FORM: EmployeeForm = { name: '', email: '', role: 'operator', password: '', password_confirmation: '', warehouse_access: 'all', warehouse_ids: [] };
+const EMPTY_FORM: EmployeeForm = { name: '', email: '', role: 'operator', password: '', password_confirmation: '', warehouse_access: 'all', warehouse_ids: [], client_id: null };
 
 const WAREHOUSE_ACCESS: { value: WarehouseAccess; label: string; description: string }[] = [
   { value: 'all', label: 'All warehouses', description: 'Works in every warehouse of the company' },
@@ -391,7 +391,7 @@ export const EmployeesPage: React.FC = () => {
 
   const [employees, setEmployees] = useState<EmployeeModel[]>([]);
   const [kpis, setKpis] = useState<EmployeeKpis>({ total: 0, active: 0, suspended: 0, admins: 0 });
-  const [options, setOptions] = useState<EmployeeOptions>({ roles: [], warehouses: [] });
+  const [options, setOptions] = useState<EmployeeOptions>({ roles: [], warehouses: [], clients: [] });
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<'' | EmployeeStatus>('');
   const [roleFilter, setRoleFilter] = useState<'' | EmployeeRole>('');
@@ -465,6 +465,7 @@ export const EmployeesPage: React.FC = () => {
             name: employee.name,
             email: employee.email,
             role: employee.role,
+            client_id: employee.client_id,
             warehouse_access: employee.warehouse_access,
             warehouse_ids: employee.warehouses.map((w) => w.id),
           }
@@ -822,9 +823,11 @@ export const EmployeesPage: React.FC = () => {
                   name: form.name,
                   email: form.email,
                   role: form.role,
-                  warehouse_access: form.role === 'admin' ? 'all' : form.warehouse_access,
+                  // Client-portal users work in no warehouse; they see only their client's stores.
+                  warehouse_access: form.role === 'admin' ? 'all' : form.role === 'client' ? 'assigned' : form.warehouse_access,
+                  ...(form.role === 'client' ? { warehouse_ids: [], client_id: form.client_id } : {}),
                   // With access to all warehouses the current staff assignments are kept as they are.
-                  ...(form.role !== 'admin' && form.warehouse_access === 'assigned' ? { warehouse_ids: form.warehouse_ids } : {}),
+                  ...(form.role !== 'admin' && form.role !== 'client' && form.warehouse_access === 'assigned' ? { warehouse_ids: form.warehouse_ids } : {}),
                 };
                 return editing ? omsService.updateEmployee(editing.id, payload) : omsService.createEmployee({ ...payload, password: form.password, password_confirmation: form.password_confirmation });
               },
@@ -876,6 +879,17 @@ export const EmployeesPage: React.FC = () => {
           </div>
           {form.role === 'admin' ? (
             <Alert type="info" message="Administrators can do everything in every warehouse, including stores, settings and employees." />
+          ) : form.role === 'client' ? (
+            <div>
+              <label className="form-label">Client *</label>
+              <CustomDropdown
+                value={form.client_id ?? 0}
+                onChange={(val) => setForm({ ...form, client_id: Number(val) || null })}
+                options={[{ value: 0, label: 'Choose the client' }, ...options.clients.map((c) => ({ value: c.id, label: c.name }))]}
+                searchable={false}
+              />
+              <span style={{ fontSize: 12, color: '#64748b' }}>This user sees only the stock, orders and shipments of this client's stores.</span>
+            </div>
           ) : (
             <WarehouseAccessFields
               warehouses={options.warehouses}

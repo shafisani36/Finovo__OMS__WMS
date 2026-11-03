@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\GoodsReceivedNote;
 use App\Models\PurchaseOrder;
+use App\Services\CrossDockService;
 use App\Services\GoodsReceivedNoteService;
 use App\Services\ProcurementPdfService;
 use Illuminate\Http\JsonResponse;
@@ -15,7 +16,8 @@ class GoodsReceivedNoteController extends Controller
 {
     public function __construct(
         protected GoodsReceivedNoteService $grnService,
-        protected ProcurementPdfService $pdfService
+        protected ProcurementPdfService $pdfService,
+        protected CrossDockService $crossDock
     ) {}
 
     /**
@@ -187,11 +189,13 @@ class GoodsReceivedNoteController extends Controller
         $grn = $this->inUserWarehouses(GoodsReceivedNote::where('organization_id', $org->id), $request)->findOrFail($id);
 
         $posted = $this->grnService->postToInventory($grn, $request->user());
+        $crossDock = $this->crossDock->allocateWaiting($posted->organization_id, $posted->warehouse_id, $posted->items->pluck('product_variant_id')->unique()->values()->all());
 
         return response()->json([
             'status' => 'success',
-            'message' => "GRN #{$posted->grn_number} successfully posted to authoritative inventory ledger.",
+            'message' => "GRN #{$posted->grn_number} successfully posted to authoritative inventory ledger.".($crossDock ? ' Send to packing first (cross-dock): '.implode(', ', $crossDock).'.' : ''),
             'data' => $posted,
+            'cross_dock' => $crossDock,
         ]);
     }
 

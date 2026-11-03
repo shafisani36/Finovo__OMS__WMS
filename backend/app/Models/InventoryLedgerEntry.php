@@ -17,6 +17,7 @@ class InventoryLedgerEntry extends Model
         'product_variant_id',
         'movement_type',
         'quantity',
+        'unit_cost',
         'balance_before',
         'balance_after',
         'reference_type',
@@ -37,6 +38,7 @@ class InventoryLedgerEntry extends Model
     {
         return [
             'quantity' => 'integer',
+            'unit_cost' => 'decimal:4',
             'balance_before' => 'integer',
             'balance_after' => 'integer',
             'expiry_date' => 'date',

@@ -86,6 +86,10 @@ class AppServiceProvider extends ServiceProvider
             });
         });
 
+        // Signed-in API traffic, per user (per address before sign-in).
+        RateLimiter::for('api', fn (Request $request) => Limit::perMinute(config('app.api_rate_limit'))
+            ->by((string) ($request->user()?->id ?: $request->ip())));
+
         // Rate Limiter for Password Changes (Authenticated)
         RateLimiter::for('password-change', function (Request $request) {
             $userId = $request->user()?->id ?: $request->ip();

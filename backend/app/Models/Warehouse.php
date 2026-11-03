@@ -96,19 +96,9 @@ class Warehouse extends Model
         ];
     }
 
-    public function isDraft(): bool
-    {
-        return $this->status === self::STATUS_DRAFT;
-    }
-
     public function isActive(): bool
     {
         return $this->status === self::STATUS_ACTIVE && $this->is_active;
-    }
-
-    public function isReadyForActivation(): bool
-    {
-        return $this->status === self::STATUS_READY_FOR_ACTIVATION;
     }
 
     public function isClosed(): bool
@@ -124,11 +114,6 @@ class Warehouse extends Model
     public function parentWarehouse(): BelongsTo
     {
         return $this->belongsTo(Warehouse::class, 'parent_warehouse_id');
-    }
-
-    public function childWarehouses(): HasMany
-    {
-        return $this->hasMany(Warehouse::class, 'parent_warehouse_id');
     }
 
     public function locations(): HasMany

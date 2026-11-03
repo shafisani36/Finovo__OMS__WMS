@@ -150,4 +150,20 @@ class CustomerController extends Controller
                 ->values()
                 ->all());
     }
+
+    /**
+     * Most the customer may owe on unpaid orders; a new order over it is held (empty for no limit).
+     */
+    public function updateCreditLimit(Request $request, Customer $customer): JsonResponse
+    {
+        abort_if($customer->organization_id !== $request->user()->currentOrganization()->id, 404);
+        $limit = $request->validate(['credit_limit' => ['present', 'nullable', 'numeric', 'min:0', 'max:999999999']])['credit_limit'];
+        $customer->update(['credit_limit' => $limit]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => $limit === null ? "{$customer->name} has no credit limit now." : "Credit limit of {$customer->name} saved.",
+            'data' => $customer->only(['id', 'name', 'credit_limit']),
+        ]);
+    }
 }

@@ -506,3 +506,103 @@
   font-weight: 500;
   color: #b45309;
 }
+
+/* Order controls: hold, split and history */
+.order-hold-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.order-hold-row .cf-input {
+  flex: 1;
+}
+
+.order-split-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.order-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 14px;
+  border-left: 2px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.order-timeline li {
+  position: relative;
+}
+
+.order-timeline li::before {
+  content: '';
+  position: absolute;
+  left: -20px;
+  top: 5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #6366f1;
+}
+
+.order-timeline-text {
+  font-size: 13px;
+  color: #0f172a;
+}
+
+/* Order statuses, bulk actions and CSV import */
+.order-status-row {
+  display: grid;
+  grid-template-columns: 1fr 110px auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.order-bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: #eef2ff;
+  border-bottom: 1px solid #e0e7ff;
+  font-size: 13px;
+  color: #3730a3;
+}
+
+.order-bulk-hold,
+.order-bulk-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.order-bulk-hold .cf-input {
+  width: 200px;
+}
+
+.order-bulk-status .cf-input {
+  width: 160px;
+}
+
+.order-bulk-failures {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 10px 16px;
+}
+
+.order-import-problems {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  max-height: 220px;
+  overflow-y: auto;
+}

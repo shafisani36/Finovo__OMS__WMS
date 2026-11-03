@@ -26,11 +26,15 @@ import {
   Package,
   Trash2,
   Settings,
+  Calculator,
 } from 'lucide-react';
 import { BarcodeLabel, BarcodeSettingsDialog } from '../components/barcode/BarcodeLabel';
 import MetricCard from '../components/common/MetricCard';
 import CustomDropdown from '../components/common/CustomDropdown';
 import DemandForecast from '../components/inventory/DemandForecast';
+import InventoryValuation from '../components/inventory/InventoryValuation';
+import StockAging from '../components/inventory/StockAging';
+import CycleCountSchedules from '../components/inventory/CycleCountSchedules';
 import PutawayModal from '../components/inventory/PutawayModal';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import omsService from '../services/omsService';
@@ -50,7 +54,7 @@ import type {
   ProductModel,
 } from '../services/omsService';
 
-type TabKey = 'balances' | 'receipts' | 'transfers' | 'adjustments' | 'counts' | 'ledger' | 'replenishment';
+type TabKey = 'balances' | 'receipts' | 'transfers' | 'adjustments' | 'counts' | 'ledger' | 'replenishment' | 'valuation';
 
 export const InventoryPage: React.FC = () => {
   const { user } = useAuth();
@@ -932,6 +936,17 @@ export const InventoryPage: React.FC = () => {
               {recommendations.length > 0 ? `${recommendations.length} Alert` : '0'}
             </span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('valuation')}
+            className={`finovo-tab-btn ${activeTab === 'valuation' ? 'active' : ''}`}
+            role="tab"
+            aria-selected={activeTab === 'valuation'}
+          >
+            <Calculator size={16} />
+            <span className="tab-label-full">Valuation & Aging</span>
+            <span className="tab-label-short">Valuation</span>
+          </button>
         </div>
 
         {/* ------------------------------------------------------------- */}
@@ -1562,6 +1577,7 @@ export const InventoryPage: React.FC = () => {
                 </tbody>
               </table>
             </div>
+            <CycleCountSchedules warehouses={warehouses} warehouseId={selectedWarehouseId !== 'all' ? Number(selectedWarehouseId) : undefined} canManage={canAdjust} />
           </div>
         )}
 
@@ -1730,6 +1746,13 @@ export const InventoryPage: React.FC = () => {
             </div>
 
             <DemandForecast warehouseId={selectedWarehouseId !== 'all' ? Number(selectedWarehouseId) : undefined} />
+          </div>
+        )}
+
+        {activeTab === 'valuation' && (
+          <div className="tab-pane-container">
+            <InventoryValuation warehouseId={selectedWarehouseId !== 'all' ? Number(selectedWarehouseId) : undefined} storeId={activeStore?.id} />
+            <StockAging warehouseId={selectedWarehouseId !== 'all' ? Number(selectedWarehouseId) : undefined} storeId={activeStore?.id} />
           </div>
         )}
       </div>

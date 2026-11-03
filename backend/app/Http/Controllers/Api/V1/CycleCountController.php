@@ -4,18 +4,20 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\CycleCount;
-use App\Models\InventoryBalance;
-use App\Models\InventoryLocationBalance;
+use App\Models\CycleCountSchedule;
 use App\Models\Warehouse;
+use App\Services\CycleCountService;
 use App\Services\InventoryEngine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class CycleCountController extends Controller
 {
     public function __construct(
-        protected InventoryEngine $inventoryEngine
+        protected InventoryEngine $inventoryEngine,
+        protected CycleCountService $counts
     ) {}
 
     /**
@@ -93,82 +95,85 @@ class CycleCountController extends Controller
     }
 
     /**
-     * Create cycle count session with baseline snapshot freeze.
+     * Start a cycle count of the whole warehouse, one zone or one bin, with a snapshot of the system quantities.
      */
     public function store(Request $request): JsonResponse
     {
-        $org = $request->user()->currentOrganization();
-
-        $validated = $request->validate([
-            'warehouse_id' => ['required', $this->accessibleWarehouse($request)],
-            'title' => ['required', 'string', 'max:150'],
-            'scope_type' => ['required', 'in:full,zone,location'],
-            'scope_value' => ['nullable', 'string', 'max:100'],
-            'notes' => ['nullable', 'string', 'max:500'],
-        ]);
-
-        $warehouse = Warehouse::where('organization_id', $org->id)->findOrFail($validated['warehouse_id']);
-
-        $countNumber = 'CYC-'.date('Ymd').'-'.strtoupper(substr(uniqid(), -5));
-
-        $count = DB::transaction(function () use ($org, $warehouse, $validated, $countNumber, $request) {
-            $cycle = CycleCount::create([
-                'organization_id' => $org->id,
-                'warehouse_id' => $warehouse->id,
-                'count_number' => $countNumber,
-                'title' => $validated['title'],
-                'scope_type' => $validated['scope_type'],
-                'scope_value' => $validated['scope_value'] ?? null,
-                'notes' => $validated['notes'] ?? null,
-                'status' => 'in_progress',
-                'created_by_user_id' => $request->user()->id,
-            ]);
-
-            // Capture snapshot of location balances
-            $locBalances = $this->inUserWarehouses(InventoryLocationBalance::where('organization_id', $org->id), $request)
-                ->where('warehouse_id', $warehouse->id)
-                ->with(['location', 'variant'])
-                ->get();
-
-            if ($locBalances->isNotEmpty()) {
-                foreach ($locBalances as $lb) {
-                    $cycle->items()->create([
-                        'product_variant_id' => $lb->product_variant_id,
-                        'warehouse_location_id' => $lb->warehouse_location_id,
-                        'lot_number' => $lb->lot_number,
-                        'snapshot_quantity' => $lb->quantity,
-                        'counted_quantity' => null,
-                        'variance_quantity' => 0,
-                        'status' => 'pending',
-                    ]);
-                }
-            } else {
-                // Fallback to warehouse-level balances if no physical locations stocked yet
-                $whBalances = $this->inUserWarehouses(InventoryBalance::where('organization_id', $org->id), $request)
-                    ->where('warehouse_id', $warehouse->id)
-                    ->get();
-
-                foreach ($whBalances as $wb) {
-                    $cycle->items()->create([
-                        'product_variant_id' => $wb->product_variant_id,
-                        'warehouse_location_id' => null,
-                        'lot_number' => null,
-                        'snapshot_quantity' => $wb->on_hand,
-                        'counted_quantity' => null,
-                        'variance_quantity' => 0,
-                        'status' => 'pending',
-                    ]);
-                }
-            }
-
-            return $cycle->load('items.variant.product');
-        });
+        $validated = $request->validate($this->countRules($request));
+        $count = $this->counts->start(
+            Warehouse::findOrFail($validated['warehouse_id']),
+            $validated['title'],
+            $validated['scope_type'],
+            $validated['scope_value'] ?? null,
+            $validated['notes'] ?? null,
+            $request->user()->id,
+        );
 
         return response()->json([
             'status' => 'success',
-            'message' => "Cycle count session '{$countNumber}' created with baseline snapshot.",
+            'message' => "Cycle count session '{$count->count_number}' created with baseline snapshot.",
             'data' => $count,
         ], 201);
+    }
+
+    /**
+     * Counts that start by themselves, in the user's warehouses.
+     */
+    public function schedules(Request $request): JsonResponse
+    {
+        $schedules = $this->inUserWarehouses(CycleCountSchedule::where('organization_id', $request->user()->currentOrganization()->id), $request)
+            ->with('warehouse:id,name')
+            ->when($request->integer('warehouse_id'), fn ($q, int $id) => $q->where('warehouse_id', $id))
+            ->orderBy('next_run_on')
+            ->get();
+
+        return response()->json(['status' => 'success', 'data' => $schedules]);
+    }
+
+    /**
+     * Schedule a count every `every_days` days, starting on `next_run_on`.
+     */
+    public function storeSchedule(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            ...$this->countRules($request),
+            'every_days' => ['required', 'integer', 'min:1', 'max:365'],
+            'next_run_on' => ['required', 'date', 'after_or_equal:today'],
+        ]);
+
+        $schedule = CycleCountSchedule::create([
+            ...collect($validated)->except('notes')->all(),
+            'organization_id' => $request->user()->currentOrganization()->id,
+            'created_by_user_id' => $request->user()->id,
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "'{$schedule->title}' is counted every {$schedule->every_days} days.",
+            'data' => $schedule->load('warehouse:id,name'),
+        ], 201);
+    }
+
+    public function destroySchedule(Request $request, int $id): JsonResponse
+    {
+        $schedule = $this->inUserWarehouses(CycleCountSchedule::where('organization_id', $request->user()->currentOrganization()->id), $request)->findOrFail($id);
+        $schedule->delete();
+
+        return response()->json(['status' => 'success', 'message' => "'{$schedule->title}' is no longer scheduled."]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function countRules(Request $request): array
+    {
+        return [
+            'warehouse_id' => ['required', 'integer', $this->accessibleWarehouse($request)],
+            'title' => ['required', 'string', 'max:150'],
+            'scope_type' => ['required', Rule::in(CycleCountService::SCOPES)],
+            'scope_value' => ['nullable', 'required_unless:scope_type,full', 'string', 'max:100'],
+            'notes' => ['nullable', 'string', 'max:500'],
+        ];
     }
 
     /**

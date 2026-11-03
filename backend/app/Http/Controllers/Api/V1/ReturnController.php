@@ -8,6 +8,7 @@ use App\Models\OrderItem;
 use App\Models\OrderReturn;
 use App\Models\ReturnItem;
 use App\Services\InventoryEngine;
+use App\Services\OrderReturnService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,13 +21,11 @@ use Illuminate\Validation\ValidationException;
  */
 class ReturnController extends Controller
 {
-    /** Orders in these statuses have goods with the customer that can come back. */
-    private const RETURNABLE_ORDER_STATUSES = ['partially_shipped', 'shipped', 'delivered', 'returned'];
-
-    private const RELATIONS = ['order.store', 'warehouse', 'creator', 'items'];
+    private const RELATIONS = ['order.store', 'warehouse', 'creator', 'items', 'replacementOrder'];
 
     public function __construct(
-        protected InventoryEngine $inventoryEngine
+        protected InventoryEngine $inventoryEngine,
+        protected OrderReturnService $returns,
     ) {}
 
     /**
@@ -84,7 +83,7 @@ class ReturnController extends Controller
         $org = $request->user()->currentOrganization();
 
         $orders = Order::where('organization_id', $org->id)
-            ->whereIn('order_status', self::RETURNABLE_ORDER_STATUSES)
+            ->whereIn('order_status', OrderReturnService::RETURNABLE_ORDER_STATUSES)
             ->when($request->integer('store_id'), fn ($q, $storeId) => $q->where('store_id', $storeId))
             ->when($request->query('search'), fn ($q, $search) => $q->where(fn ($q) => $q
                 ->where('order_number', 'like', "%{$search}%")
@@ -94,7 +93,7 @@ class ReturnController extends Controller
             ->limit(50)
             ->get();
 
-        $returned = $this->returnedQuantities($orders->flatMap->items->pluck('id')->all());
+        $returned = $this->returns->returnedQuantities($orders->flatMap->items->pluck('id')->all());
 
         return response()->json([
             'status' => 'success',
@@ -132,54 +131,13 @@ class ReturnController extends Controller
             'items.*.quantity' => 'required|integer|min:1',
         ]);
 
-        $return = DB::transaction(function () use ($validated, $org, $request) {
-            $order = Order::with('items')->lockForUpdate()->findOrFail($validated['order_id']);
-
-            if (! in_array($order->order_status, self::RETURNABLE_ORDER_STATUSES, true)) {
-                throw ValidationException::withMessages(['order_id' => "Order {$order->order_number} has not been shipped, so nothing can be returned yet."]);
-            }
-
-            $returned = $this->returnedQuantities($order->items->pluck('id')->all());
-            $lines = [];
-
-            foreach ($validated['items'] as $line) {
-                $item = $order->items->firstWhere('id', $line['order_item_id']);
-                $returnable = $item->fulfilled_quantity - ($returned[$item->id] ?? 0);
-
-                if ($line['quantity'] > $returnable) {
-                    throw ValidationException::withMessages(['items' => "Only {$returnable} unit(s) of {$item->product_name} can be returned."]);
-                }
-
-                $lines[] = [
-                    'order_item_id' => $item->id,
-                    'product_variant_id' => $item->product_variant_id,
-                    'sku' => $item->external_sku,
-                    'product_name' => $item->product_name,
-                    'quantity' => (int) $line['quantity'],
-                    // Goods go back to the warehouse they were shipped from.
-                    'warehouse_id' => $item->allocated_warehouse_id,
-                ];
-            }
-
-            $return = OrderReturn::create([
-                'organization_id' => $org->id,
-                'order_id' => $order->id,
-                'warehouse_id' => collect($lines)->pluck('warehouse_id')->filter()->first(),
-                'created_by_user_id' => $request->user()->id,
-                'return_number' => OrderReturn::nextNumber($org->id),
-                'status' => 'requested',
-                'reason' => $validated['reason'],
-                'notes' => $validated['notes'] ?? null,
-                'items_count' => array_sum(array_column($lines, 'quantity')),
-            ]);
-
-            foreach ($lines as $line) {
-                unset($line['warehouse_id']);
-                $return->items()->create($line);
-            }
-
-            return $return;
-        });
+        $return = $this->returns->request(
+            Order::where('organization_id', $org->id)->findOrFail($validated['order_id']),
+            collect($validated['items'])->mapWithKeys(fn (array $line) => [$line['order_item_id'] => $line['quantity']])->all(),
+            $validated['reason'],
+            $validated['notes'] ?? null,
+            $request->user()->id,
+        );
 
         return response()->json([
             'status' => 'success',
@@ -246,6 +204,24 @@ class ReturnController extends Controller
     }
 
     /**
+     * Settle a completed return: refund money or send the items again on a free replacement order.
+     */
+    public function resolve(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'resolution' => ['required', Rule::in(OrderReturnService::RESOLUTIONS)],
+            'amount' => ['required_if:resolution,refund', 'nullable', 'numeric', 'min:0.01', 'max:99999999'],
+            'method' => ['nullable', 'string', 'max:100'],
+        ]);
+        $return = OrderReturn::where('organization_id', $request->user()->currentOrganization()->id)->findOrFail($id);
+        $return = $this->returns->resolve($return, $data, $request->user());
+
+        return $this->respond($return, $return->resolution === 'refund'
+            ? "Refund of {$return->refund_amount} recorded for return {$return->return_number}."
+            : "Replacement order {$return->replacementOrder?->order_number} created for return {$return->return_number}.");
+    }
+
+    /**
      * Turn down a return request.
      */
     public function reject(Request $request, int $id): JsonResponse
@@ -281,23 +257,6 @@ class ReturnController extends Controller
 
             return $return;
         });
-    }
-
-    /**
-     * Units already on a return (rejected returns do not count), per order item.
-     *
-     * @param  list<int>  $orderItemIds
-     * @return array<int, int>
-     */
-    private function returnedQuantities(array $orderItemIds): array
-    {
-        return ReturnItem::whereIn('order_item_id', $orderItemIds)
-            ->whereHas('orderReturn', fn (Builder $r) => $r->where('status', '!=', 'rejected'))
-            ->selectRaw('order_item_id, sum(quantity) as total')
-            ->groupBy('order_item_id')
-            ->pluck('total', 'order_item_id')
-            ->map(fn ($total) => (int) $total)
-            ->all();
     }
 
     private function markOrderReturnedWhenFullyBack(Order $order): void
@@ -342,6 +301,12 @@ class ReturnController extends Controller
             'status' => $return->status,
             'reason' => $return->reason,
             'disposition' => $return->disposition,
+            'resolution' => $return->resolution,
+            'refund_amount' => $return->refund_amount,
+            'refund_method' => $return->refund_method,
+            'replacement_order' => $return->replacementOrder?->only(['id', 'order_number']),
+            'currency' => $return->order?->currency,
+            'payment_status' => $return->order?->payment_status,
             'notes' => $return->notes,
             'items_count' => $return->items_count,
             'items' => $return->items->map(fn (ReturnItem $item) => [
@@ -353,6 +318,7 @@ class ReturnController extends Controller
             'created_at' => $return->created_at?->toIso8601String(),
             'received_at' => $return->received_at?->toIso8601String(),
             'completed_at' => $return->completed_at?->toIso8601String(),
+            'resolved_at' => $return->resolved_at?->toIso8601String(),
         ];
     }
 }

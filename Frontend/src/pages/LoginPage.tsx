@@ -1,18 +1,16 @@
-import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { Mail, ArrowRight, Shield } from 'lucide-react';
 import { AuthLayout } from '../components/layout/AuthLayout';
 import { Input } from '../components/common/Input';
 import { PasswordInput } from '../components/common/PasswordInput';
 import { Button } from '../components/common/Button';
 import { Alert } from '../components/common/Alert';
-import { useConfirmDialog } from '../components/common/ConfirmDialog';
 import { authService } from '../services/authService';
 import { ApiError } from '../services/apiClient';
 import { useAuth } from '../hooks/useAuth';
 
 export const LoginPage: React.FC = () => {
-  const { notify, dialog } = useConfirmDialog();
   const navigate = useNavigate();
   const { setAuthSession } = useAuth();
 
@@ -21,7 +19,27 @@ export const LoginPage: React.FC = () => {
   const [remember, setRemember] = useState(true);
 
   const [isLoading, setIsLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  // A failed single sign-on comes back here with its reason.
+  const [errorMessage, setErrorMessage] = useState<string | null>(searchParams.get('sso_error'));
+  // Single sign-on providers set up on the server.
+  const [ssoProviders, setSsoProviders] = useState<string[]>([]);
+
+  useEffect(() => {
+    authService
+      .getSsoProviders()
+      .then((providers) => setSsoProviders(providers.map((provider) => provider.key)))
+      .catch(() => setSsoProviders([]));
+  }, []);
+
+  const signInWith = (provider: string, label: string) => {
+    if (!ssoProviders.includes(provider)) {
+      setErrorMessage(`${label} sign-in is not set up for this workspace yet. Log in with your email and password, or ask your administrator to turn it on.`);
+      return;
+    }
+    setIsLoading(true);
+    window.location.assign(`/api/v1/auth/sso/${provider}/redirect`);
+  };
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
 
   const validateForm = (): boolean => {
@@ -162,13 +180,14 @@ export const LoginPage: React.FC = () => {
               type="button"
               variant="outline"
               disabled={isLoading}
-              onClick={() => notify({ title: 'Microsoft Sign-In', message: 'Enterprise Microsoft SSO is configured through your identity provider. Contact your administrator to enable it.' })}
+              title="Sign in with your Microsoft work account"
+              onClick={() => signInWith('microsoft', 'Microsoft')}
               leftIcon={
                 <svg width="18" height="18" viewBox="0 0 21 21" fill="none" aria-hidden="true">
-                  <path fill="#f25022" d="M1 1h9v9H1z"/>
-                  <path fill="#00a4ef" d="M1 11h9v9H1z"/>
-                  <path fill="#7fba00" d="M11 1h9v9H11z"/>
-                  <path fill="#ffb900" d="M11 11h9v9H11z"/>
+                  <path fill="#f25022" d="M1 1h9v9H1z" />
+                  <path fill="#00a4ef" d="M1 11h9v9H1z" />
+                  <path fill="#7fba00" d="M11 1h9v9H11z" />
+                  <path fill="#ffb900" d="M11 11h9v9H11z" />
                 </svg>
               }
             >
@@ -179,7 +198,8 @@ export const LoginPage: React.FC = () => {
               type="button"
               variant="outline"
               disabled={isLoading}
-              onClick={() => notify({ title: 'Enterprise SSO', message: 'SAML / OIDC Single Sign-On is available for corporate domain users. Contact your administrator to enable it.' })}
+              title="Sign in with your company's identity provider"
+              onClick={() => signInWith('oidc', 'Enterprise SSO')}
               leftIcon={<Shield size={16} color="#64748b" aria-hidden="true" />}
             >
               Enterprise SSO
@@ -190,9 +210,14 @@ export const LoginPage: React.FC = () => {
         <div className="card-footer">
           <span>Need access to Finovo OMS / WMS? </span>
           <span style={{ color: '#2563eb', fontWeight: 600 }}>Contact your administrator</span>
+          <div style={{ marginTop: 6 }}>
+            <span>Bought from us? </span>
+            <Link to="/track" className="link-btn">
+              Track your order
+            </Link>
+          </div>
         </div>
       </div>
-      {dialog}
     </AuthLayout>
   );
 };

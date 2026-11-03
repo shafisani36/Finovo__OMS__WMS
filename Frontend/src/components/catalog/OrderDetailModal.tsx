@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Download, Loader2, Pencil, Trash2, X } from 'lucide-react';
-import omsService from '../../services/omsService';
-import type { OrderFulfillment, OrderModel } from '../../services/omsService';
+import omsService, { ORDER_WAITING_STATUSES, canSplitOrMerge } from '../../services/omsService';
+import type { CustomOrderStatus, OrderFulfillment, OrderModel } from '../../services/omsService';
 import { platformLabel } from '../stores/storePlatforms';
 import ProductThumb from './ProductThumb';
 import StatusPill from '../common/StatusPill';
@@ -12,6 +12,8 @@ import { Alert } from '../common/Alert';
 import { DetailValue } from '../common/DetailValue';
 import OrderWorkflow from './OrderWorkflow';
 import OrderFormModal from './OrderFormModal';
+import { HoldPill, OrderHoldSection, OrderSplitSection, OrderTimeline } from './OrderControls';
+import { CustomStatusPill, OrderCustomStatusSection, OrderRepeatSection } from './OrderOperations';
 import { useConfirmDialog } from '../common/ConfirmDialog';
 import { useAuth } from '../../hooks/useAuth';
 import { can } from '../../types/auth';
@@ -20,15 +22,14 @@ import './DetailModal.css';
 
 interface OrderDetailModalProps {
   order: OrderModel;
+  /** The company's own order statuses. */
+  statuses?: CustomOrderStatus[];
   onClose: () => void;
   /** Called after the order changes here, so the list behind can refresh (with a message after an edit or delete). */
   onChanged?: (message?: string) => void;
 }
 
-/** Same rule as the backend's OrderService::EDITABLE_STATUSES: orders still waiting for stock. */
-const EDITABLE_STATUSES = ['imported', 'pending', 'exception'];
-
-export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({ order, onClose, onChanged }) => {
+export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({ order, statuses = [], onClose, onChanged }) => {
   const items = order.items ?? [];
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +37,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({ order, onClo
   const [notice, setNotice] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  /** Bumped after every change here, so the history reloads. */
+  const [historyKey, setHistoryKey] = useState(0);
   const { user } = useAuth();
   const { confirm, dialog } = useConfirmDialog();
 
@@ -53,14 +56,21 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({ order, onClo
 
   const handleChanged = async (message: string) => {
     setNotice(message);
+    setHistoryKey((key) => key + 1);
     await loadFulfillment();
     onChanged?.();
   };
 
+  /** A hold, release or split changes the order itself: the list reloads it and this view closes with the message. */
+  const handleControlChanged = (message: string) => {
+    onClose();
+    onChanged?.(message);
+  };
+
   const status = fulfillment?.order_status ?? order.order_status;
-  const canEdit = can(user, 'orders.manage') && EDITABLE_STATUSES.includes(status);
+  const canEdit = can(user, 'orders.manage') && ORDER_WAITING_STATUSES.includes(status);
   // Orders on a store, and orders that reserved or moved stock, are kept for the record (cancel them instead).
-  const canDelete = can(user, 'orders.delete') && !order.external_order_id && [...EDITABLE_STATUSES, 'cancelled'].includes(status);
+  const canDelete = can(user, 'orders.delete') && !order.external_order_id && [...ORDER_WAITING_STATUSES, 'cancelled'].includes(status);
 
   const remove = async () => {
     const ok = await confirm({
@@ -132,6 +142,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({ order, onClo
             <div className="order-modal-title">
               <h3>Order {order.order_number}</h3>
               <StatusPill status={status} />
+              <HoldPill type={order.hold_type} />
+              <CustomStatusPill value={order.custom_status} statuses={statuses} />
             </div>
             <div className="detail-muted" style={{ marginTop: 2 }}>
               {order.store ? `${order.store.name} · ${platformLabel(order.store.platform)}` : 'Created in Finovo'}
@@ -193,6 +205,9 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({ order, onClo
             {notice && <Alert type="success" message={notice} className="page-banner" />}
             {fulfillment ? <OrderWorkflow order={fulfillment} onChanged={handleChanged} /> : <div className="detail-muted">Loading order status...</div>}
           </section>
+
+          <OrderHoldSection order={order} status={status} canManage={can(user, 'orders.manage')} onChanged={handleControlChanged} />
+          {can(user, 'orders.manage') && <OrderCustomStatusSection order={order} statuses={statuses} onChanged={handleControlChanged} />}
 
           <section className="order-section">
             <h4 className="detail-section-title">Items ({items.length})</h4>
@@ -262,6 +277,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({ order, onClo
             </div>
           </section>
 
+          {can(user, 'orders.manage') && canSplitOrMerge(order, status) && <OrderSplitSection order={order} onChanged={handleControlChanged} />}
+
           <section className="order-section">
             <h4 className="detail-section-title">Labels</h4>
             <div className="order-labels">
@@ -305,6 +322,10 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({ order, onClo
               </dl>
             </section>
           )}
+
+          {can(user, 'orders.manage') && status !== 'cancelled' && <OrderRepeatSection order={order} onChanged={handleControlChanged} />}
+
+          <OrderTimeline orderId={order.id} refreshKey={historyKey} />
 
           {order.notes && (
             <section className="order-section">

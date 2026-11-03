@@ -1,12 +1,7 @@
 <?php
 
-use Illuminate\Foundation\Inspiring;
-use Illuminate\Support\Facades\Artisan;
+use App\Models\IdempotencyKey;
 use Illuminate\Support\Facades\Schedule;
-
-Artisan::command('inspire', function () {
-    $this->comment(Inspiring::quote());
-})->purpose('Display an inspiring quote');
 
 // Keep store products and orders current (needs the scheduler cron and a queue worker on the server)
 Schedule::command('stores:sync')->everyFifteenMinutes()->withoutOverlapping();
@@ -18,4 +13,16 @@ Schedule::command('stores:import-orders')->everyMinute()->withoutOverlapping();
 Schedule::command('stores:push-updates')->everyMinute()->withoutOverlapping();
 
 // Courier status of parcels on their way; delivered parcels are marked delivered
+// Scheduled cycle counts start early in the morning.
+Schedule::command('cycle-counts:run-schedules')->dailyAt('05:00');
+
+// Recurring orders that are due (each run places at most one order per plan)
+Schedule::command('orders:recurring')->hourly()->withoutOverlapping();
+
 Schedule::command('couriers:track')->everyThirtyMinutes()->withoutOverlapping();
+
+// Expired API tokens are deleted once a day.
+Schedule::command('sanctum:prune-expired --hours=24')->daily();
+
+// Saved answers to offline scans are kept for a week.
+Schedule::command('model:prune', ['--model' => [IdempotencyKey::class]])->daily();

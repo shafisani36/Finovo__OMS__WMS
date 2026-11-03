@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Enums\Permission;
 use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
+use App\Models\Client;
 use App\Models\Organization;
 use App\Models\User;
 use App\Models\UserPermissionOverride;
@@ -97,6 +98,8 @@ class EmployeeController extends Controller
                 'warehouses' => $this->inUserWarehouses(Warehouse::where('organization_id', $org->id), $request, 'id')
                     ->orderBy('name')
                     ->get(['id', 'name', 'code']),
+                // 3PL clients a client-portal user can belong to.
+                'clients' => Client::where('organization_id', $org->id)->orderBy('name')->get(['id', 'name']),
             ],
         ]);
     }
@@ -111,6 +114,7 @@ class EmployeeController extends Controller
             'role' => ['required', new Enum(UserRole::class)],
             'password' => self::PASSWORD_RULES,
             ...$this->warehouseRules($request),
+            ...$this->clientRules($request),
         ]);
 
         $this->guardRoleChoice($request, UserRole::from($validated['role']));
@@ -124,6 +128,7 @@ class EmployeeController extends Controller
                 'email' => $validated['email'],
                 'password' => $validated['password'],
                 'role' => $validated['role'],
+                'client_id' => $validated['role'] === UserRole::CLIENT->value ? $validated['client_id'] : null,
                 'warehouse_access' => $this->warehouseAccess($validated),
                 'status' => 'active',
                 'otp_enabled' => true,
@@ -155,6 +160,7 @@ class EmployeeController extends Controller
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($employee->id)],
             'role' => ['sometimes', 'required', new Enum(UserRole::class)],
             ...$this->warehouseRules($request),
+            ...$this->clientRules($request, $employee),
         ]);
 
         $role = isset($validated['role']) ? UserRole::from($validated['role']) : $employee->role;
@@ -170,6 +176,7 @@ class EmployeeController extends Controller
                 'name' => $validated['name'],
                 'email' => $validated['email'],
                 'role' => $role,
+                'client_id' => $role === UserRole::CLIENT ? ($validated['client_id'] ?? $employee->client_id) : null,
                 'warehouse_access' => $this->warehouseAccess($validated, $employee),
             ]);
             if (array_key_exists('warehouse_ids', $validated)) {
@@ -486,6 +493,20 @@ class EmployeeController extends Controller
     /**
      * Only an administrator may make someone an administrator.
      */
+    /**
+     * A client-portal user belongs to one 3PL client of the company.
+     *
+     * @return array<string, mixed>
+     */
+    private function clientRules(Request $request, ?User $employee = null): array
+    {
+        $isClient = ($request->input('role') ?? $employee?->role->value) === UserRole::CLIENT->value;
+
+        return [
+            'client_id' => ['nullable', 'integer', Rule::requiredIf($isClient && ! $employee?->client_id), $this->inOrganization($request, 'clients')],
+        ];
+    }
+
     private function guardRoleChoice(Request $request, UserRole $role): void
     {
         if ($role === UserRole::ADMIN && ! $request->user()->isAdmin()) {
@@ -552,6 +573,7 @@ class EmployeeController extends Controller
             'name' => $user->name,
             'email' => $user->email,
             'role' => $user->role->value,
+            'client_id' => $user->client_id,
             'role_label' => $user->role->label(),
             'status' => $user->status,
             'warehouse_access' => $user->isAdmin() ? User::WAREHOUSE_ACCESS_ALL : $user->warehouse_access,

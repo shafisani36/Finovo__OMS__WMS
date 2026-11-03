@@ -2,6 +2,9 @@ import type { ApiResponse } from '../types/auth';
 
 export const TOKEN_STORAGE_KEY = 'finovo_auth_token';
 
+/** Fired when the server no longer accepts the saved token; the sign-in state listens for it. */
+export const SESSION_EXPIRED_EVENT = 'finovo:session-expired';
+
 let inMemoryToken: string | null = null;
 
 // Immediately restore token from persistent storage if present
@@ -95,6 +98,9 @@ export const request = async <T = any>(
     }
 
     if (!response.ok) {
+      if (response.status === 401 && headers.has('Authorization')) {
+        window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+      }
       const message = payload.message || 'An unexpected error occurred.';
       throw new ApiError(message, response.status, payload.errors);
     }

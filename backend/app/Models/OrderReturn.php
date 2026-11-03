@@ -39,10 +39,15 @@ class OrderReturn extends Model
         'status',
         'reason',
         'disposition',
+        'resolution',
+        'refund_amount',
+        'refund_method',
+        'replacement_order_id',
         'notes',
         'items_count',
         'received_at',
         'completed_at',
+        'resolved_at',
     ];
 
     protected function casts(): array
@@ -51,6 +56,8 @@ class OrderReturn extends Model
             'items_count' => 'integer',
             'received_at' => 'datetime',
             'completed_at' => 'datetime',
+            'resolved_at' => 'datetime',
+            'refund_amount' => 'decimal:2',
         ];
     }
 
@@ -72,6 +79,11 @@ class OrderReturn extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by_user_id');
+    }
+
+    public function replacementOrder(): BelongsTo
+    {
+        return $this->belongsTo(Order::class, 'replacement_order_id');
     }
 
     public function items(): HasMany

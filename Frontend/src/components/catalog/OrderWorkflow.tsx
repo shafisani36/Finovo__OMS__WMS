@@ -6,6 +6,7 @@ import { useConfirmDialog } from '../common/ConfirmDialog';
 import omsService from '../../services/omsService';
 import type { OrderFulfillment } from '../../services/omsService';
 import { useAuth } from '../../hooks/useAuth';
+import { useShipmentCouriers } from '../../hooks/useShipmentCouriers';
 import { can } from '../../types/auth';
 import type { Permission } from '../../types/auth';
 import './DetailModal.css';
@@ -20,8 +21,6 @@ const PICK_STEPS: { value: PickStatus; label: string }[] = [
   { value: 'picked', label: 'Picked' },
   { value: 'packed', label: 'Packed' },
 ];
-
-const CARRIERS = ['TCS', 'Leopards Courier', 'M&P', 'PostEx', 'Trax', 'BlueEx', 'DHL', 'FedEx', 'UPS'];
 
 /** How many of the STEPS the order has completed. */
 const completedSteps = (order: OrderFulfillment): number => {
@@ -48,7 +47,10 @@ export const OrderWorkflow: React.FC<OrderWorkflowProps> = ({ order, onChanged }
   const { confirm, dialog } = useConfirmDialog();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [carrier, setCarrier] = useState(CARRIERS[0]);
+  // The carrier list is only needed while the parcel waits for dispatch.
+  const { carriers } = useShipmentCouriers(order.shipment?.status === 'pending' && can(user, 'shipments.dispatch'));
+  const [chosenCarrier, setCarrier] = useState('');
+  const carrier = chosenCarrier || carriers[0] || '';
   // 0 = let the system pick the best-stocked linked warehouse.
   const [warehouseId, setWarehouseId] = useState(0);
 
@@ -176,9 +178,9 @@ export const OrderWorkflow: React.FC<OrderWorkflowProps> = ({ order, onChanged }
         body: (
           <div className="ow-inline">
             <div className="ow-inline-grow">
-              <CustomDropdown value={carrier} onChange={(val) => setCarrier(String(val))} options={CARRIERS.map((c) => ({ value: c, label: c }))} searchable={false} />
+              <CustomDropdown value={carrier} onChange={(val) => setCarrier(String(val))} options={carriers.map((c) => ({ value: c, label: c }))} searchable={false} />
             </div>
-            <button type="button" className="btn-finovo-primary" disabled={busy} onClick={() => run(() => omsService.dispatchShipment(shipment.id, { carrier }))}>
+            <button type="button" className="btn-finovo-primary" disabled={busy || !carrier} onClick={() => run(() => omsService.dispatchShipment(shipment.id, { carrier }))}>
               {spinner ?? <Send size={15} />}
               <span>Dispatch</span>
             </button>

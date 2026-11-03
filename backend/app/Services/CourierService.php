@@ -15,8 +15,8 @@ use Illuminate\Validation\ValidationException;
 use Throwable;
 
 /**
- * Pakistani courier integrations: booking parcels at dispatch, labels, and following each parcel's status until
- * it is delivered (a delivered parcel marks the shipment and order delivered by itself).
+ * Pakistani courier integrations: booking and cancelling parcels, labels, tracking and checking accounts. What a
+ * courier status means for the shipment is decided in ShipmentService.
  */
 class CourierService
 {
@@ -157,65 +157,41 @@ class CourierService
     }
 
     /**
-     * Ask the couriers for the latest status of every parcel still on its way. A delivered parcel marks the
-     * shipment delivered; the status of the others is kept on the shipment.
+     * Latest status of each tracking number with the account's courier.
      *
-     * @return array{checked: int, updated: int, delivered: int, failed_accounts: int}
+     * @param  list<string>  $trackingNumbers
+     * @return array<string, CourierStatus>
+     *
+     * @throws CourierException
      */
-    public function syncTracking(?CourierAccount $only = null): array
+    public function track(CourierAccount $account, array $trackingNumbers): array
     {
-        $result = ['checked' => 0, 'updated' => 0, 'delivered' => 0, 'failed_accounts' => 0];
-        $accounts = $only ? collect([$only]) : CourierAccount::where('is_active', true)->get();
-
-        foreach ($accounts as $account) {
-            $account->shipments()
-                ->where('status', 'shipped')
-                ->whereNotNull('tracking_number')
-                ->chunkById(50, function ($shipments) use ($account, &$result) {
-                    try {
-                        $statuses = $this->gateways->for($account)->track($account, $shipments->pluck('tracking_number')->all());
-                    } catch (CourierException $e) {
-                        $account->update(['last_error' => $e->getMessage()]);
-                        $result['failed_accounts']++;
-
-                        return false;
-                    }
-
-                    foreach ($shipments as $shipment) {
-                        $result['checked']++;
-                        $status = $statuses[$shipment->tracking_number] ?? null;
-                        if ($status && $this->apply($shipment, $status)) {
-                            $result['updated']++;
-                            $result['delivered'] += $status->status === CourierStatus::DELIVERED ? 1 : 0;
-                        }
-                    }
-                });
-
-            $account->update(['last_tracked_at' => now()]);
-        }
-
-        return $result;
+        return $this->gateways->for($account)->track($account, $trackingNumbers);
     }
 
     /**
-     * Keep the courier's status on the shipment; a delivered parcel is marked delivered in Finovo.
+     * Cancel a booking with the courier; the courier's refusal becomes a validation error.
+     *
+     * @throws ValidationException
      */
-    private function apply(Shipment $shipment, CourierStatus $status): bool
+    public function cancel(CourierAccount $account, string $trackingNumber): void
     {
-        if ($shipment->courier_status === $status->status && $shipment->courier_status_text === $status->text) {
-            return false;
+        try {
+            $this->gateways->for($account)->cancel($account, $trackingNumber);
+        } catch (CourierException $e) {
+            throw ValidationException::withMessages(['shipment' => $e->getMessage()]);
         }
+    }
 
-        $shipment->update([
-            'courier_status' => $status->status,
-            'courier_status_text' => mb_substr($status->text, 0, 255),
-            'courier_status_at' => $status->at ?? now(),
-        ]);
+    /** The courier's display name for an account's carrier code. */
+    public static function carrierName(string $carrier): string
+    {
+        return self::CARRIERS[$carrier]['name'] ?? $carrier;
+    }
 
-        if ($status->status === CourierStatus::DELIVERED) {
-            $shipment->markDelivered();
-        }
-
-        return true;
+    /** Whether the carrier makes printable labels. */
+    public static function makesLabels(?string $carrier): bool
+    {
+        return (bool) (self::CARRIERS[$carrier]['labels'] ?? false);
     }
 }

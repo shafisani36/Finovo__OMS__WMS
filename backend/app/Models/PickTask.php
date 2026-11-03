@@ -88,6 +88,7 @@ class PickTask extends Model
         if (in_array($this->status, self::CLOSED, true)) {
             throw ValidationException::withMessages(['status' => "Order {$this->order?->order_number} is already {$this->status} and can no longer be picked."]);
         }
+        $this->order?->ensureNotOnHold();
 
         return DB::transaction(function () use ($status, $user) {
             // Moving back undoes the scans of the stages being repeated (back before packed: packing scans,

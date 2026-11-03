@@ -54,6 +54,8 @@ class OrderAllocationEngine
      */
     public function allocateOrder(Order $order, ?int $warehouseId = null): Order
     {
+        $order->ensureNotOnHold();
+
         return DB::transaction(function () use ($order, $warehouseId) {
             $order->load(['items', 'store.warehouses']);
 

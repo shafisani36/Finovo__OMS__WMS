@@ -3,9 +3,12 @@
 namespace App\Services;
 
 use App\Models\Product;
+use App\Rules\PublicUrl;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Psr\Http\Message\UriInterface;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -38,8 +41,23 @@ class ProductImageStore
             return null;
         }
 
+        // Never fetch from the server's own network, also not through a redirect.
+        if (! PublicUrl::allows($source)) {
+            Log::warning('Product image address refused', ['product' => $product->id, 'url' => $source]);
+
+            return false;
+        }
+
         try {
-            $response = Http::timeout(15)->connectTimeout(5)->withOptions(['allow_redirects' => ['max' => 3, 'protocols' => ['http', 'https']]])->get($source);
+            $response = Http::timeout(15)->connectTimeout(5)->withOptions(['allow_redirects' => [
+                'max' => 3,
+                'protocols' => ['http', 'https'],
+                'on_redirect' => function ($request, $response, UriInterface $uri): void {
+                    if (! PublicUrl::allows((string) $uri)) {
+                        throw new RuntimeException("Redirect to {$uri} refused.");
+                    }
+                },
+            ]])->get($source);
         } catch (Throwable $e) {
             Log::warning('Product image download failed', ['product' => $product->id, 'url' => $source, 'error' => $e->getMessage()]);
 

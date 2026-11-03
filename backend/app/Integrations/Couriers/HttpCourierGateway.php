@@ -5,6 +5,7 @@ namespace App\Integrations\Couriers;
 use App\Models\CourierAccount;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 
@@ -46,6 +47,9 @@ abstract class HttpCourierGateway implements CourierGateway
             $response = $call($this->http($account));
         } catch (ConnectionException $e) {
             throw new CourierException("{$this->name()} could not be reached. Try again in a moment.", previous: $e);
+        } catch (RequestException $e) {
+            // Raised when the request fails on the way (e.g. a proxy refuses it), before the courier answers.
+            throw new CourierException("{$this->name()} could not be reached (error {$e->response->status()}). Try again in a moment.", previous: $e);
         }
 
         if ($response->serverError()) {

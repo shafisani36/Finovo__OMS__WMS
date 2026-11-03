@@ -53,11 +53,6 @@ class ProductVariant extends Model
         return $this->hasMany(InventoryLocationBalance::class);
     }
 
-    public function reorderRules(): HasMany
-    {
-        return $this->hasMany(ReorderRule::class);
-    }
-
     public function skuMappings(): HasMany
     {
         return $this->hasMany(SkuMapping::class);

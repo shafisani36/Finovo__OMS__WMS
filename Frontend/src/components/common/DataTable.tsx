@@ -116,7 +116,7 @@ export function DataTable<T extends Record<string, any>>({
                   }}
                 >
                   {selectable && (
-                    <td style={{ width: 44, padding: '16px' }}>
+                    <td style={{ width: 44, padding: '16px' }} onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={isSelected}

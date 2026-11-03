@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Validation\ValidationException;
 
 #[ObservedBy(OrderObserver::class)]
 class Order extends Model
@@ -41,6 +42,12 @@ class Order extends Model
         'order_status',
         'payment_status',
         'fulfillment_status',
+        'hold_type',
+        'hold_reason',
+        'held_at',
+        'held_by_user_id',
+        'custom_status',
+        'recurring_order_id',
         'subtotal_amount',
         'shipping_amount',
         'tax_amount',
@@ -71,6 +78,7 @@ class Order extends Model
             'platform_data' => 'array',
             'total_amount' => 'decimal:2',
             'placed_at' => 'datetime',
+            'held_at' => 'datetime',
             'invoiced_at' => 'datetime',
         ];
     }
@@ -104,6 +112,34 @@ class Order extends Model
     public function pickTasks(): HasMany
     {
         return $this->hasMany(PickTask::class);
+    }
+
+    /**
+     * The order's history, oldest first.
+     */
+    public function events(): HasMany
+    {
+        return $this->hasMany(OrderEvent::class)->orderBy('created_at')->orderBy('id');
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $changes
+     */
+    public function record(string $type, string $description, ?int $userId = null, ?array $changes = null): OrderEvent
+    {
+        return $this->events()->create(['type' => $type, 'description' => $description, 'user_id' => $userId, 'changes' => $changes]);
+    }
+
+    /**
+     * A held order is not allocated, picked or dispatched until it is released.
+     *
+     * @throws ValidationException
+     */
+    public function ensureNotOnHold(): void
+    {
+        if ($this->hold_type !== null) {
+            throw ValidationException::withMessages(['order' => "Order {$this->order_number} is on hold: {$this->hold_reason}"]);
+        }
     }
 
     public function shipments(): HasMany

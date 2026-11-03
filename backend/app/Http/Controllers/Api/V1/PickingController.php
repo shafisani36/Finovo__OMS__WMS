@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\PickTask;
 use App\Models\PickWave;
+use App\Models\User;
 use App\Services\AccessControl;
 use App\Services\PickingService;
 use Illuminate\Http\JsonResponse;
@@ -271,6 +272,28 @@ class PickingController extends Controller
         $this->picking->cancelWave($pickWave);
 
         return response()->json(['status' => 'success', 'message' => "Wave {$pickWave->wave_number} cancelled."]);
+    }
+
+    /**
+     * Give a pick task to a worker of the company who works in its warehouse (or take it back with user_id null).
+     */
+    public function assign(Request $request, PickTask $pickTask): JsonResponse
+    {
+        $this->authorizeTask($request, $pickTask);
+        abort_if(in_array($pickTask->status, PickTask::CLOSED, true), 422, "Order {$pickTask->order?->order_number} is already {$pickTask->status}.");
+
+        $worker = User::whereKey($request->validate([
+            'user_id' => ['present', 'nullable', 'integer', Rule::exists('organization_memberships', 'user_id')->where('organization_id', $pickTask->organization_id)],
+        ])['user_id'])->first();
+        abort_if($worker && ! app(AccessControl::class)->canAccessWarehouse($worker, $pickTask->warehouse_id), 422, "{$worker?->name} does not work in this warehouse.");
+
+        $pickTask->update(['assigned_to_user_id' => $worker?->id]);
+        $order = $pickTask->order?->order_number;
+
+        return response()->json([
+            'status' => 'success',
+            'message' => $worker ? "Order {$order} is now {$worker->name}'s to pick." : "Order {$order} is open for any worker.",
+        ]);
     }
 
     private function authorizeWave(Request $request, PickWave $wave): void

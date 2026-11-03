@@ -1,7 +1,13 @@
-# Environment files
+# Environment files (all of them except the examples: they hold secrets)
 .env
-.env.backup
-.env.production
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Local databases
+**/*.sqlite
 
 # Dependencies
 **/node_modules/

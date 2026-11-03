@@ -507,6 +507,11 @@ html, body {
   color: #b45309;
 }
 
+.kpi-pill-red {
+  background-color: #fef2f2;
+  color: #dc2626;
+}
+
 @media (max-width: 1200px) {
   .kpi-grid {
     grid-template-columns: repeat(3, 1fr);
@@ -3010,6 +3015,147 @@ a.btn-finovo-secondary {
   margin-bottom: 16px;
 }
 
+.shipment-bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  background: #eff4ff;
+  border-bottom: 1px solid #dbe4ff;
+  font-size: 13px;
+  color: #1e3a8a;
+}
+
+.shipment-bulk-bar strong {
+  margin-right: auto;
+}
+
+.shipment-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shipment-tracking-link {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-family: monospace;
+  color: #1e56ff;
+}
+
+.shipment-courier-banner {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #eff6ff;
+  border: 1px solid #dbeafe;
+  font-size: 13px;
+  color: #1e3a8a;
+}
+
+.shipment-courier-banner.is-problem {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+.shipment-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.shipment-timeline li {
+  position: relative;
+  padding: 0 0 14px 22px;
+}
+
+.shipment-timeline li:last-child {
+  padding-bottom: 0;
+}
+
+.shipment-timeline li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #1e56ff;
+}
+
+.shipment-timeline li:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 16px;
+  bottom: 0;
+  width: 2px;
+  background: #e2e8f0;
+}
+
+.shipment-timeline li.is-delivered::before {
+  background: #16a34a;
+}
+
+.shipment-timeline li.is-returned::before,
+.shipment-timeline li.is-dispatch_cancelled::before {
+  background: #dc2626;
+}
+
+.shipment-timeline li.is-courier::before {
+  background: #94a3b8;
+}
+
+.shipment-timeline-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.dispatch-parcel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.dispatch-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dispatch-results li {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 13px;
+}
+
+.dispatch-results li div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dispatch-results li span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.dispatch-results li.is-done svg {
+  color: #16a34a;
+}
+
+.dispatch-results li.is-failed svg {
+  color: #dc2626;
+}
+
 /* Store ↔ warehouse links (StoreWarehousesModal, WarehouseStoresModal) */
 .link-modal-body {
   display: flex;
@@ -3133,4 +3279,117 @@ a.btn-finovo-secondary {
   display: block;
   font-size: 12px;
   color: #64748b;
+}
+
+/* Inventory valuation (InventoryValuation) */
+.valuation-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.valuation-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.valuation-summary span {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.valuation-summary strong {
+  font-size: 18px;
+  color: #0f172a;
+}
+
+.valuation-summary small {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+/* Scheduled cycle counts (CycleCountSchedules) */
+.count-schedule-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+/* Assistant & insights (AssistantPage) */
+.assistant-turns {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.assistant-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.assistant-question {
+  margin: 0 0 6px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.assistant-answer {
+  position: relative;
+  padding: 12px 40px 12px 14px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  white-space: pre-wrap;
+}
+
+.assistant-answer p {
+  margin: 0;
+}
+
+.assistant-answer small {
+  display: block;
+  margin-top: 6px;
+  color: #64748b;
+}
+
+.assistant-answer .topbar-icon-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
+.assistant-form {
+  display: flex;
+  gap: 8px;
+}
+
+.assistant-form .form-input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.assistant-form .btn-primary {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.assistant-insights {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+  color: #334155;
 }

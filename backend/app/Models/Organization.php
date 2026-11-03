@@ -56,24 +56,9 @@ class Organization extends Model
         return $this->hasMany(Order::class);
     }
 
-    public function inventoryBalances(): HasMany
-    {
-        return $this->hasMany(InventoryBalance::class);
-    }
-
-    public function inventoryLedger(): HasMany
-    {
-        return $this->hasMany(InventoryLedgerEntry::class);
-    }
-
     public function pickTasks(): HasMany
     {
         return $this->hasMany(PickTask::class);
-    }
-
-    public function purchaseRequisitions(): HasMany
-    {
-        return $this->hasMany(PurchaseRequisition::class);
     }
 
     public function purchaseOrders(): HasMany

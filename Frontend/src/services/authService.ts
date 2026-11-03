@@ -81,6 +81,12 @@ export const authService = {
     });
   },
 
+  /** Single sign-on providers set up on the server. */
+  getSsoProviders: async (): Promise<{ key: string; label: string }[]> => {
+    const res = await request<{ key: string; label: string }[]>('/auth/sso/providers', { method: 'GET' });
+    return res.data ?? [];
+  },
+
   getMe: async (): Promise<ApiResponse<{ user: User }>> => {
     return request<{ user: User }>('/auth/me', {
       method: 'GET',

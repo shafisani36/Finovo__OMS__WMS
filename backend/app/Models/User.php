@@ -36,6 +36,7 @@ class User extends Authenticatable
         'last_login_ip',
         'permissions_version',
         'warehouse_access',
+        'client_id',
     ];
 
     /** Works in every warehouse of the company. */
@@ -76,11 +77,6 @@ class User extends Authenticatable
         return $this->role === UserRole::ADMIN;
     }
 
-    public function isOperator(): bool
-    {
-        return $this->role === UserRole::OPERATOR;
-    }
-
     public function isActive(): bool
     {
         return $this->status === 'active';
@@ -102,16 +98,6 @@ class User extends Authenticatable
     public function warehouseMemberships(): HasMany
     {
         return $this->hasMany(WarehouseMembership::class);
-    }
-
-    public function otpChallenges(): HasMany
-    {
-        return $this->hasMany(OtpChallenge::class);
-    }
-
-    public function securityEvents(): HasMany
-    {
-        return $this->hasMany(SecurityEvent::class);
     }
 
     public function memberships(): HasMany

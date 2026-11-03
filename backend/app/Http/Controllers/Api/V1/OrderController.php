@@ -5,15 +5,21 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Integrations\Push\StoreWriterFactory;
 use App\Models\Order;
+use App\Models\RecurringOrder;
 use App\Models\Store;
 use App\Services\AccessControl;
 use App\Services\InvoiceService;
 use App\Services\OrderAllocationEngine;
+use App\Services\OrderBulkService;
+use App\Services\OrderControlService;
+use App\Services\OrderImportService;
 use App\Services\OrderService;
+use App\Services\RecurringOrderService;
 use App\Services\StorePushService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
 
 class OrderController extends Controller
@@ -48,6 +54,14 @@ class OrderController extends Controller
             $query->where('order_status', $status);
         }
 
+        // The company's own status
+        $query->when($request->query('custom_status'), fn ($q, $key) => $q->where('custom_status', $key));
+
+        // Hold filter: one kind of hold, or any held order
+        $hold = $request->validate(['hold' => ['nullable', Rule::in([...OrderControlService::HOLD_TYPES, 'any'])]])['hold'] ?? null;
+        $query->when($hold === 'any', fn ($q) => $q->whereNotNull('hold_type'))
+            ->when($hold && $hold !== 'any', fn ($q) => $q->where('hold_type', $hold));
+
         // Store filter (the store being managed); metrics follow the same store
         $storeId = $request->query('store_id');
         if ($storeId) {
@@ -69,6 +83,7 @@ class OrderController extends Controller
         $pending = $metrics()->whereIn('order_status', ['imported', 'pending'])->count();
         $allocated = $metrics()->where('order_status', 'allocated')->count();
         $shipped = $metrics()->whereIn('order_status', ['partially_shipped', 'shipped', 'delivered', 'returned'])->count();
+        $onHold = $metrics()->whereNotNull('hold_type')->count();
 
         return response()->json([
             'status' => 'success',
@@ -84,6 +99,7 @@ class OrderController extends Controller
                 'pending' => $pending,
                 'allocated' => $allocated,
                 'shipped' => $shipped,
+                'on_hold' => $onHold,
             ],
         ]);
     }
@@ -264,47 +280,213 @@ class OrderController extends Controller
      */
     private function validateOrder(Request $request, ?Order $order = null): array
     {
-        $address = fn (string $field) => [
-            $field => ['nullable', 'array'],
-            "{$field}.name" => ['nullable', 'string', 'max:255'],
-            "{$field}.company" => ['nullable', 'string', 'max:255'],
-            "{$field}.address1" => ['nullable', 'string', 'max:255'],
-            "{$field}.address2" => ['nullable', 'string', 'max:255'],
-            "{$field}.city" => ['nullable', 'string', 'max:120'],
-            "{$field}.province" => ['nullable', 'string', 'max:120'],
-            "{$field}.zip" => ['nullable', 'string', 'max:30'],
-            "{$field}.country_code" => ['nullable', 'string', 'size:2'],
-            "{$field}.phone" => ['nullable', 'string', 'max:50'],
-        ];
         // Lines are required for a new order; on an edit they are sent only when they change.
-        $linesRule = $order ? 'sometimes' : 'required';
-
-        $validated = $request->validate([
-            'store_id' => ['nullable', 'integer', $this->inOrganization($request, 'stores')],
-            'customer_name' => ['required', 'string', 'max:255'],
-            'customer_email' => ['nullable', 'email', 'max:255'],
-            'customer_phone' => ['nullable', 'string', 'max:50'],
-            ...$address('shipping_address'),
-            ...$address('billing_address'),
-            'payment_status' => ['required', Rule::in(['pending', 'paid'])],
-            'payment_method' => ['nullable', 'string', 'max:100'],
-            'currency' => ['required', 'string', 'size:3'],
-            'notes' => ['nullable', 'string', 'max:2000'],
-            'shipping_amount' => ['nullable', 'numeric', 'min:0', 'max:99999999'],
-            'discount_amount' => ['nullable', 'numeric', 'min:0', 'max:99999999'],
-            'tax_amount' => ['nullable', 'numeric', 'min:0', 'max:99999999'],
-            'items' => [$linesRule, 'array', 'min:1', 'max:200'],
-            'items.*.product_variant_id' => ['required', 'integer', 'distinct', $this->inOrganization($request, 'product_variants')],
-            'items.*.quantity' => ['required', 'integer', 'min:1', 'max:100000'],
-            'items.*.unit_price' => ['required', 'numeric', 'min:0', 'max:99999999'],
-        ], [
-            'items.required' => 'Add at least one product to the order.',
-            'items.*.product_variant_id.distinct' => 'A product is listed twice; change its quantity instead.',
-        ]);
-
+        $validated = $request->validate($this->orders->rules($request->user()->currentOrganization()->id, $order === null), OrderService::VALIDATION_MESSAGES);
         $validated['currency'] = strtoupper($validated['currency']);
 
         return $validated;
+    }
+
+    /**
+     * Stop an order from being allocated, picked or dispatched until it is released.
+     */
+    public function hold(Request $request, Order $order, OrderControlService $controls): JsonResponse
+    {
+        $this->ensureSameOrganization($request, $order);
+        $reason = $request->validate(['reason' => ['required', 'string', 'max:500']])['reason'];
+        if ($order->hold_type !== null) {
+            return response()->json(['status' => 'error', 'message' => "Order {$order->order_number} is already on hold."], 422);
+        }
+        $controls->hold($order, 'manual', $reason, $request->user());
+
+        return response()->json(['status' => 'success', 'message' => "Order {$order->order_number} is on hold.", 'data' => $this->holdState($order)]);
+    }
+
+    /**
+     * Release a hold; releasing an approval hold approves the order.
+     */
+    public function release(Request $request, Order $order, OrderControlService $controls): JsonResponse
+    {
+        $this->ensureSameOrganization($request, $order);
+        $message = $controls->release($order, $request->user());
+
+        return response()->json(['status' => 'success', 'message' => $message, 'data' => $this->holdState($order)]);
+    }
+
+    /**
+     * Everything that happened to the order, oldest first: its own history and its shipments' tracking.
+     */
+    public function timeline(Request $request, Order $order): JsonResponse
+    {
+        $this->ensureSameOrganization($request, $order);
+
+        $events = $order->events()->with('user:id,name')->get()->map(fn ($event) => [
+            'type' => $event->type,
+            'description' => $event->description,
+            'user' => $event->user?->name,
+            'at' => $event->created_at,
+        ]);
+        $tracking = $order->shipments()->with('events.user:id,name')->get()->flatMap(fn ($shipment) => $shipment->events->map(fn ($event) => [
+            'type' => "shipment_{$event->type}",
+            'description' => "{$shipment->shipment_number}: {$event->description}",
+            'user' => $event->user?->name,
+            'at' => $event->happened_at,
+        ]));
+
+        return response()->json(['status' => 'success', 'data' => $events->concat($tracking)->sortBy('at')->values()]);
+    }
+
+    /**
+     * Move some quantities into a new order, e.g. to ship what is in stock now and the rest later.
+     */
+    public function split(Request $request, Order $order, OrderControlService $controls): JsonResponse
+    {
+        $this->ensureSameOrganization($request, $order);
+        $data = $request->validate([
+            'items' => ['required', 'array', 'min:1'],
+            'items.*.item_id' => ['required', 'integer', 'distinct'],
+            'items.*.quantity' => ['required', 'integer', 'min:0'],
+        ]);
+        $new = $controls->split($order, $data['items'], $request->user());
+
+        return response()->json(['status' => 'success', 'message' => "Order {$order->order_number} was split; the moved items are on order {$new->order_number}.", 'data' => $new], 201);
+    }
+
+    /**
+     * Combine orders of one customer into the first of them; the others are cancelled.
+     */
+    public function merge(Request $request, OrderControlService $controls): JsonResponse
+    {
+        $ids = $request->validate([
+            'order_ids' => ['required', 'array', 'min:2', 'max:20'],
+            'order_ids.*' => ['integer', 'distinct', $this->inOrganization($request, 'orders')],
+        ])['order_ids'];
+        $merged = $controls->merge(Order::whereIn('id', $ids)->get(), $request->user());
+
+        return response()->json(['status' => 'success', 'message' => count($ids)." orders were merged into order {$merged->order_number}.", 'data' => $merged]);
+    }
+
+    /**
+     * Open orders past the shipping deadline or close to it.
+     */
+    public function sla(Request $request, OrderControlService $controls): JsonResponse
+    {
+        $storeId = $request->validate(['store_id' => ['nullable', 'integer', $this->inOrganization($request, 'stores')]])['store_id'] ?? null;
+
+        return response()->json(['status' => 'success', 'data' => $controls->sla($request->user()->currentOrganization(), $storeId)]);
+    }
+
+    public function controlSettings(Request $request, OrderControlService $controls): JsonResponse
+    {
+        return response()->json(['status' => 'success', 'data' => $controls->settings($request->user()->currentOrganization())]);
+    }
+
+    /**
+     * Approval limit for high-value orders (empty for none) and the hours an order may take to ship.
+     */
+    public function updateControlSettings(Request $request, OrderControlService $controls): JsonResponse
+    {
+        $data = $request->validate([
+            'approval_threshold' => ['present', 'nullable', 'numeric', 'min:0.01', 'max:999999999'],
+            'sla_hours' => ['required', 'integer', 'min:1', 'max:720'],
+        ]);
+        $settings = ['approval_threshold' => $data['approval_threshold'] === null ? null : (float) $data['approval_threshold'], 'sla_hours' => (int) $data['sla_hours']];
+        $controls->saveSettings($request->user()->currentOrganization(), $settings);
+
+        return response()->json(['status' => 'success', 'message' => 'Order rules saved.', 'data' => $settings]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function holdState(Order $order): array
+    {
+        return [
+            'id' => $order->id,
+            'order_number' => $order->order_number,
+            'hold' => $order->hold_type === null ? null : ['type' => $order->hold_type, 'reason' => $order->hold_reason, 'at' => $order->held_at],
+        ];
+    }
+
+    /**
+     * One action on many orders (allocate, hold, release, cancel, set the company status); each order is reported.
+     */
+    public function bulk(Request $request, OrderBulkService $bulk, AccessControl $access): JsonResponse
+    {
+        $data = $request->validate([
+            'action' => ['required', Rule::in(array_keys(OrderBulkService::ACTIONS))],
+            'order_ids' => ['required', 'array', 'min:1', 'max:100'],
+            'order_ids.*' => ['integer', 'distinct', $this->inOrganization($request, 'orders')],
+            'reason' => ['required_if:action,hold', 'nullable', 'string', 'max:500'],
+            'custom_status' => ['nullable', 'string', 'max:40'],
+        ]);
+        abort_unless($access->allows($request->user(), OrderBulkService::ACTIONS[$data['action']]), 403, 'You do not have permission for this action.');
+
+        $result = $bulk->run($data['action'], Order::whereIn('id', $data['order_ids'])->orderBy('id')->get(), $request->user(), $data);
+        $message = count($result['done']).' order(s) done.'.($result['failed'] ? ' '.count($result['failed']).' could not be changed.' : '');
+
+        return response()->json(['status' => 'success', 'message' => $message, 'data' => $result]);
+    }
+
+    /**
+     * Create orders from a CSV file (one row per line, rows with the same order_ref make one order).
+     */
+    public function import(Request $request, OrderImportService $imports): JsonResponse
+    {
+        $data = $request->validate([
+            'file' => ['required', 'file', 'mimes:csv,txt', 'max:2048'],
+            'store_id' => ['nullable', 'integer', $this->inOrganization($request, 'stores')],
+        ]);
+        $numbers = $imports->import($data['file'], $request->user(), isset($data['store_id']) ? (int) $data['store_id'] : null);
+
+        return response()->json(['status' => 'success', 'message' => count($numbers).' orders were imported.', 'data' => $numbers], 201);
+    }
+
+    public function customStatuses(Request $request, OrderControlService $controls): JsonResponse
+    {
+        return response()->json(['status' => 'success', 'data' => $controls->customStatuses($request->user()->currentOrganization())]);
+    }
+
+    public function saveCustomStatuses(Request $request, OrderControlService $controls): JsonResponse
+    {
+        $statuses = $request->validate([
+            'statuses' => ['present', 'array', 'max:30'],
+            'statuses.*.key' => ['required', 'string', 'regex:/^[a-z][a-z0-9_]{1,39}$/', 'distinct'],
+            'statuses.*.label' => ['required', 'string', 'max:40'],
+            'statuses.*.color' => ['required', Rule::in(OrderControlService::STATUS_COLORS)],
+        ])['statuses'];
+        $statuses = array_map(fn (array $status) => ['key' => $status['key'], 'label' => $status['label'], 'color' => $status['color']], $statuses);
+        $controls->saveCustomStatuses($request->user()->currentOrganization(), $statuses);
+
+        return response()->json(['status' => 'success', 'message' => 'Order statuses saved.', 'data' => $statuses]);
+    }
+
+    public function setCustomStatus(Request $request, Order $order, OrderControlService $controls): JsonResponse
+    {
+        $this->ensureSameOrganization($request, $order);
+        $key = $request->validate(['custom_status' => ['present', 'nullable', 'string', 'max:40']])['custom_status'];
+        $controls->setCustomStatus($order, $key, $request->user());
+
+        return response()->json(['status' => 'success', 'message' => "Order {$order->order_number} updated.", 'data' => $order->only(['id', 'order_number', 'custom_status'])]);
+    }
+
+    /**
+     * Place this order again on a schedule.
+     */
+    public function repeat(Request $request, Order $order, RecurringOrderService $plans): JsonResponse
+    {
+        $this->ensureSameOrganization($request, $order);
+        $data = $request->validate([
+            'interval' => ['required', Rule::in(RecurringOrder::INTERVALS)],
+            'starts_on' => ['required', 'date', 'after_or_equal:today'],
+        ]);
+        $plan = $plans->repeat($order, $data['interval'], Carbon::parse($data['starts_on']), $request->user());
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Order {$order->order_number} will be placed again {$data['interval']}, starting {$plan->next_run_at->toFormattedDateString()}.",
+            'data' => [...$plan->toArray(), 'items' => $plan->template['items']],
+        ], 201);
     }
 
     private function ensureSameOrganization(Request $request, Order $order): void

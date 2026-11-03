@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Ban, CheckCircle2, ClipboardCheck, Eye, Loader2, PackageOpen, Plus, RotateCcw, Search, X } from 'lucide-react';
+import { Ban, CheckCircle2, ClipboardCheck, Eye, HandCoins, Loader2, PackageOpen, Plus, RotateCcw, Search, X } from 'lucide-react';
+import ReturnResolveModal from '../components/returns/ReturnResolveModal';
 import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import DataTable from '../components/common/DataTable';
@@ -74,6 +75,7 @@ export const ReturnsPage: React.FC = () => {
   const [inspectionNotes, setInspectionNotes] = useState('');
   const [rejecting, setRejecting] = useState<ReturnModel | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [resolving, setResolving] = useState<ReturnModel | null>(null);
 
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -268,6 +270,8 @@ export const ReturnsPage: React.FC = () => {
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
           <StatusPill status={row.status} label={STATUS_LABELS[row.status]} />
           {row.disposition && <span style={{ fontSize: 12, color: '#64748b', textTransform: 'capitalize' }}>{row.disposition}</span>}
+          {row.resolution === 'refund' && <span style={{ fontSize: 12, color: '#047857' }}>Refunded {row.currency} {row.refund_amount}</span>}
+          {row.resolution === 'replacement' && <span style={{ fontSize: 12, color: '#047857' }}>Replaced by {row.replacement_order?.order_number}</span>}
         </div>
       ),
     },
@@ -306,6 +310,12 @@ export const ReturnsPage: React.FC = () => {
             <button type="button" className="table-action-primary" onClick={() => handleReceive(row)} disabled={busyId === row.id}>
               {busyId === row.id ? <Loader2 size={14} className="animate-spin" /> : <PackageOpen size={14} />}
               <span>Receive</span>
+            </button>
+          )}
+          {row.status === 'completed' && !row.resolution && (
+            <button type="button" className="table-action-primary" onClick={() => setResolving(row)}>
+              <HandCoins size={14} />
+              <span>Settle</span>
             </button>
           )}
           {row.status === 'received' && (
@@ -540,6 +550,18 @@ export const ReturnsPage: React.FC = () => {
             </div>
           </form>
         </div>
+      )}
+
+      {resolving && (
+        <ReturnResolveModal
+          ret={resolving}
+          onClose={() => setResolving(null)}
+          onResolved={(message) => {
+            setResolving(null);
+            setBanner({ type: 'success', text: message });
+            fetchReturns();
+          }}
+        />
       )}
 
       {inspecting && (

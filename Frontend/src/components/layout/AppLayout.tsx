@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
+  Sparkles,
   Warehouse,
   Store as StoreIcon,
   FileText,
@@ -24,6 +25,8 @@ import {
   LogOut,
   Receipt,
   Smartphone,
+  LayoutTemplate,
+  Repeat,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
@@ -56,15 +59,19 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
     title: 'STORE MANAGEMENT',
     items: [
       { to: '/orders', label: 'Orders', icon: FileText, permission: 'orders.view' },
+      { to: '/recurring-orders', label: 'Recurring Orders', icon: Repeat, permission: 'orders.manage' },
       { to: '/products', label: 'Products', icon: Package, permission: 'products.view' },
       { to: '/inventory', label: 'Inventory Engine', icon: Boxes, permission: 'inventory.view' },
       { to: '/shipments', label: 'Shipments', icon: Truck, permission: 'shipments.view' },
       { to: '/picking', label: 'Picking', icon: CheckSquare, permission: 'picking.view' },
+      { to: '/work-board', label: 'Work Board', icon: Users, permission: 'picking.view' },
+      { to: '/assistant', label: 'Assistant', icon: Sparkles, permission: 'orders.view' },
       { to: '/mobile', label: 'Mobile Scanner', icon: Smartphone, permission: 'inventory.view' },
       { to: '/purchase-orders', label: 'Purchase Orders', icon: FileSpreadsheet, permission: 'purchasing.view' },
       { to: '/stock-movements', label: 'Stock Movements', icon: ArrowLeftRight, permission: 'inventory.view' },
       { to: '/returns', label: 'Returns', icon: RotateCcw, permission: 'returns.view' },
       { to: '/customers', label: 'Customers', icon: Users, permission: 'customers.view' },
+      { to: '/forms', label: 'Forms', icon: LayoutTemplate, permission: 'forms.submit' },
     ],
   },
   {

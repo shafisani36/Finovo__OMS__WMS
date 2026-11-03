@@ -14,6 +14,9 @@ use RuntimeException;
 
 class InventoryEngine
 {
+    /** Ledger movements that change on-hand stock (the ledger adds up to the balance). */
+    public const ON_HAND_MOVEMENTS = ['receipt', 'shipment', 'shipment_cancelled', 'return', 'adjustment', 'transfer_in', 'transfer_out'];
+
     /**
      * Get availability for a product variant at a warehouse.
      * Available = On-hand - Reserved - Damaged - Quarantined.
@@ -141,7 +144,8 @@ class InventoryEngine
     }
 
     /**
-     * Receive stock from PO, supplier or external inbound receipt.
+     * Receive stock from PO, supplier or external inbound receipt, with its unit purchase cost when known
+     * (the base of inventory valuation; without it the product's cost price is used).
      */
     public function receiveStock(
         int $organizationId,
@@ -154,7 +158,8 @@ class InventoryEngine
         string $condition = 'available',
         ?string $referenceDoc = null,
         ?int $userId = null,
-        ?string $idempotencyKey = null
+        ?string $idempotencyKey = null,
+        ?float $unitCost = null
     ): array {
         if ($quantity <= 0) {
             throw new InvalidArgumentException('Received quantity must be greater than zero.');
@@ -171,7 +176,8 @@ class InventoryEngine
             $condition,
             $referenceDoc,
             $userId,
-            $idempotencyKey
+            $idempotencyKey,
+            $unitCost
         ) {
             if ($idempotencyKey) {
                 $existing = InventoryLedgerEntry::where('organization_id', $organizationId)
@@ -218,6 +224,7 @@ class InventoryEngine
                 'product_variant_id' => $productVariantId,
                 'movement_type' => 'receipt',
                 'quantity' => $quantity,
+                'unit_cost' => $unitCost,
                 'balance_before' => $before,
                 'balance_after' => $balance->on_hand,
                 'reference_type' => 'Receipt',
@@ -800,7 +807,11 @@ class InventoryEngine
     }
 
     /**
-     * Deduct stock when shipped.
+     * Stock leaves the warehouse with a shipment: on hand and reserved go down, the units come out of the bins
+     * (the given bin, or the bins in pick order, FEFO) and the order's reservation is fulfilled. One ledger line is
+     * written per bin, so a cancelled dispatch can put the units back exactly where they came from.
+     *
+     * @param  string|null  $referenceNumber  the shipment's reference (default SHP-{order ID})
      */
     public function deductShipped(
         int $organizationId,
@@ -809,48 +820,128 @@ class InventoryEngine
         int $quantity,
         int $orderId,
         ?int $userId = null,
-        ?int $locationId = null
+        ?int $locationId = null,
+        ?string $referenceNumber = null,
     ): void {
-        DB::transaction(function () use ($organizationId, $warehouseId, $productVariantId, $quantity, $orderId, $userId, $locationId) {
+        DB::transaction(function () use ($organizationId, $warehouseId, $productVariantId, $quantity, $orderId, $userId, $locationId, $referenceNumber) {
             $balance = $this->lockBalance($organizationId, $warehouseId, $productVariantId);
 
             $before = $balance->on_hand;
             $balance->on_hand = max(0, $balance->on_hand - $quantity);
             $balance->reserved = max(0, $balance->reserved - $quantity);
-            $balance->available = max(0, $balance->on_hand - $balance->reserved - $balance->damaged - ($balance->quarantined ?? 0));
-            $balance->save();
+            $this->refreshAvailable($balance);
 
-            // The bins lose the units too: the given bin, or else the bins in pick order (FEFO).
-            $this->takeFromBins($organizationId, $warehouseId, $productVariantId, $quantity, $locationId);
-
-            // Mark active reservation as fulfilled
-            $reservation = InventoryReservation::where('organization_id', $organizationId)
+            InventoryReservation::where('organization_id', $organizationId)
                 ->where('order_id', $orderId)
                 ->where('product_variant_id', $productVariantId)
                 ->where('status', 'active')
-                ->first();
+                ->update(['status' => 'fulfilled']);
 
-            if ($reservation) {
-                $reservation->status = 'fulfilled';
-                $reservation->save();
+            $taken = $this->takeFromBins($organizationId, $warehouseId, $productVariantId, $quantity, $locationId);
+            // Units the bins did not hold (stock never put away) leave without a bin.
+            $unplaced = $quantity - array_sum(array_column($taken, 'quantity'));
+            if ($unplaced > 0) {
+                $taken[] = ['location_id' => null, 'lot_number' => null, 'expiry_date' => null, 'quantity' => $unplaced];
             }
 
-            InventoryLedgerEntry::create([
-                'organization_id' => $organizationId,
-                'warehouse_id' => $warehouseId,
-                'warehouse_location_id' => $locationId,
-                'product_variant_id' => $productVariantId,
-                'movement_type' => 'shipment',
-                'quantity' => -$quantity,
-                'balance_before' => $before,
-                'balance_after' => $balance->on_hand,
-                'reference_type' => 'Order',
-                'reference_id' => $orderId,
-                'reference_number' => 'SHP-'.$orderId,
-                'reason' => "Shipped $quantity units for Order #$orderId",
-                'user_id' => $userId,
-            ]);
+            foreach ($taken as $part) {
+                $after = $before - $part['quantity'];
+                InventoryLedgerEntry::create([
+                    'organization_id' => $organizationId,
+                    'warehouse_id' => $warehouseId,
+                    'warehouse_location_id' => $part['location_id'],
+                    'product_variant_id' => $productVariantId,
+                    'lot_number' => $part['lot_number'],
+                    'expiry_date' => $part['expiry_date'],
+                    'movement_type' => 'shipment',
+                    'quantity' => -$part['quantity'],
+                    'balance_before' => $before,
+                    'balance_after' => max(0, $after),
+                    'reference_type' => 'Order',
+                    'reference_id' => $orderId,
+                    'reference_number' => $referenceNumber ?? 'SHP-'.$orderId,
+                    'reason' => "Shipped {$part['quantity']} units for Order #{$orderId}",
+                    'user_id' => $userId,
+                ]);
+                $before = max(0, $after);
+            }
         });
+    }
+
+    /**
+     * Undo a shipment that never left (its dispatch was cancelled): the units go back on hand, into the bins they
+     * were taken from, and are reserved for the order again. Returns the units put back per variant.
+     *
+     * @return array<int, int> units by product variant ID
+     */
+    public function restoreShipped(int $organizationId, int $orderId, string $referenceNumber, ?int $userId = null): array
+    {
+        return DB::transaction(function () use ($organizationId, $orderId, $referenceNumber, $userId) {
+            $entries = InventoryLedgerEntry::where('organization_id', $organizationId)
+                ->where('movement_type', 'shipment')
+                ->where('reference_number', $referenceNumber)
+                ->lockForUpdate()
+                ->get();
+            $restored = [];
+
+            foreach ($entries->groupBy(fn (InventoryLedgerEntry $entry) => $entry->warehouse_id.'-'.$entry->product_variant_id) as $parts) {
+                $first = $parts->first();
+                $units = (int) -$parts->sum('quantity');
+                $balance = $this->lockBalance($organizationId, $first->warehouse_id, $first->product_variant_id);
+                $before = $balance->on_hand;
+                $balance->on_hand += $units;
+                $balance->reserved += $units;
+                $this->refreshAvailable($balance);
+
+                InventoryReservation::where('organization_id', $organizationId)
+                    ->where('order_id', $orderId)
+                    ->where('product_variant_id', $first->product_variant_id)
+                    ->where('status', 'fulfilled')
+                    ->update(['status' => 'active']);
+
+                foreach ($parts as $part) {
+                    $quantity = (int) -$part->quantity;
+                    if ($part->warehouse_location_id) {
+                        $bin = $this->lockLocationBalance($organizationId, $part->warehouse_id, $part->warehouse_location_id, $part->product_variant_id, $part->lot_number);
+                        $bin->quantity += $quantity;
+                        $bin->expiry_date ??= $part->expiry_date;
+                        $bin->save();
+                    }
+
+                    InventoryLedgerEntry::create([
+                        'organization_id' => $organizationId,
+                        'warehouse_id' => $part->warehouse_id,
+                        'warehouse_location_id' => $part->warehouse_location_id,
+                        'product_variant_id' => $part->product_variant_id,
+                        'lot_number' => $part->lot_number,
+                        'expiry_date' => $part->expiry_date,
+                        'movement_type' => 'shipment_cancelled',
+                        'quantity' => $quantity,
+                        'balance_before' => $before,
+                        'balance_after' => $before + $quantity,
+                        'reference_type' => 'Order',
+                        'reference_id' => $orderId,
+                        'reference_number' => $referenceNumber,
+                        'reason' => "Dispatch cancelled: {$quantity} units back for Order #{$orderId}",
+                        'user_id' => $userId,
+                    ]);
+                    $before += $quantity;
+                }
+
+                $restored[$first->product_variant_id] = ($restored[$first->product_variant_id] ?? 0) + $units;
+            }
+
+            return $restored;
+        });
+    }
+
+    /**
+     * Available = on hand − reserved − damaged − quarantined, never below zero; saves the balance.
+     */
+    private function refreshAvailable(InventoryBalance $balance): void
+    {
+        $balance->available = max(0, $balance->on_hand - $balance->reserved - $balance->damaged - ($balance->quarantined ?? 0));
+        $balance->save();
     }
 
     /**
@@ -1011,11 +1102,10 @@ class InventoryEngine
         $discrepancies = [];
 
         foreach ($balances as $b) {
-            // Calculate sum of movements that affect on-hand (receipt, shipment, adjustment, transfer_in, transfer_out)
             $ledgerNet = (int) InventoryLedgerEntry::where('organization_id', $organizationId)
                 ->where('warehouse_id', $b->warehouse_id)
                 ->where('product_variant_id', $b->product_variant_id)
-                ->whereIn('movement_type', ['receipt', 'shipment', 'adjustment', 'transfer_in', 'transfer_out'])
+                ->whereIn('movement_type', self::ON_HAND_MOVEMENTS)
                 ->sum('quantity');
 
             $onHand = (int) $b->on_hand;
@@ -1045,8 +1135,10 @@ class InventoryEngine
     /**
      * Take shipped units out of the bins: from the given bin, or across the bins in FEFO order (the order the
      * picker is sent in), so bin stock keeps matching the shelves.
+     *
+     * @return list<array{location_id: int, lot_number: string|null, expiry_date: mixed, quantity: int}> what came out of each bin
      */
-    private function takeFromBins(int $organizationId, int $warehouseId, int $productVariantId, int $quantity, ?int $locationId): void
+    private function takeFromBins(int $organizationId, int $warehouseId, int $productVariantId, int $quantity, ?int $locationId): array
     {
         $bins = InventoryLocationBalance::where('organization_id', $organizationId)
             ->when(
@@ -1056,14 +1148,21 @@ class InventoryEngine
             )
             ->lockForUpdate()
             ->get();
+        $taken = [];
 
         foreach ($bins as $bin) {
             if ($quantity <= 0) {
                 break;
             }
-            $taken = min($quantity, (int) $bin->quantity);
-            $bin->decrement('quantity', $taken);
-            $quantity -= $taken;
+            $units = min($quantity, (int) $bin->quantity);
+            if ($units <= 0) {
+                continue;
+            }
+            $bin->decrement('quantity', $units);
+            $quantity -= $units;
+            $taken[] = ['location_id' => $bin->warehouse_location_id, 'lot_number' => $bin->lot_number, 'expiry_date' => $bin->expiry_date, 'quantity' => $units];
         }
+
+        return $taken;
     }
 }

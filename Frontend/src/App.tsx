@@ -11,6 +11,14 @@ import { DashboardPage } from './pages/DashboardPage';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
 import { StoresPage } from './pages/StoresPage';
 import { PickingPage } from './pages/PickingPage';
+import { WorkBoardPage } from './pages/WorkBoardPage';
+import { FormsPage } from './pages/FormsPage';
+import { RecurringOrdersPage } from './pages/RecurringOrdersPage';
+import { TrackOrderPage } from './pages/TrackOrderPage';
+import { FormBuilderPage } from './pages/FormBuilderPage';
+import { ClientPortalPage } from './pages/ClientPortalPage';
+import { AssistantPage } from './pages/AssistantPage';
+import { SsoCallbackPage } from './pages/SsoCallbackPage';
 import { StockMovementsPage } from './pages/StockMovementsPage';
 import { WarehousesPage } from './pages/WarehousesPage';
 import { WarehouseCreatePage } from './pages/WarehouseCreatePage';
@@ -34,7 +42,7 @@ import type { Permission } from './types/auth';
 import { Loader2 } from 'lucide-react';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { user, isAuthenticated, isLoading } = useAuth();
   const location = useLocation();
 
   if (isLoading) {
@@ -60,6 +68,11 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // 3PL client accounts only have the client portal, whatever address they open.
+  if (user?.role === 'client') {
+    return <ClientPortalPage />;
   }
 
   return <>{children}</>;
@@ -108,6 +121,9 @@ export const App: React.FC = () => {
               </PublicOnlyRoute>
             }
           />
+          <Route path="/sso/callback" element={<SsoCallbackPage />} />
+          {/* Customer self-service: open to everyone, signed in or not */}
+          <Route path="/track" element={<TrackOrderPage />} />
           <Route
             path="/reset-password"
             element={
@@ -148,11 +164,16 @@ export const App: React.FC = () => {
             <Route path="/warehouses/create" element={<RequirePermission permission="warehouses.manage"><WarehouseCreatePage /></RequirePermission>} />
             <Route path="/warehouses/:id" element={<RequirePermission permission="warehouses.view"><WarehouseDetailPage /></RequirePermission>} />
             <Route path="/orders" element={<RequirePermission permission="orders.view"><OrdersPage /></RequirePermission>} />
+            <Route path="/recurring-orders" element={<RequirePermission permission="orders.manage"><RecurringOrdersPage /></RequirePermission>} />
             <Route path="/products" element={<RequirePermission permission="products.view"><ProductsPage /></RequirePermission>} />
             <Route path="/products/:id" element={<RequirePermission permission="products.view"><ProductDetailPage /></RequirePermission>} />
             <Route path="/inventory" element={<RequirePermission permission="inventory.view"><InventoryPage /></RequirePermission>} />
             <Route path="/shipments" element={<RequirePermission permission="shipments.view"><ShipmentsPage /></RequirePermission>} />
             <Route path="/picking" element={<RequirePermission permission="picking.view"><PickingPage /></RequirePermission>} />
+            <Route path="/work-board" element={<RequirePermission permission="picking.view"><WorkBoardPage /></RequirePermission>} />
+            <Route path="/forms" element={<RequirePermission permission="forms.submit"><FormsPage /></RequirePermission>} />
+            <Route path="/forms/:uuid" element={<RequirePermission permission="forms.submit"><FormBuilderPage /></RequirePermission>} />
+            <Route path="/assistant" element={<RequirePermission permission="orders.view"><AssistantPage /></RequirePermission>} />
             <Route path="/purchase-orders" element={<RequirePermission permission="purchasing.view"><PurchaseOrdersPage /></RequirePermission>} />
             <Route path="/purchase-requisitions" element={<RequirePermission permission="purchasing.view"><PurchaseOrdersPage /></RequirePermission>} />
             <Route path="/goods-received-notes" element={<RequirePermission permission="purchasing.view"><PurchaseOrdersPage /></RequirePermission>} />

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\InventoryBalance;
+use App\Models\InventoryLedgerEntry;
 use App\Models\Organization;
 use App\Models\Product;
 use App\Models\ProductVariant;
@@ -198,6 +199,7 @@ class EnterpriseInventoryEngineTest extends TestCase
         ]);
 
         $confirmResponse->assertStatus(200);
+        $this->assertEquals(24.5, (float) InventoryLedgerEntry::where('movement_type', 'receipt')->where('product_variant_id', $this->variant->id)->value('unit_cost'));
 
         // Assert warehouse balance
         $avail = $this->inventoryEngine->getAvailability($this->orgA->id, $this->warehouse1->id, $this->variant->id);

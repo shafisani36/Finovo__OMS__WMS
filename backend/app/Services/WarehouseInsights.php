@@ -26,7 +26,7 @@ class WarehouseInsights
     public const ACTIVITY_TYPES = ['all', 'stock', 'orders', 'setup'];
 
     /** Ledger movements that belong to customer orders rather than stock handling. */
-    private const ORDER_MOVEMENTS = ['reservation', 'release', 'shipment'];
+    private const ORDER_MOVEMENTS = ['reservation', 'release', 'shipment', 'shipment_cancelled'];
 
     /**
      * @return array<string, mixed>
@@ -293,6 +293,7 @@ class WarehouseInsights
             'reservation' => "Reserved {$units} of {$item}".($order ? " for order {$order}" : $reference),
             'release' => "Released {$units} of {$item} back to stock".($order ? " from order {$order}" : $reference),
             'shipment' => "Shipped {$units} of {$item}".($order ? " for order {$order}" : $reference),
+            'shipment_cancelled' => "Dispatch cancelled: {$units} of {$item} back".($bin ? " in {$bin}" : '').($order ? " for order {$order}" : $reference),
             'transfer_out' => "Sent {$units} of {$item} to another warehouse{$reference}",
             'transfer_in' => "Received {$units} of {$item} by transfer{$reference}",
             'return' => "Returned {$units} of {$item} to stock{$reference}",

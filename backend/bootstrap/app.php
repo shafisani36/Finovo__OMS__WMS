@@ -1,7 +1,10 @@
 <?php
 
+use App\Http\Middleware\EnsureClientPortal;
 use App\Http\Middleware\EnsureUserPermission;
 use App\Http\Middleware\EnsureUserRole;
+use App\Http\Middleware\Idempotent;
+use App\Http\Middleware\SecurityHeaders;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -21,9 +24,12 @@ return Application::configure(basePath: dirname(__DIR__))
             'api/*',
         ]);
         $middleware->statefulApi();
+        $middleware->api(append: [SecurityHeaders::class]);
         $middleware->alias([
             'role' => EnsureUserRole::class,
             'permission' => EnsureUserPermission::class,
+            'idempotent' => Idempotent::class,
+            'client_portal' => EnsureClientPortal::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -9,16 +9,21 @@ use App\Models\InventoryLocationBalance;
 use App\Models\InventoryReservation;
 use App\Models\Product;
 use App\Models\ProductVariant;
+use App\Models\SkuMapping;
 use App\Models\Warehouse;
 use App\Services\AccessControl;
 use App\Services\InventoryEngine;
+use App\Services\InventoryValuationService;
+use App\Services\StockAgingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class InventoryController extends Controller
 {
     public function __construct(
-        protected InventoryEngine $inventoryEngine
+        protected InventoryEngine $inventoryEngine,
+        protected InventoryValuationService $valuations
     ) {}
 
     /**
@@ -165,16 +170,12 @@ class InventoryController extends Controller
 
         $lowStockCount = 0;
         $outOfStockCount = 0;
-        $totalValuation = 0.0;
 
         foreach ($balances as $b) {
             if ($b->available <= 0) {
                 $outOfStockCount++;
             } elseif ($b->available <= 10) {
                 $lowStockCount++;
-            }
-            if ($b->variant) {
-                $totalValuation += $b->on_hand * (float) $b->variant->cost_price;
             }
         }
 
@@ -190,7 +191,8 @@ class InventoryController extends Controller
                 'total_in_transit' => $totalInTransit,
                 'low_stock_count' => $lowStockCount,
                 'out_of_stock_count' => $outOfStockCount,
-                'total_valuation' => round($totalValuation, 2),
+                // Stock on hand now, valued with the company's method (FIFO, LIFO or AVCO).
+                'total_valuation' => $this->valuations->report($org->id, $this->valuations->method($org), 'perpetual', now(), now(), ...$this->stockScope($request))['totals']['closing_value'],
             ],
         ]);
     }
@@ -299,6 +301,85 @@ class InventoryController extends Controller
                 'active_reservations' => $reservations,
             ],
         ]);
+    }
+
+    /**
+     * Inventory value for the last 1, 3, 6 or 12 months: opening stock, received, cost of goods sold and closing stock
+     * per product, with the company's method (or ?method=fifo|lifo|avco), perpetual or periodic (?mode=).
+     */
+    public function valuation(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'method' => ['nullable', Rule::in(InventoryValuationService::METHODS)],
+            'mode' => ['nullable', Rule::in(InventoryValuationService::MODES)],
+            'months' => ['nullable', 'integer', Rule::in(InventoryValuationService::PERIOD_MONTHS)],
+            'warehouse_id' => ['nullable', 'integer', $this->accessibleWarehouse($request)],
+            'store_id' => ['nullable', 'integer', $this->inOrganization($request, 'stores')],
+        ]);
+
+        $org = $request->user()->currentOrganization();
+        $method = $validated['method'] ?? $this->valuations->method($org);
+        $mode = $validated['mode'] ?? 'perpetual';
+        $to = now();
+        $from = now()->subMonths((int) ($validated['months'] ?? 1))->startOfDay();
+
+        return response()->json([
+            'status' => 'success',
+            'method' => $method,
+            'mode' => $mode,
+            'from' => $from->toDateString(),
+            'to' => $to->toDateString(),
+            ...$this->valuations->report($org->id, $method, $mode, $from, $to, ...$this->stockScope($request)),
+        ]);
+    }
+
+    /**
+     * Stock aging: units on hand by age (0-30, 31-60, 61-90, over 90 days), last sale and how fast each product moves
+     * (?movement=fast|slow|non_moving).
+     */
+    public function aging(Request $request, StockAgingService $aging): JsonResponse
+    {
+        $validated = $request->validate([
+            'warehouse_id' => ['nullable', 'integer', $this->accessibleWarehouse($request)],
+            'store_id' => ['nullable', 'integer', $this->inOrganization($request, 'stores')],
+            'movement' => ['nullable', Rule::in(StockAgingService::MOVEMENTS)],
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            ...$aging->report($request->user()->currentOrganization()->id, ...$this->stockScope($request), movement: $validated['movement'] ?? null),
+        ]);
+    }
+
+    /**
+     * The company's inventory valuation method, used for the inventory value everywhere.
+     */
+    public function updateValuationMethod(Request $request): JsonResponse
+    {
+        $method = $request->validate(['method' => ['required', Rule::in(InventoryValuationService::METHODS)]])['method'];
+        $this->valuations->setMethod($request->user()->currentOrganization(), $method);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Inventory is now valued with '.strtoupper($method).'.',
+            'method' => $method,
+        ]);
+    }
+
+    /**
+     * The warehouses (the one asked for, else the user's) and products (of ?store_id=) a stock report covers.
+     *
+     * @return array{0: list<int>|null, 1: list<int>|null}
+     */
+    private function stockScope(Request $request): array
+    {
+        $warehouseId = $request->integer('warehouse_id');
+        $storeId = $request->integer('store_id');
+
+        return [
+            $warehouseId ? [$warehouseId] : app(AccessControl::class)->warehouseIds($request->user()),
+            $storeId ? SkuMapping::where('store_id', $storeId)->distinct()->pluck('product_variant_id')->map(fn ($id) => (int) $id)->all() : null,
+        ];
     }
 
     /**

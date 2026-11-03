@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\V1\AiController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BarcodeController;
 use App\Http\Controllers\Api\V1\ClientController;
@@ -9,6 +10,7 @@ use App\Http\Controllers\Api\V1\CustomBridgeWebhookController;
 use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\CycleCountController;
 use App\Http\Controllers\Api\V1\EmployeeController;
+use App\Http\Controllers\Api\V1\FormController;
 use App\Http\Controllers\Api\V1\GoodsReceivedNoteController;
 use App\Http\Controllers\Api\V1\InventoryController;
 use App\Http\Controllers\Api\V1\InventoryReceiptController;
@@ -19,18 +21,23 @@ use App\Http\Controllers\Api\V1\OrderController;
 use App\Http\Controllers\Api\V1\PasswordChangeController;
 use App\Http\Controllers\Api\V1\PasswordRecoveryController;
 use App\Http\Controllers\Api\V1\PickingController;
+use App\Http\Controllers\Api\V1\PortalController;
 use App\Http\Controllers\Api\V1\ProductController;
+use App\Http\Controllers\Api\V1\PublicOrderController;
 use App\Http\Controllers\Api\V1\PurchaseOrderController;
 use App\Http\Controllers\Api\V1\PurchaseRequisitionController;
+use App\Http\Controllers\Api\V1\RecurringOrderController;
 use App\Http\Controllers\Api\V1\ReplenishmentController;
 use App\Http\Controllers\Api\V1\ReturnController;
 use App\Http\Controllers\Api\V1\ShipmentController;
+use App\Http\Controllers\Api\V1\SingleSignOnController;
 use App\Http\Controllers\Api\V1\StockAdjustmentController;
 use App\Http\Controllers\Api\V1\StockMovementController;
 use App\Http\Controllers\Api\V1\StoreAuthorizationController;
 use App\Http\Controllers\Api\V1\StoreController;
 use App\Http\Controllers\Api\V1\StoreWebhookController;
 use App\Http\Controllers\Api\V1\WarehouseController;
+use App\Services\SingleSignOnService;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -49,6 +56,13 @@ Route::prefix('v1')->group(function () {
         Route::post('password/verify-reset-otp', [PasswordRecoveryController::class, 'verifyResetOtp'])->middleware('throttle:otp-verify');
         Route::post('password/reset', [PasswordRecoveryController::class, 'resetPassword'])->middleware('throttle:login');
 
+        // Single sign-on (Microsoft, company identity provider)
+        Route::prefix('sso')->middleware('throttle:30,1')->group(function () {
+            Route::get('providers', [SingleSignOnController::class, 'providers']);
+            Route::get('{provider}/redirect', [SingleSignOnController::class, 'redirect'])->whereIn('provider', SingleSignOnService::PROVIDERS);
+            Route::get('{provider}/callback', [SingleSignOnController::class, 'callback'])->whereIn('provider', SingleSignOnService::PROVIDERS)->name('auth.sso.callback');
+        });
+
         // Protected Auth Routes
         Route::middleware('auth:sanctum')->group(function () {
             Route::get('me', [AuthController::class, 'me']);
@@ -58,7 +72,7 @@ Route::prefix('v1')->group(function () {
     });
 
     // Custom Bridge Inbound Webhook Endpoints (Protected by HMAC-SHA256 signature verification)
-    Route::prefix('bridge')->group(function () {
+    Route::prefix('bridge')->middleware('throttle:120,1')->group(function () {
         Route::post('orders', [CustomBridgeWebhookController::class, 'orderWebhook']);
         Route::get('health', [CustomBridgeWebhookController::class, 'health']);
     });
@@ -85,10 +99,24 @@ Route::prefix('v1')->group(function () {
         Route::get('ebay/callback', [StoreAuthorizationController::class, 'ebayCallback'])->name('ebay.callback');
     });
 
+    // Customer self-service: an order is opened with its number and the email it was placed with
+    Route::prefix('public/orders')->middleware('throttle:10,1')->group(function () {
+        Route::post('track', [PublicOrderController::class, 'track']);
+        Route::post('cancel-request', [PublicOrderController::class, 'requestCancellation']);
+        Route::post('return-request', [PublicOrderController::class, 'requestReturn']);
+    });
+
     // Authenticated OMS / WMS Enterprise Core Routes.
     // Every action names the permission it needs (App\Enums\Permission); which warehouse or record the
     // request touches is checked again in the controllers (App\Services\AccessControl).
-    Route::middleware('auth:sanctum')->group(function () {
+    // 3PL client portal: a client's own user sees the stock, orders and shipments of their stores (read only).
+    Route::prefix('portal')->middleware(['auth:sanctum', 'throttle:api', 'client_portal:client'])->group(function () {
+        Route::get('stock', [PortalController::class, 'stock']);
+        Route::get('orders', [PortalController::class, 'orders']);
+        Route::get('activity', [PortalController::class, 'activity']);
+    });
+
+    Route::middleware(['auth:sanctum', 'throttle:api', 'client_portal:staff'])->group(function () {
         // Stores & Channels (the list feeds the store switcher, so any employee can read it)
         Route::get('stores', [StoreController::class, 'index']);
         Route::get('stores/{store}', [StoreController::class, 'show']);
@@ -116,7 +144,7 @@ Route::prefix('v1')->group(function () {
             Route::get('warehouses/{warehouse}/slotting', [WarehouseController::class, 'slotting']);
             Route::get('warehouses/{warehouse}/putaway-suggestion', [WarehouseController::class, 'putawaySuggestion']);
         });
-        Route::post('warehouses/{warehouse}/move-stock', [WarehouseController::class, 'moveStock'])->middleware('permission:inventory.transfer');
+        Route::post('warehouses/{warehouse}/move-stock', [WarehouseController::class, 'moveStock'])->middleware(['permission:inventory.transfer', 'idempotent']);
         Route::middleware('permission:warehouses.manage')->group(function () {
             Route::put('warehouses/{warehouse}', [WarehouseController::class, 'update']);
             Route::put('warehouses/{warehouse}/stores', [WarehouseController::class, 'updateStores']);
@@ -147,11 +175,14 @@ Route::prefix('v1')->group(function () {
             Route::middleware('permission:inventory.view')->group(function () {
                 Route::get('/', [InventoryController::class, 'index']);
                 Route::get('kpis', [InventoryController::class, 'kpis']);
+                Route::get('valuation', [InventoryController::class, 'valuation']);
+                Route::get('aging', [InventoryController::class, 'aging']);
                 Route::get('sku/{variantId}', [InventoryController::class, 'skuDetail']);
                 Route::get('receipts', [InventoryReceiptController::class, 'index']);
                 Route::get('transfers', [InventoryTransferController::class, 'index']);
                 Route::get('adjustments', [StockAdjustmentController::class, 'index']);
                 Route::get('cycle-counts', [CycleCountController::class, 'index']);
+                Route::get('cycle-count-schedules', [CycleCountController::class, 'schedules']);
                 Route::get('replenishment/rules', [ReplenishmentController::class, 'rules']);
                 Route::get('replenishment/recommendations', [ReplenishmentController::class, 'recommendations']);
                 Route::get('replenishment/alerts', [ReplenishmentController::class, 'alerts']);
@@ -162,8 +193,8 @@ Route::prefix('v1')->group(function () {
 
             Route::middleware('permission:inventory.receive')->group(function () {
                 Route::post('receipts', [InventoryReceiptController::class, 'store']);
-                Route::post('receipts/{receiptId}/confirm', [InventoryReceiptController::class, 'confirm']);
-                Route::post('receipts/{receiptId}/putaway', [InventoryReceiptController::class, 'putaway']);
+                Route::post('receipts/{receiptId}/confirm', [InventoryReceiptController::class, 'confirm'])->middleware('idempotent');
+                Route::post('receipts/{receiptId}/putaway', [InventoryReceiptController::class, 'putaway'])->middleware('idempotent');
             });
 
             Route::middleware('permission:inventory.transfer')->group(function () {
@@ -174,9 +205,12 @@ Route::prefix('v1')->group(function () {
 
             Route::middleware('permission:inventory.adjust')->group(function () {
                 Route::post('reconcile', [InventoryController::class, 'reconcile']);
+                Route::put('valuation/method', [InventoryController::class, 'updateValuationMethod']);
                 Route::post('adjustments', [StockAdjustmentController::class, 'store']);
                 Route::post('cycle-counts', [CycleCountController::class, 'store']);
-                Route::put('cycle-counts/{countId}/record-counts', [CycleCountController::class, 'recordCounts']);
+                Route::post('cycle-count-schedules', [CycleCountController::class, 'storeSchedule']);
+                Route::delete('cycle-count-schedules/{id}', [CycleCountController::class, 'destroySchedule'])->whereNumber('id');
+                Route::put('cycle-counts/{countId}/record-counts', [CycleCountController::class, 'recordCounts'])->middleware('idempotent');
                 Route::post('replenishment/rules', [ReplenishmentController::class, 'saveRule']);
                 Route::post('legacy-adjustments', [StockMovementController::class, 'adjust']);
             });
@@ -218,11 +252,33 @@ Route::prefix('v1')->group(function () {
         // Orders & Lifecycle
         Route::middleware('permission:orders.view')->group(function () {
             Route::get('orders', [OrderController::class, 'index']);
+            Route::get('orders/sla', [OrderController::class, 'sla']);
+            Route::get('orders/statuses', [OrderController::class, 'customStatuses']);
+            // Each action checks its own permission.
+            Route::post('orders/bulk', [OrderController::class, 'bulk']);
+            Route::get('orders/settings', [OrderController::class, 'controlSettings']);
+            Route::get('orders/{order}/timeline', [OrderController::class, 'timeline']);
             Route::get('orders/{order}', [OrderController::class, 'show']);
             Route::get('orders/{order}/invoice', [OrderController::class, 'invoice']);
             Route::get('orders/{order}/fulfillment', [OrderController::class, 'fulfillment']);
         });
         Route::post('orders', [OrderController::class, 'store'])->middleware('permission:orders.manage');
+        Route::middleware('permission:orders.manage')->group(function () {
+            Route::put('orders/settings', [OrderController::class, 'updateControlSettings']);
+            Route::put('orders/statuses', [OrderController::class, 'saveCustomStatuses']);
+            Route::post('orders/import', [OrderController::class, 'import']);
+            Route::put('orders/{order}/custom-status', [OrderController::class, 'setCustomStatus']);
+            Route::post('orders/{order}/repeat', [OrderController::class, 'repeat']);
+            Route::get('recurring-orders', [RecurringOrderController::class, 'index']);
+            Route::put('recurring-orders/{recurringOrder}', [RecurringOrderController::class, 'update']);
+            Route::delete('recurring-orders/{recurringOrder}', [RecurringOrderController::class, 'destroy']);
+            Route::post('recurring-orders/{recurringOrder}/run', [RecurringOrderController::class, 'run']);
+            Route::post('orders/merge', [OrderController::class, 'merge']);
+            Route::post('orders/{order}/split', [OrderController::class, 'split']);
+            Route::post('orders/{order}/hold', [OrderController::class, 'hold']);
+            Route::post('orders/{order}/release', [OrderController::class, 'release']);
+            Route::put('customers/{customer}/credit-limit', [CustomerController::class, 'updateCreditLimit']);
+        });
         Route::put('orders/{order}', [OrderController::class, 'update'])->middleware('permission:orders.manage');
         Route::delete('orders/{order}', [OrderController::class, 'destroy'])->middleware('permission:orders.delete');
         Route::post('orders/{order}/allocate', [OrderController::class, 'allocate'])->middleware('permission:orders.allocate');
@@ -236,21 +292,33 @@ Route::prefix('v1')->group(function () {
             Route::get('picking/waves/{pickWave}', [PickingController::class, 'showWave']);
             Route::get('picking/{pickTask}/lines', [PickingController::class, 'lines']);
         });
+        Route::put('picking/{pickTask}/assign', [PickingController::class, 'assign'])->middleware('permission:warehouse.employees.assign');
         Route::middleware('permission:picking.update')->group(function () {
             Route::put('picking/{pickTask}/status', [PickingController::class, 'updateStatus']);
             Route::post('picking/{pickTask}/complete', [PickingController::class, 'complete']);
             Route::post('picking/bulk-update', [PickingController::class, 'bulkUpdate']);
-            Route::post('picking/{pickTask}/scan', [PickingController::class, 'scan']);
+            Route::post('picking/{pickTask}/scan', [PickingController::class, 'scan'])->middleware('idempotent');
             Route::post('picking/waves', [PickingController::class, 'storeWave']);
-            Route::post('picking/waves/{pickWave}/scan', [PickingController::class, 'scanWave']);
+            Route::post('picking/waves/{pickWave}/scan', [PickingController::class, 'scanWave'])->middleware('idempotent');
             Route::delete('picking/waves/{pickWave}', [PickingController::class, 'cancelWave']);
         });
 
         // Shipments (packed orders are dispatched from here)
-        Route::get('shipments', [ShipmentController::class, 'index'])->middleware('permission:shipments.view');
-        Route::get('shipments/couriers', [ShipmentController::class, 'couriers'])->middleware('permission:shipments.view');
-        Route::get('shipments/{id}/label', [ShipmentController::class, 'label'])->middleware('permission:shipments.view');
-        Route::post('shipments/track', [ShipmentController::class, 'track'])->middleware('permission:shipments.dispatch');
+        Route::middleware('permission:shipments.view')->group(function () {
+            Route::get('shipments', [ShipmentController::class, 'index']);
+            Route::get('shipments/couriers', [ShipmentController::class, 'couriers']);
+            Route::post('shipments/labels', [ShipmentController::class, 'labels']);
+            Route::post('shipments/load-sheet', [ShipmentController::class, 'loadSheet']);
+            Route::get('shipments/{id}', [ShipmentController::class, 'show'])->whereNumber('id');
+            Route::get('shipments/{id}/label', [ShipmentController::class, 'label'])->whereNumber('id');
+        });
+        Route::middleware('permission:shipments.dispatch')->group(function () {
+            Route::post('shipments/track', [ShipmentController::class, 'track']);
+            Route::post('shipments/dispatch', [ShipmentController::class, 'dispatchMany']);
+            Route::post('shipments/{id}/dispatch', [ShipmentController::class, 'dispatch'])->whereNumber('id');
+            Route::post('shipments/{id}/cancel-dispatch', [ShipmentController::class, 'cancelDispatch'])->whereNumber('id');
+            Route::post('shipments/{id}/deliver', [ShipmentController::class, 'deliver'])->whereNumber('id');
+        });
 
         // Courier accounts (Leopards, PostEx, TCS, Trax)
         Route::middleware('permission:couriers.manage')->group(function () {
@@ -260,8 +328,6 @@ Route::prefix('v1')->group(function () {
             Route::delete('courier-accounts/{courierAccount}', [CourierAccountController::class, 'destroy']);
             Route::post('courier-accounts/{courierAccount}/test', [CourierAccountController::class, 'test']);
         });
-        Route::post('shipments/{id}/dispatch', [ShipmentController::class, 'dispatch'])->middleware('permission:shipments.dispatch');
-        Route::post('shipments/{id}/deliver', [ShipmentController::class, 'deliver'])->middleware('permission:shipments.dispatch');
 
         // Barcodes (label settings and scanning)
         Route::get('barcode/settings', [BarcodeController::class, 'settings']);
@@ -284,6 +350,7 @@ Route::prefix('v1')->group(function () {
                 Route::post('{id}/receive', [ReturnController::class, 'receive']);
                 Route::post('{id}/complete', [ReturnController::class, 'complete']);
                 Route::post('{id}/reject', [ReturnController::class, 'reject']);
+                Route::post('{id}/resolve', [ReturnController::class, 'resolve']);
             });
         });
 
@@ -339,6 +406,26 @@ Route::prefix('v1')->group(function () {
             Route::put('{id}/permissions', [EmployeeController::class, 'updatePermissions'])->middleware('permission:employees.manage_permissions');
         });
 
+        // Forms made with the drag-and-drop builder
+        Route::middleware('permission:forms.submit')->group(function () {
+            Route::get('forms', [FormController::class, 'index']);
+            Route::get('forms/lookups/{source}', [FormController::class, 'lookup']);
+            Route::get('forms/{form}', [FormController::class, 'show']);
+            Route::post('forms/{form}/submissions', [FormController::class, 'submit']);
+            Route::get('forms/{form}/submissions', [FormController::class, 'submissions']);
+        });
+        Route::middleware('permission:forms.manage')->group(function () {
+            Route::post('forms', [FormController::class, 'store']);
+            Route::put('forms/{form}', [FormController::class, 'update']);
+            Route::delete('forms/{form}', [FormController::class, 'destroy']);
+            Route::post('forms/{form}/publish', [FormController::class, 'publish']);
+            Route::get('forms/{form}/versions', [FormController::class, 'versions']);
+            Route::post('forms/{form}/versions/{version}/restore', [FormController::class, 'restore'])->whereNumber('version');
+        });
+
+        // Read-only AI assistant (OpenRouter), a few questions a minute per user
+        Route::post('ai/ask', [AiController::class, 'ask'])->middleware('throttle:20,1');
+        Route::get('insights', [AiController::class, 'insights']);
         // Role-guarded overview
         Route::get('admin/overview', [OperationsController::class, 'adminOverview'])->middleware('role:admin');
         Route::get('operator/tasks', [OperationsController::class, 'operatorTasks'])->middleware('role:operator,manager,sales,admin');

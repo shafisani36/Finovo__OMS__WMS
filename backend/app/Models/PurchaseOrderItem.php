@@ -5,7 +5,6 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PurchaseOrderItem extends Model
 {
@@ -45,11 +44,6 @@ class PurchaseOrderItem extends Model
     public function variant(): BelongsTo
     {
         return $this->belongsTo(ProductVariant::class, 'product_variant_id');
-    }
-
-    public function grnItems(): HasMany
-    {
-        return $this->hasMany(GoodsReceivedNoteItem::class);
     }
 
     public function getOutstandingQuantityAttribute(): int

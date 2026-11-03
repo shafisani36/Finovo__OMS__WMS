@@ -73,6 +73,10 @@ enum Permission: string
     // Settings
     case SETTINGS_BARCODE = 'settings.barcode';
 
+    // Forms made with the builder
+    case FORMS_MANAGE = 'forms.manage';
+    case FORMS_SUBMIT = 'forms.submit';
+
     /** Section of the permission screen the action is listed under. */
     public function module(): string
     {
@@ -86,6 +90,7 @@ enum Permission: string
             'purchasing' => 'Purchasing',
             'billing' => 'Billing',
             'settings' => 'Settings',
+            'forms' => 'Forms',
         };
     }
 
@@ -138,6 +143,8 @@ enum Permission: string
             self::BILLING_VIEW => 'View clients and their invoices',
             self::BILLING_MANAGE => 'Manage clients, rate cards and invoices',
             self::SETTINGS_BARCODE => 'Change barcode label settings',
+            self::FORMS_MANAGE => 'Design and publish forms',
+            self::FORMS_SUBMIT => 'Fill in forms and see their answers',
         };
     }
 

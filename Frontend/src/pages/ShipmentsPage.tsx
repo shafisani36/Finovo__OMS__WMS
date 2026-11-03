@@ -1,43 +1,55 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, Loader2, PackageCheck, Printer, RefreshCw, Search, Send, Settings2, Truck, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ClipboardList,
+  Eye,
+  Loader2,
+  PackageCheck,
+  Printer,
+  RefreshCw,
+  Search,
+  Send,
+  Settings2,
+  Tag,
+  Truck,
+  Undo2,
+} from 'lucide-react';
 import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
 import DataTable from '../components/common/DataTable';
 import type { Column } from '../components/common/DataTable';
-import CustomDropdown from '../components/common/CustomDropdown';
 import StatusPill from '../components/common/StatusPill';
+import RowActionsMenu from '../components/common/RowActionsMenu';
+import type { RowAction } from '../components/common/RowActionsMenu';
 import { Alert } from '../components/common/Alert';
 import { useConfirmDialog } from '../components/common/ConfirmDialog';
-import { useActiveStore } from '../hooks/useActiveStore';
-import omsService from '../services/omsService';
-import { useAuth } from '../hooks/useAuth';
-import { can } from '../types/auth';
-import type { ShipmentKpis, ShipmentModel } from '../services/omsService';
-import { formatDate } from '../utils/format';
 import CourierAccountsModal from '../components/shipments/CourierAccountsModal';
+import DispatchModal from '../components/shipments/DispatchModal';
+import ShipmentDetailModal from '../components/shipments/ShipmentDetailModal';
+import { useActiveStore } from '../hooks/useActiveStore';
+import { useAuth } from '../hooks/useAuth';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { useShipmentCouriers } from '../hooks/useShipmentCouriers';
+import omsService, { SHIPMENT_STATUS_LABELS } from '../services/omsService';
+import type { ShipmentFilter, ShipmentKpis, ShipmentModel } from '../services/omsService';
+import { can } from '../types/auth';
+import { formatDate, formatMoney } from '../utils/format';
 import { errorMessage } from '../utils/errors';
 
-const CARRIERS = ['TCS', 'Leopards Courier', 'M&P', 'PostEx', 'Trax', 'BlueEx', 'DHL', 'FedEx', 'UPS', 'Other'];
-
-const STATUS_TABS: { value: string; label: string; kpi?: keyof ShipmentKpis }[] = [
+const STATUS_TABS: { value: ShipmentFilter | ''; label: string; kpi?: keyof ShipmentKpis }[] = [
   { value: '', label: 'All Shipments' },
   { value: 'pending', label: 'Ready to Dispatch', kpi: 'ready_to_dispatch' },
   { value: 'shipped', label: 'In Transit', kpi: 'in_transit' },
+  { value: 'issues', label: 'Needs Attention', kpi: 'issues' },
   { value: 'delivered', label: 'Delivered', kpi: 'delivered' },
+  { value: 'returned', label: 'Returned', kpi: 'returned' },
 ];
 
-const STATUS_LABELS: Record<ShipmentModel['status'], string> = {
-  pending: 'Ready to Dispatch',
-  shipped: 'In Transit',
-  delivered: 'Delivered',
-};
+const EMPTY_KPIS: ShipmentKpis = { ready_to_dispatch: 0, dispatched_today: 0, in_transit: 0, issues: 0, delivered: 0, returned: 0 };
 
-/** Value of the "Send with" choice that means: enter the carrier and tracking details by hand. */
-const MANUAL = 'manual';
-
+/** Courier statuses that need someone to follow up (the parcel was not delivered). */
 const PROBLEM_STATUSES = ['delivery_failed', 'returned', 'cancelled'];
-
 
 export const ShipmentsPage: React.FC = () => {
   const { user } = useAuth();
@@ -46,11 +58,12 @@ export const ShipmentsPage: React.FC = () => {
   const { activeStore } = useActiveStore();
   const storeId = activeStore?.id;
   const { confirm, dialog } = useConfirmDialog();
+  const { accounts, carriers, reload: reloadCouriers } = useShipmentCouriers();
 
   const [shipments, setShipments] = useState<ShipmentModel[]>([]);
-  const [kpis, setKpis] = useState<ShipmentKpis>({ ready_to_dispatch: 0, dispatched_today: 0, in_transit: 0, delivered: 0 });
+  const [kpis, setKpis] = useState<ShipmentKpis>(EMPTY_KPIS);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<ShipmentFilter | ''>('');
   const [search, setSearch] = useState('');
   // Live search: the list reloads 300 ms after typing stops.
   const appliedSearch = useDebouncedValue(search.trim());
@@ -58,26 +71,19 @@ export const ShipmentsPage: React.FC = () => {
   const [perPage, setPerPage] = useState(10);
   const [meta, setMeta] = useState({ total: 0, last_page: 1 });
   const [banner, setBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-
-  // Courier accounts to book with, the accounts popup and the tracking refresh
-  const [couriers, setCouriers] = useState<{ id: number; name: string; carrier_name: string }[]>([]);
-  const [couriersOpen, setCouriersOpen] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [working, setWorking] = useState(false);
   const [tracking, setTracking] = useState(false);
-  const [labelId, setLabelId] = useState<number | null>(null);
 
-  // Dispatch popup
-  const [dispatching, setDispatching] = useState<ShipmentModel | null>(null);
-  const [sendWith, setSendWith] = useState<string>(MANUAL);
-  const [carrier, setCarrier] = useState(CARRIERS[0]);
-  const [otherCarrier, setOtherCarrier] = useState('');
-  const [trackingNumber, setTrackingNumber] = useState('');
-  const [trackingUrl, setTrackingUrl] = useState('');
-  const [formError, setFormError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [deliveringId, setDeliveringId] = useState<number | null>(null);
+  const [couriersOpen, setCouriersOpen] = useState(false);
+  const [dispatchList, setDispatchList] = useState<ShipmentModel[] | null>(null);
+  const [viewingId, setViewingId] = useState<number | null>(null);
+  // Bumped after every change, so an open shipment reloads.
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  // A new search starts from the first page.
+  // A new search, filter or page starts with nothing selected; a new search starts from the first page.
   useEffect(() => setPage(1), [appliedSearch]);
+  useEffect(() => setSelected(new Set()), [storeId, statusFilter, appliedSearch, page, perPage]);
 
   const fetchShipments = useCallback(async () => {
     try {
@@ -103,82 +109,30 @@ export const ShipmentsPage: React.FC = () => {
     fetchShipments();
   }, [fetchShipments]);
 
-  const loadCouriers = useCallback(() => {
-    omsService
-      .getShipmentCouriers()
-      .then(setCouriers)
-      .catch(() => setCouriers([]));
-  }, []);
+  const changed = (message: string) => {
+    setBanner({ type: 'success', text: message });
+    setSelected(new Set());
+    setRefreshKey((key) => key + 1);
+    fetchShipments();
+  };
 
-  useEffect(() => {
-    loadCouriers();
-  }, [loadCouriers]);
+  /** Runs one action, showing its message (or error) above the list. */
+  const run = async (task: () => Promise<{ message: string } | void>, failure: string) => {
+    try {
+      setWorking(true);
+      const res = await task();
+      if (res) changed(res.message);
+    } catch (err) {
+      setBanner({ type: 'error', text: errorMessage(err, failure) });
+    } finally {
+      setWorking(false);
+    }
+  };
 
   const handleTrack = async () => {
-    try {
-      setTracking(true);
-      const res = await omsService.trackShipments();
-      setBanner({ type: 'success', text: res.message });
-      fetchShipments();
-    } catch (err) {
-      setBanner({ type: 'error', text: errorMessage(err, 'The couriers could not be checked.') });
-    } finally {
-      setTracking(false);
-    }
-  };
-
-  const handleLabel = async (shipment: ShipmentModel) => {
-    try {
-      setLabelId(shipment.id);
-      await omsService.openShipmentLabel(shipment.id, shipment.tracking_number ?? String(shipment.id));
-    } catch (err) {
-      setBanner({ type: 'error', text: errorMessage(err, 'The label could not be opened.') });
-    } finally {
-      setLabelId(null);
-    }
-  };
-
-  const openDispatch = (shipment: ShipmentModel) => {
-    setDispatching(shipment);
-    setSendWith(couriers[0] ? String(couriers[0].id) : MANUAL);
-    setCarrier(CARRIERS[0]);
-    setOtherCarrier('');
-    setTrackingNumber('');
-    setTrackingUrl('');
-    setFormError(null);
-  };
-
-  const closeDispatch = () => {
-    if (!submitting) setDispatching(null);
-  };
-
-  const handleDispatch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!dispatching) return;
-
-    const courierAccountId = sendWith === MANUAL ? undefined : Number(sendWith);
-    const carrierName = carrier === 'Other' ? otherCarrier.trim() : carrier;
-    if (!courierAccountId && !carrierName) {
-      setFormError('Choose the carrier to dispatch this order.');
-      return;
-    }
-
-    try {
-      setSubmitting(true);
-      const res = await omsService.dispatchShipment(
-        dispatching.id,
-        courierAccountId
-          ? { courier_account_id: courierAccountId }
-          : { carrier: carrierName, tracking_number: trackingNumber.trim() || undefined, tracking_url: trackingUrl.trim() || undefined }
-      );
-      setDispatching(null);
-      setBanner({ type: 'success', text: res.message });
-      fetchShipments();
-    } catch (err) {
-      setFormError(errorMessage(err, 'Failed to dispatch the order.'));
-    } finally {
-      setSubmitting(false);
-    }
+    setTracking(true);
+    await run(() => omsService.trackShipments(), 'The couriers could not be checked.');
+    setTracking(false);
   };
 
   const handleDeliver = async (shipment: ShipmentModel) => {
@@ -193,25 +147,60 @@ export const ShipmentsPage: React.FC = () => {
       confirmLabel: 'Mark Delivered',
       tone: 'primary',
     });
-    if (!ok) return;
-
-    try {
-      setDeliveringId(shipment.id);
-      const res = await omsService.deliverShipment(shipment.id);
-      setBanner({ type: 'success', text: res.message });
-      fetchShipments();
-    } catch (err) {
-      setBanner({ type: 'error', text: errorMessage(err, 'Failed to update the shipment.') });
-    } finally {
-      setDeliveringId(null);
-    }
+    if (ok) run(() => omsService.deliverShipment(shipment.id), 'Failed to update the shipment.');
   };
+
+  const handleCancelDispatch = async (shipment: ShipmentModel) => {
+    const ok = await confirm({
+      title: `Cancel dispatch of order ${shipment.order_number}?`,
+      message: (
+        <>
+          {shipment.booked_with_courier ? `The booking with ${shipment.carrier} is cancelled, the` : 'The'} stock goes back to its bins and the order
+          returns to <strong>Ready to Dispatch</strong>. Tracking ID {shipment.tracking_number} stops working.
+        </>
+      ),
+      confirmLabel: 'Cancel Dispatch',
+      tone: 'danger',
+    });
+    if (ok) run(() => omsService.cancelShipmentDispatch(shipment.id), 'The dispatch could not be cancelled.');
+  };
+
+  const shipmentActions = (row: ShipmentModel): RowAction[] =>
+    ([
+      canDispatch && row.status === 'pending' && { label: 'Dispatch', icon: Send, onSelect: () => setDispatchList([row]) },
+      canDispatch && row.status === 'shipped' && { label: 'Mark Delivered', icon: CheckCircle2, onSelect: () => handleDeliver(row) },
+      row.has_label && {
+        label: 'Courier Label',
+        icon: Printer,
+        onSelect: () => run(() => omsService.openShipmentLabel(row.id, row.tracking_number ?? String(row.id)), 'The label could not be opened.'),
+      },
+      row.status !== 'pending' && {
+        label: 'Shipping Label',
+        icon: Tag,
+        onSelect: () => run(() => omsService.downloadShippingLabels([row.id]), 'The label could not be printed.'),
+      },
+      canDispatch && row.can_cancel_dispatch && { label: 'Cancel Dispatch', icon: Undo2, danger: true, onSelect: () => handleCancelDispatch(row) },
+    ] as (RowAction | false)[]).filter((action): action is RowAction => Boolean(action));
+
+  const selectedRows = shipments.filter((s) => selected.has(s.id));
+  const readyRows = selectedRows.filter((s) => s.status === 'pending');
+  const dispatchedIds = selectedRows.filter((s) => s.status !== 'pending').map((s) => s.id);
+
+  const toggleRow = (id: string | number) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (!next.delete(Number(id))) next.add(Number(id));
+      return next;
+    });
+
+  const toggleAll = (ids: (string | number)[]) =>
+    setSelected((current) => (ids.every((id) => current.has(Number(id))) ? new Set() : new Set(ids.map(Number))));
 
   const columns: Column<ShipmentModel>[] = [
     {
       key: 'order_number',
       header: 'ORDER',
-      width: '13%',
+      width: '12%',
       render: (row) => <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{row.order_number}</span>,
     },
     {
@@ -221,7 +210,7 @@ export const ShipmentsPage: React.FC = () => {
       render: (row) => (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span style={{ fontSize: 13, color: '#0f172a', fontWeight: 500 }}>{row.customer}</span>
-          {row.store && <span style={{ fontSize: 12, color: '#64748b' }}>{row.store}</span>}
+          <span style={{ fontSize: 12, color: '#64748b' }}>{[row.city, row.store].filter(Boolean).join(' · ')}</span>
         </div>
       ),
     },
@@ -233,21 +222,26 @@ export const ShipmentsPage: React.FC = () => {
       render: (row) => <span style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>{row.items_count}</span>,
     },
     {
-      key: 'warehouse',
-      header: 'WAREHOUSE',
-      width: '14%',
-      render: (row) => <span style={{ fontSize: 13, color: '#334155' }}>{row.warehouse ?? '—'}</span>,
+      key: 'cod_amount',
+      header: 'COD',
+      width: '10%',
+      render: (row) =>
+        row.cod_amount > 0 ? (
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>{formatMoney(row.cod_amount, row.currency ?? 'PKR')}</span>
+        ) : (
+          <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 600 }}>Paid</span>
+        ),
     },
     {
       key: 'carrier',
       header: 'CARRIER / TRACKING',
-      width: '18%',
+      width: '20%',
       render: (row) =>
         row.carrier ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span style={{ fontSize: 13, color: '#0f172a', fontWeight: 500 }}>{row.carrier}</span>
             {row.tracking_url ? (
-              <a href={row.tracking_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: '#1e56ff', fontFamily: 'monospace' }}>
+              <a href={row.tracking_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ fontSize: 12, color: '#1e56ff', fontFamily: 'monospace' }}>
                 {row.tracking_number}
               </a>
             ) : (
@@ -259,65 +253,50 @@ export const ShipmentsPage: React.FC = () => {
                 {row.courier_status_at ? ` · ${formatDate(row.courier_status_at, true)}` : ''}
               </span>
             )}
-            {row.has_label && (
-              <button type="button" className="wh-link" style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 4 }} onClick={() => handleLabel(row)} disabled={labelId === row.id}>
-                {labelId === row.id ? <Loader2 size={12} className="animate-spin" /> : <Printer size={12} />}
-                Label
-              </button>
-            )}
           </div>
         ) : (
-          <span style={{ fontSize: 12, color: '#94a3b8' }}>Not dispatched yet</span>
+          <span style={{ fontSize: 12, color: '#94a3b8' }}>{row.warehouse ? `Packed at ${row.warehouse}` : 'Not dispatched yet'}</span>
         ),
     },
     {
       key: 'status',
       header: 'STATUS',
-      width: '13%',
-      render: (row) => <StatusPill status={row.status} label={STATUS_LABELS[row.status]} />,
+      width: '12%',
+      render: (row) => <StatusPill status={row.status} label={SHIPMENT_STATUS_LABELS[row.status]} />,
     },
     {
       key: 'date',
       header: 'DATE',
       width: '10%',
       render: (row) => (
-        <span style={{ fontSize: 12, color: '#64748b' }}>
-          {formatDate(row.delivered_at ?? row.shipped_at ?? row.packed_at)}
-        </span>
+        <span style={{ fontSize: 12, color: '#64748b' }}>{formatDate(row.returned_at ?? row.delivered_at ?? row.shipped_at ?? row.packed_at)}</span>
       ),
     },
     {
       key: 'action',
       header: 'ACTION',
-      width: '13%',
+      width: '12%',
       align: 'center',
-      render: (row) => {
-        if (!canDispatch && row.status !== 'delivered') {
-          return <span style={{ fontSize: 12, color: '#94a3b8' }}>{row.status === 'pending' ? 'Awaiting dispatch' : 'In transit'}</span>;
-        }
-        if (row.status === 'pending') {
-          return (
-            <button type="button" className="table-action-primary" onClick={() => openDispatch(row)}>
+      render: (row) => (
+        <div className="shipment-row-actions" onClick={(e) => e.stopPropagation()}>
+          {canDispatch && row.status === 'pending' && (
+            <button type="button" className="table-action-primary" onClick={() => setDispatchList([row])}>
               <Send size={14} />
               <span>Dispatch</span>
             </button>
-          );
-        }
-        if (row.status === 'shipped') {
-          return (
-            <button
-              type="button"
-              className="table-action-primary is-success"
-              onClick={() => handleDeliver(row)}
-              disabled={deliveringId === row.id}
-            >
-              {deliveringId === row.id ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+          )}
+          {canDispatch && row.status === 'shipped' && (
+            <button type="button" className="table-action-primary is-success" onClick={() => handleDeliver(row)} disabled={working}>
+              <CheckCircle2 size={14} />
               <span>Delivered</span>
             </button>
-          );
-        }
-        return <span style={{ fontSize: 12, color: '#94a3b8' }}>Completed</span>;
-      },
+          )}
+          <RowActionsMenu
+            label={`Actions for order ${row.order_number}`}
+            actions={[{ label: 'View Details', icon: Eye, onSelect: () => setViewingId(row.id) }, ...shipmentActions(row)]}
+          />
+        </div>
+      ),
     },
   ];
 
@@ -345,9 +324,9 @@ export const ShipmentsPage: React.FC = () => {
         />
       </div>
 
-      {(canManageCouriers || (canDispatch && couriers.length > 0)) && (
+      {(canManageCouriers || (canDispatch && accounts.length > 0)) && (
         <div className="shipment-toolbar">
-          {canDispatch && couriers.length > 0 && (
+          {canDispatch && accounts.length > 0 && (
             <button type="button" className="btn-finovo-secondary" onClick={handleTrack} disabled={tracking}>
               {tracking ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
               <span>Update Courier Tracking</span>
@@ -368,7 +347,7 @@ export const ShipmentsPage: React.FC = () => {
         <MetricCard title="Ready to Dispatch" value={kpis.ready_to_dispatch} icon={<PackageCheck size={20} />} pillText="Packed" pillVariant="amber" />
         <MetricCard title="Dispatched Today" value={kpis.dispatched_today} icon={<Send size={20} />} pillText="Today" />
         <MetricCard title="In Transit" value={kpis.in_transit} icon={<Truck size={20} />} pillText="On the way" pillVariant="blue" />
-        <MetricCard title="Delivered" value={kpis.delivered} icon={<CheckCircle2 size={20} />} pillText="Completed" pillVariant="green" />
+        <MetricCard title="Needs Attention" value={kpis.issues} icon={<AlertTriangle size={20} />} pillText="Failed or cancelled" pillVariant="amber" />
       </div>
 
       <div className="content-card">
@@ -394,28 +373,54 @@ export const ShipmentsPage: React.FC = () => {
         </div>
 
         <div style={{ padding: '12px 24px', borderBottom: '1px solid #f1f5f9' }}>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-            }}
-          >
-            <div className="topbar-search-input" style={{ width: '100%', boxSizing: 'border-box' }}>
-              <Search size={16} color="#94a3b8" />
-              <input
-                type="text"
-                placeholder="Search order number, customer, carrier or tracking number..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-          </form>
+          <div className="topbar-search-input" style={{ width: '100%', boxSizing: 'border-box' }}>
+            <Search size={16} color="#94a3b8" />
+            <input
+              type="text"
+              placeholder="Search order number, customer, carrier or tracking number..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
         </div>
+
+        {selectedRows.length > 0 && (
+          <div className="shipment-bulk-bar">
+            <strong>{selectedRows.length} selected</strong>
+            {canDispatch && readyRows.length > 0 && (
+              <button type="button" className="btn-finovo-primary" onClick={() => setDispatchList(readyRows)} disabled={working}>
+                <Send size={14} />
+                <span>Dispatch {readyRows.length}</span>
+              </button>
+            )}
+            {dispatchedIds.length > 0 && (
+              <>
+                <button type="button" className="btn-finovo-secondary" onClick={() => run(() => omsService.downloadShippingLabels(dispatchedIds), 'The labels could not be printed.')} disabled={working}>
+                  <Tag size={14} />
+                  <span>Print {dispatchedIds.length} Label(s)</span>
+                </button>
+                <button type="button" className="btn-finovo-secondary" onClick={() => run(() => omsService.downloadLoadSheet(dispatchedIds), 'The load sheet could not be printed.')} disabled={working}>
+                  <ClipboardList size={14} />
+                  <span>Load Sheet</span>
+                </button>
+              </>
+            )}
+            <button type="button" className="btn-finovo-secondary" onClick={() => setSelected(new Set())}>
+              Clear
+            </button>
+          </div>
+        )}
 
         <DataTable
           columns={columns}
           data={shipments}
           keyField="id"
           isLoading={loading}
+          selectable
+          selectedIds={selected}
+          onSelectRow={toggleRow}
+          onSelectAll={toggleAll}
+          onRowClick={(row) => setViewingId(row.id)}
           emptyMessage={
             statusFilter === 'pending' || statusFilter === ''
               ? 'No packed orders yet. Orders marked Packed in Picking appear here for dispatch.'
@@ -435,114 +440,24 @@ export const ShipmentsPage: React.FC = () => {
         />
       </div>
 
-      {dispatching && (
-        <div className="modal-overlay" onClick={closeDispatch}>
-          <form className="procurement-modal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()} onSubmit={handleDispatch}>
-            <div className="procurement-modal-header">
-              <div>
-                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#0f172a' }}>Dispatch Order {dispatching.order_number}</h3>
-                <p style={{ margin: '3px 0 0 0', fontSize: 12, color: '#64748b' }}>
-                  {dispatching.items_count} item(s) for {dispatching.customer}
-                  {dispatching.warehouse ? ` from ${dispatching.warehouse}` : ''}
-                </p>
-              </div>
-              <button type="button" onClick={closeDispatch} className="topbar-icon-button" aria-label="Close">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="procurement-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {formError && <Alert type="error" message={formError} />}
-
-              {couriers.length > 0 && (
-                <div>
-                  <label className="form-label">Send with *</label>
-                  <CustomDropdown
-                    value={sendWith}
-                    onChange={(val) => setSendWith(String(val))}
-                    options={[
-                      ...couriers.map((c) => ({ value: String(c.id), label: `Book with ${c.name}`, description: `${c.carrier_name}: tracking number and label come from the courier` })),
-                      { value: MANUAL, label: 'Enter carrier details myself', description: 'For carriers without a courier account' },
-                    ]}
-                    searchable={false}
-                  />
-                </div>
-              )}
-
-              {sendWith === MANUAL && (
-                <>
-                  <div>
-                    <label className="form-label">Carrier *</label>
-                    <CustomDropdown value={carrier} onChange={(val) => setCarrier(String(val))} options={CARRIERS.map((c) => ({ value: c, label: c }))} />
-                  </div>
-
-                  {carrier === 'Other' && (
-                    <div>
-                      <label className="form-label">Carrier Name *</label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        value={otherCarrier}
-                        onChange={(e) => setOtherCarrier(e.target.value)}
-                        placeholder="e.g. Local Rider"
-                        maxLength={100}
-                      />
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="form-label">Tracking ID</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={trackingNumber}
-                      onChange={(e) => setTrackingNumber(e.target.value)}
-                      placeholder="Leave empty to generate a unique tracking ID"
-                      maxLength={100}
-                      autoFocus
-                    />
-                  </div>
-
-                  <div>
-                    <label className="form-label">Tracking Link</label>
-                    <input
-                      type="url"
-                      className="form-input"
-                      value={trackingUrl}
-                      onChange={(e) => setTrackingUrl(e.target.value)}
-                      placeholder={
-                        ['DHL', 'FedEx', 'UPS'].includes(carrier)
-                          ? `Optional, ${carrier}'s tracking page is added automatically`
-                          : 'Optional, e.g. the courier tracking page for this parcel'
-                      }
-                      maxLength={500}
-                    />
-                  </div>
-                </>
-              )}
-
-              <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
-                Dispatching removes these items from warehouse stock, marks the order as shipped and emails the customer the
-                tracking details.
-              </p>
-            </div>
-
-            <div className="procurement-modal-footer" style={{ justifyContent: 'flex-end' }}>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button type="button" onClick={closeDispatch} className="btn-outline" disabled={submitting}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary" disabled={submitting}>
-                  {submitting ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-                  <span>Dispatch Order</span>
-                </button>
-              </div>
-            </div>
-          </form>
-        </div>
+      {viewingId !== null && (
+        <ShipmentDetailModal shipmentId={viewingId} refreshKey={refreshKey} actions={shipmentActions} onClose={() => setViewingId(null)} />
       )}
 
-      {couriersOpen && <CourierAccountsModal onClose={() => setCouriersOpen(false)} onChanged={loadCouriers} />}
+      {dispatchList && (
+        <DispatchModal
+          shipments={dispatchList}
+          accounts={accounts}
+          carriers={carriers}
+          onClose={() => setDispatchList(null)}
+          onDispatched={(message) => {
+            setDispatchList(null);
+            changed(message);
+          }}
+        />
+      )}
+
+      {couriersOpen && <CourierAccountsModal onClose={() => setCouriersOpen(false)} onChanged={reloadCouriers} />}
 
       {dialog}
     </div>

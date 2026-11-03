@@ -7,7 +7,9 @@ use App\Models\Order;
 use App\Models\ProductVariant;
 use App\Models\SkuMapping;
 use App\Models\User;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -56,6 +58,53 @@ class OrderService
         return [$order->fresh(['items', 'store']), $this->push->createOrder($order->load('store', 'items'))];
     }
 
+    public const VALIDATION_MESSAGES = [
+        'items.required' => 'Add at least one product to the order.',
+        'items.*.product_variant_id.distinct' => 'A product is listed twice; change its quantity instead.',
+    ];
+
+    /**
+     * Rules for an order taken by hand, imported from a CSV file or placed again on a schedule.
+     *
+     * @return array<string, mixed>
+     */
+    public function rules(int $organizationId, bool $linesRequired = true): array
+    {
+        $inOrganization = fn (string $table) => Rule::exists($table, 'id')->where('organization_id', $organizationId);
+        $address = fn (string $field) => [
+            $field => ['nullable', 'array'],
+            "{$field}.name" => ['nullable', 'string', 'max:255'],
+            "{$field}.company" => ['nullable', 'string', 'max:255'],
+            "{$field}.address1" => ['nullable', 'string', 'max:255'],
+            "{$field}.address2" => ['nullable', 'string', 'max:255'],
+            "{$field}.city" => ['nullable', 'string', 'max:120'],
+            "{$field}.province" => ['nullable', 'string', 'max:120'],
+            "{$field}.zip" => ['nullable', 'string', 'max:30'],
+            "{$field}.country_code" => ['nullable', 'string', 'size:2'],
+            "{$field}.phone" => ['nullable', 'string', 'max:50'],
+        ];
+
+        return [
+            'store_id' => ['nullable', 'integer', $inOrganization('stores')],
+            'customer_name' => ['required', 'string', 'max:255'],
+            'customer_email' => ['nullable', 'email', 'max:255'],
+            'customer_phone' => ['nullable', 'string', 'max:50'],
+            ...$address('shipping_address'),
+            ...$address('billing_address'),
+            'payment_status' => ['required', Rule::in(['pending', 'paid'])],
+            'payment_method' => ['nullable', 'string', 'max:100'],
+            'currency' => ['required', 'string', 'size:3'],
+            'notes' => ['nullable', 'string', 'max:2000'],
+            'shipping_amount' => ['nullable', 'numeric', 'min:0', 'max:99999999'],
+            'discount_amount' => ['nullable', 'numeric', 'min:0', 'max:99999999'],
+            'tax_amount' => ['nullable', 'numeric', 'min:0', 'max:99999999'],
+            'items' => [$linesRequired ? 'required' : 'sometimes', 'array', 'min:1', 'max:200'],
+            'items.*.product_variant_id' => ['required', 'integer', 'distinct', $inOrganization('product_variants')],
+            'items.*.quantity' => ['required', 'integer', 'min:1', 'max:100000'],
+            'items.*.unit_price' => ['required', 'numeric', 'min:0', 'max:99999999'],
+        ];
+    }
+
     /**
      * Change an order that is still waiting for stock. The lines of an order that came from (or was sent to)
      * a store stay as they are there; its customer, address and note are sent to the store.
@@ -75,11 +124,18 @@ class OrderService
 
         DB::transaction(function () use ($order, $data) {
             $order->update($this->orderFields($data, $order));
+            $changed = array_keys($order->getChanges());
 
             if (isset($data['items'])) {
                 $order->items()->delete();
                 $this->saveLines($order, $data['items']);
                 $this->addToStoreCatalog($order);
+                $changed[] = 'items';
+            }
+
+            $changed = array_values(array_diff($changed, ['updated_at']));
+            if ($changed) {
+                $order->record('edited', 'Edited: '.str_replace('_', ' ', implode(', ', $changed)), Auth::id(), $changed);
             }
         });
 
@@ -213,12 +269,9 @@ class OrderService
             ->get()
             ->keyBy('id');
 
-        $subtotal = 0.0;
-
         foreach ($items as $item) {
             $variant = $variants->get($item['product_variant_id']);
             $total = round($item['quantity'] * (float) $item['unit_price'], 2);
-            $subtotal += $total;
 
             $order->items()->create([
                 'product_variant_id' => $variant->id,
@@ -234,6 +287,15 @@ class OrderService
             ]);
         }
 
+        $this->recalculateTotals($order);
+    }
+
+    /**
+     * Subtotal from the order lines; total after discount, shipping and tax.
+     */
+    public function recalculateTotals(Order $order): void
+    {
+        $subtotal = round((float) $order->items()->sum('total_amount'), 2);
         $order->update([
             'subtotal_amount' => $subtotal,
             'total_amount' => max(0, $subtotal - (float) $order->discount_amount + (float) $order->shipping_amount + (float) $order->tax_amount),

@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'manager' | 'sales' | 'operator';
+export type UserRole = 'admin' | 'manager' | 'sales' | 'operator' | 'client';
 
 /**
  * Actions an employee can be allowed (same keys as the backend's App\Enums\Permission).
@@ -50,7 +50,9 @@ export type Permission =
   | 'purchasing.receive'
   | 'billing.view'
   | 'billing.manage'
-  | 'settings.barcode';
+  | 'settings.barcode'
+  | 'forms.manage'
+  | 'forms.submit';
 
 export interface User {
   id: number;
@@ -111,20 +113,34 @@ export interface VerifyResetOtpResponseData {
   expires_in_seconds: number;
 }
 
-export interface AdminOverviewData {
-  role: 'admin';
-  total_orders: number;
-  inventory_items: number;
-  connected_stores: number;
-  active_shipments: number;
-  warehouses_synced: number;
-  system_health: string;
+/** A pick task on the work board. */
+export interface WorkTask {
+  id: number;
+  order_number: string | null;
+  warehouse: string | null;
+  status: 'not_started' | 'in_progress' | 'picked';
+  items_count: number;
+  created_at: string | null;
 }
 
+export interface WorkerLoad {
+  id: number;
+  name: string;
+  role: UserRole;
+  open_tasks: number;
+  done_today: number;
+  scan_errors_today: number;
+}
+
+/** Admin work board: company totals, every worker's work today and the tasks nobody has yet. */
+export interface AdminOverviewData {
+  totals: { open_orders: number; open_pick_tasks: number; ready_to_dispatch: number; in_transit: number; connected_stores: number; active_warehouses: number };
+  workers: WorkerLoad[];
+  unassigned: WorkTask[];
+}
+
+/** The signed-in worker's pick tasks. */
 export interface OperatorTasksData {
-  role: 'operator';
-  active_pick_lists: number;
-  pending_shipments: number;
-  stock_movements_today: number;
-  assigned_zone: string;
+  my_tasks: WorkTask[];
+  unassigned: number;
 }

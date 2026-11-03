@@ -164,14 +164,4 @@ class Store extends Model
     {
         return $this->hasMany(SkuMapping::class);
     }
-
-    public function integrationJobs(): HasMany
-    {
-        return $this->hasMany(IntegrationJob::class);
-    }
-
-    public function integrationErrors(): HasMany
-    {
-        return $this->hasMany(IntegrationError::class);
-    }
 }

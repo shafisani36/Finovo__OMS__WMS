@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\CourierAccount;
+use App\Rules\PublicUrl;
 use App\Services\CourierService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -93,7 +94,7 @@ class CourierAccountController extends Controller
             'credentials' => [$account ? 'sometimes' : 'required', 'array'],
             'settings' => ['sometimes', 'array'],
             'settings.default_weight_kg' => ['nullable', 'numeric', 'min:0.1', 'max:100'],
-            'settings.api_url' => ['nullable', 'url:https'],
+            'settings.api_url' => ['nullable', 'url:https', new PublicUrl],
         ];
 
         foreach ($definition['credentials'] ?? [] as $field) {

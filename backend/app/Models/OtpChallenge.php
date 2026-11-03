@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Enums\ChallengePurpose;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -68,28 +67,5 @@ class OtpChallenge extends Model
     public function hasExceededMaxAttempts(): bool
     {
         return $this->attempts >= $this->max_attempts;
-    }
-
-    public function isValid(): bool
-    {
-        return ! $this->isExpired()
-            && ! $this->isConsumed()
-            && ! $this->isRevoked()
-            && ! $this->hasExceededMaxAttempts();
-    }
-
-    public function canResend(): bool
-    {
-        return ! $this->isConsumed()
-            && ! $this->isRevoked()
-            && ($this->resend_available_at === null || $this->resend_available_at->isPast());
-    }
-
-    public function scopeValid(Builder $query): Builder
-    {
-        return $query->whereNull('consumed_at')
-            ->whereNull('revoked_at')
-            ->where('expires_at', '>', now())
-            ->whereColumn('attempts', '<', 'max_attempts');
     }
 }

@@ -47,12 +47,14 @@ class StockMovementController extends Controller
             });
         }
 
-        // Filter by movement type
+        // Filter by movement type: "transfer" covers both legs of a transfer between warehouses, and "shipment"
+        // includes dispatches that were cancelled.
         if ($type = $request->query('type')) {
-            // "transfer" covers both legs of a transfer between warehouses.
-            $type === 'transfer'
-                ? $query->whereIn('movement_type', ['transfer', 'transfer_in', 'transfer_out'])
-                : $query->where('movement_type', $type);
+            $query->whereIn('movement_type', match ($type) {
+                'transfer' => ['transfer', 'transfer_in', 'transfer_out'],
+                'shipment' => ['shipment', 'shipment_cancelled'],
+                default => [$type],
+            });
         }
 
         // Filter by warehouse

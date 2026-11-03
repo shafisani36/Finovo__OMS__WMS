@@ -1,7 +1,7 @@
 import React, { createContext, useEffect, useState, useCallback } from 'react';
 import type { User } from '../types/auth';
 import { authService } from '../services/authService';
-import { getAuthToken, setAuthToken } from '../services/apiClient';
+import { SESSION_EXPIRED_EVENT, TOKEN_STORAGE_KEY, getAuthToken, setAuthToken } from '../services/apiClient';
 
 export const STOCK_ALERTS_ON_LOGIN_KEY = 'finovo_show_stock_alerts';
 
@@ -19,6 +19,36 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const USER_STORAGE_KEY = 'finovo_user';
 
+/** Keeps the signed-in user for this tab, and across visits when "Keep me signed in" was chosen. */
+const saveUser = (user: User, remember: boolean) => {
+  try {
+    const serialized = JSON.stringify(user);
+    sessionStorage.setItem(USER_STORAGE_KEY, serialized);
+    if (remember) {
+      localStorage.setItem(USER_STORAGE_KEY, serialized);
+    }
+  } catch {
+    // Storage unavailable (private mode); the session lasts for this tab only.
+  }
+};
+
+const forgetUser = () => {
+  try {
+    localStorage.removeItem(USER_STORAGE_KEY);
+    sessionStorage.removeItem(USER_STORAGE_KEY);
+  } catch {
+    // Storage unavailable
+  }
+};
+
+const remembered = (): boolean => {
+  try {
+    return localStorage.getItem(TOKEN_STORAGE_KEY) !== null;
+  } catch {
+    return false;
+  }
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Pre-load user from cached storage to prevent unauthenticated flash on page reloads
   const [user, setUser] = useState<User | null>(() => {
@@ -32,20 +62,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [token, setTokenState] = useState<string | null>(getAuthToken());
   const [isLoading, setIsLoading] = useState<boolean>(!user && !!getAuthToken());
 
+  /** Signs out on this device only (the server token is already gone or expired). */
+  const clearSession = useCallback(() => {
+    setUser(null);
+    setTokenState(null);
+    setAuthToken(null);
+    forgetUser();
+  }, []);
+
   const setAuthSession = useCallback((newUser: User, newToken: string, remember = true) => {
     setUser(newUser);
     setTokenState(newToken);
     setAuthToken(newToken, remember);
+    saveUser(newUser, remember);
     try {
       // The stock alerts open by themselves once after every login (see StockAlertsBell).
       sessionStorage.setItem(STOCK_ALERTS_ON_LOGIN_KEY, '1');
-      const serialized = JSON.stringify(newUser);
-      if (remember) {
-        localStorage.setItem(USER_STORAGE_KEY, serialized);
-      }
-      sessionStorage.setItem(USER_STORAGE_KEY, serialized);
     } catch {
-      // Ignore
+      // Storage unavailable
     }
   }, []);
 
@@ -55,76 +89,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {
       // Ignored during client cleanup
     } finally {
-      setUser(null);
-      setTokenState(null);
-      setAuthToken(null);
-      try {
-        localStorage.removeItem(USER_STORAGE_KEY);
-        sessionStorage.removeItem(USER_STORAGE_KEY);
-      } catch {
-        // Ignore
-      }
+      clearSession();
     }
-  }, []);
+  }, [clearSession]);
 
   const refreshUser = useCallback(async () => {
     try {
       const response = await authService.getMe();
       if (response.data?.user) {
         setUser(response.data.user);
-        try {
-          const serialized = JSON.stringify(response.data.user);
-          sessionStorage.setItem(USER_STORAGE_KEY, serialized);
-          if (localStorage.getItem('finovo_auth_token')) {
-            localStorage.setItem(USER_STORAGE_KEY, serialized);
-          }
-        } catch {
-          // Ignore
-        }
+        saveUser(response.data.user, remembered());
       }
     } catch {
-      setUser(null);
-      setTokenState(null);
-      setAuthToken(null);
-      try {
-        localStorage.removeItem(USER_STORAGE_KEY);
-        sessionStorage.removeItem(USER_STORAGE_KEY);
-      } catch {
-        // Ignore
-      }
+      clearSession();
     }
-  }, []);
+  }, [clearSession]);
+
+  // A request answered "Unauthenticated" (token expired or revoked): back to the sign-in screen.
+  useEffect(() => {
+    window.addEventListener(SESSION_EXPIRED_EVENT, clearSession);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, clearSession);
+  }, [clearSession]);
 
   useEffect(() => {
     const initAuth = async () => {
-      const currentToken = getAuthToken();
-      if (currentToken) {
-        try {
-          const response = await authService.getMe();
-          if (response.data?.user) {
-            setUser(response.data.user);
-            try {
-              const serialized = JSON.stringify(response.data.user);
-              sessionStorage.setItem(USER_STORAGE_KEY, serialized);
-              if (localStorage.getItem('finovo_auth_token')) {
-                localStorage.setItem(USER_STORAGE_KEY, serialized);
-              }
-            } catch {
-              // Ignore
-            }
-          }
-        } catch {
-          // Token is invalid/expired on backend
-          setUser(null);
-          setTokenState(null);
-          setAuthToken(null);
-          try {
-            localStorage.removeItem(USER_STORAGE_KEY);
-            sessionStorage.removeItem(USER_STORAGE_KEY);
-          } catch {
-            // Ignore
-          }
-        }
+      if (getAuthToken()) {
+        await refreshUser();
       } else {
         setUser(null);
       }
@@ -132,7 +122,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     initAuth();
-  }, []);
+  }, [refreshUser]);
 
   return (
     <AuthContext.Provider

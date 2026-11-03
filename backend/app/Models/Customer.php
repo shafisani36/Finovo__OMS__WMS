@@ -19,6 +19,7 @@ class Customer extends Model
         'phone',
         'default_address',
         'last_order_at',
+        'credit_limit',
     ];
 
     protected $hidden = ['identity_key'];
@@ -28,6 +29,7 @@ class Customer extends Model
         return [
             'default_address' => 'array',
             'last_order_at' => 'datetime',
+            'credit_limit' => 'decimal:2',
         ];
     }
 

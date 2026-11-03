@@ -15,6 +15,7 @@ import {
   Package,
   CalendarDays,
   Contact,
+  ShieldCheck,
   FileText,
   Search,
   Loader2,
@@ -26,6 +27,9 @@ import type { CustomerDetailModel, CustomerOrderModel } from '../services/omsSer
 import { platformLabel } from '../components/stores/storePlatforms';
 import ProductThumb from '../components/catalog/ProductThumb';
 import StatusPill from '../components/common/StatusPill';
+import { useAuth } from '../hooks/useAuth';
+import { can } from '../types/auth';
+import { errorMessage } from '../utils/errors';
 import { formatDate, formatMoney, formatMoneyByCurrency, humanize, initials } from '../utils/format';
 import '../components/customers/CustomerDetail.css';
 
@@ -41,7 +45,43 @@ const Field: React.FC<{ icon: React.ReactNode; label: string; children?: React.R
   </div>
 );
 
+/** Most the customer may owe on unpaid orders; a new order over it is held for review. Empty for no limit. */
+const CreditLimitField: React.FC<{ customerId: number; initial: string | null; editable: boolean }> = ({ customerId, initial, editable }) => {
+  const [value, setValue] = useState(initial === null ? '' : String(Number(initial)));
+  const [saved, setSaved] = useState(value);
+  const [message, setMessage] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      setMessage((await omsService.saveCustomerCreditLimit(customerId, value.trim() === '' ? null : Number(value))).message);
+      setSaved(value);
+    } catch (err) {
+      setMessage(errorMessage(err, 'The credit limit could not be saved.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editable) return <>{saved || 'No limit'}</>;
+
+  return (
+    <form onSubmit={save} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+      <input className="cf-input" type="number" min={0} step="0.01" placeholder="No limit" value={value} onChange={(e) => setValue(e.target.value)} style={{ width: 120 }} aria-label="Credit limit" />
+      {value !== saved && (
+        <button type="submit" className="btn-finovo-secondary" disabled={saving}>
+          {saving ? <Loader2 size={14} className="animate-spin" /> : 'Save'}
+        </button>
+      )}
+      {message && <span style={{ fontSize: 11, color: '#64748b' }}>{message}</span>}
+    </form>
+  );
+};
+
 export const CustomerDetailPage: React.FC = () => {
+  const { user } = useAuth();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [customer, setCustomer] = useState<CustomerDetailModel | null>(null);
@@ -191,6 +231,9 @@ export const CustomerDetailPage: React.FC = () => {
           </Field>
           <Field icon={<TrendingUp size={13} />} label="Avg. Order Value">
             {stats.spent.length ? formatMoneyByCurrency(stats.spent.map((entry) => ({ currency: entry.currency, amount: entry.average }))) : null}
+          </Field>
+          <Field icon={<ShieldCheck size={13} />} label="Credit Limit">
+            <CreditLimitField customerId={customer.id} initial={customer.credit_limit} editable={can(user, 'orders.manage')} />
           </Field>
           <Field icon={<CalendarPlus size={13} />} label="Customer Since">
             {stats.first_order_at ? formatDate(stats.first_order_at) : formatDate(customer.created_at)}

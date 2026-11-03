@@ -2,7 +2,7 @@ import React from 'react';
 import { humanize } from '../../utils/format';
 import './StatusPill.css';
 
-type Tone = 'green' | 'blue' | 'amber' | 'red' | 'grey';
+type Tone = 'green' | 'blue' | 'amber' | 'red' | 'grey' | 'purple';
 
 const TONES: Record<string, Tone> = {
   shipped: 'green',
@@ -30,14 +30,15 @@ const TONES: Record<string, Tone> = {
   cancelled: 'red',
   failed: 'red',
   refunded: 'red',
+  partially_refunded: 'amber',
   returned: 'red',
   exception: 'red',
   suspended: 'red',
 };
 
-/** Coloured pill for an order, payment or fulfillment status. */
-export const StatusPill: React.FC<{ status: string; label?: string }> = ({ status, label }) => (
-  <span className={`status-pill status-pill-${TONES[status] ?? 'grey'}`}>{label ?? humanize(status)}</span>
+/** Coloured pill for an order, payment or fulfillment status; tone sets the colour of a status the company named. */
+export const StatusPill: React.FC<{ status: string; label?: string; tone?: Tone }> = ({ status, label, tone }) => (
+  <span className={`status-pill status-pill-${tone ?? TONES[status] ?? 'grey'}`}>{label ?? humanize(status)}</span>
 );
 
 export default StatusPill;

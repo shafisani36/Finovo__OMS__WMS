@@ -8,6 +8,8 @@ enum UserRole: string
     case MANAGER = 'manager';
     case SALES = 'sales';
     case OPERATOR = 'operator';
+    /** A 3PL client's own user: the client portal only (their stock, orders and shipments). */
+    case CLIENT = 'client';
 
     public function label(): string
     {
@@ -16,6 +18,7 @@ enum UserRole: string
             self::MANAGER => 'Operations Manager',
             self::SALES => 'Sales Staff',
             self::OPERATOR => 'Warehouse Operator',
+            self::CLIENT => '3PL Client',
         };
     }
 
@@ -26,6 +29,7 @@ enum UserRole: string
             self::MANAGER => 'Runs orders, inventory, fulfillment and purchasing; can see employees',
             self::SALES => 'Orders, customers, products and returns',
             self::OPERATOR => 'Warehouse work: stock, picking, shipments, returns and receiving',
+            self::CLIENT => 'Client portal only: the stock, orders and shipments of their own stores',
         };
     }
 
@@ -56,6 +60,7 @@ enum UserRole: string
                 Permission::SHIPMENTS_VIEW,
                 Permission::RETURNS_VIEW,
                 Permission::RETURNS_MANAGE,
+                Permission::FORMS_SUBMIT,
             ],
             self::OPERATOR => [
                 Permission::STORES_VIEW,
@@ -84,7 +89,10 @@ enum UserRole: string
                 Permission::PURCHASING_APPROVE,
                 Permission::PURCHASING_ORDER,
                 Permission::PURCHASING_RECEIVE,
+                Permission::FORMS_SUBMIT,
             ],
+            // Clients use the portal, which needs no staff permission.
+            self::CLIENT => [],
         };
     }
 }
