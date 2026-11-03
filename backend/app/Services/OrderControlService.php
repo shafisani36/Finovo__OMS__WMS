@@ -69,7 +69,11 @@ class OrderControlService
      */
     public function customStatuses(Organization $organization): array
     {
-        return $organization->settings[self::STATUSES_KEY] ?? [];
+        // Always key, label, colour: MySQL keeps JSON object keys in its own order, not the order they were saved in.
+        return array_map(
+            fn (array $status) => ['key' => $status['key'], 'label' => $status['label'], 'color' => $status['color']],
+            $organization->settings[self::STATUSES_KEY] ?? [],
+        );
     }
 
     /**
