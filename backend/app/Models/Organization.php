@@ -71,4 +71,3 @@ class Organization extends Model
         return $this->hasMany(GoodsReceivedNote::class);
     }
 }
-

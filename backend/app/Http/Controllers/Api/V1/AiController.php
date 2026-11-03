@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\AccessControl;
 use App\Services\AiAssistantService;
 use App\Services\OperationalInsightsService;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use RuntimeException;
@@ -35,6 +36,10 @@ class AiController extends Controller
 
         try {
             return response()->json(['status' => 'success', ...$assistant->ask($user, $question)]);
+        } catch (QueryException $e) {
+            // A database error is a bug, not an AI outage: it is logged and answered as a server error, and its SQL
+            // never reaches the user.
+            throw $e;
         } catch (RuntimeException $e) {
             return response()->json(['status' => 'error', 'message' => $e->getMessage()], 502);
         }

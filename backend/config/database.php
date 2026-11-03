@@ -48,6 +48,11 @@ return [
             'driver' => 'mysql',
             'url' => env('DB_URL'),
             'host' => env('DB_HOST', '127.0.0.1'),
+            // Read replicas (comma-separated) take the reads when traffic grows; writes, and reads right after a write
+            // in the same request (sticky), go to DB_HOST. Without DB_READ_HOSTS everything uses DB_HOST.
+            'read' => ['host' => array_map('trim', explode(',', (string) env('DB_READ_HOSTS', env('DB_HOST', '127.0.0.1'))))],
+            'write' => ['host' => [env('DB_HOST', '127.0.0.1')]],
+            'sticky' => true,
             'port' => env('DB_PORT', '3306'),
             'database' => env('DB_DATABASE', 'laravel'),
             'username' => env('DB_USERNAME', 'root'),
@@ -58,6 +63,9 @@ return [
             'prefix' => '',
             'prefix_indexes' => true,
             'strict' => true,
+            // The database clock (CURRENT_TIMESTAMP defaults) follows the app's time zone (UTC), whatever time zone
+            // the database server itself is set to.
+            'timezone' => env('DB_TIMEZONE', '+00:00'),
             'engine' => null,
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
@@ -78,6 +86,9 @@ return [
             'prefix' => '',
             'prefix_indexes' => true,
             'strict' => true,
+            // The database clock (CURRENT_TIMESTAMP defaults) follows the app's time zone (UTC), whatever time zone
+            // the database server itself is set to.
+            'timezone' => env('DB_TIMEZONE', '+00:00'),
             'engine' => null,
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),

@@ -1,0 +1,5 @@
+# crontab -u www-data /var/www/finovo/deploy/crontab
+# Laravel scheduler: store sync, order import, store updates, parcel tracking, recurring orders, cleanups.
+* * * * * cd /var/www/finovo/backend && php artisan schedule:run >> /dev/null 2>&1
+# Database backup every night at 02:30, kept for 14 days.
+30 2 * * * /var/www/finovo/deploy/backup.sh >> /var/www/finovo/backend/storage/logs/backup.log 2>&1

@@ -70,7 +70,7 @@ class EmailService
 
             // One email per admin, so admins do not see each other's addresses.
             foreach ($admins as $admin) {
-                Mail::to($admin->email, $admin->name)->send((new Mailable)->subject($subject)->html((string) $html));
+                $this->deliver($admin->email, $admin->name, $subject, (string) $html);
             }
         } catch (Throwable $e) {
             report($e);
@@ -133,7 +133,8 @@ class EmailService
 
     /**
      * Send an email to the order's customer. Orders without a valid customer email are skipped, and a mail
-     * failure is logged without undoing the order change that triggered it.
+     * failure is logged without undoing the order change that triggered it. Returns whether the email was handed
+     * to the mail queue (see deliver()).
      */
     private function sendCustomerEmail(Order $order, string $subject, MailMessage $message): bool
     {
@@ -147,7 +148,7 @@ class EmailService
                 ->salutation("Thank you for shopping with {$this->storeName($order)}.")
                 ->render();
 
-            Mail::to($order->customer_email, $order->customer_name)->send((new Mailable)->subject($subject)->html((string) $html));
+            $this->deliver($order->customer_email, $order->customer_name, $subject, (string) $html);
 
             return true;
         } catch (Throwable $e) {
@@ -224,5 +225,20 @@ class EmailService
             ->line('Time: '.now()->format('d M Y, H:i T'))
             ->action("View {$definition['record']}s", config('app.frontend_url').'/'.$definition['page'])
             ->line('If you did not expect this change, review it in Finovo.');
+    }
+
+    /**
+     * Sends the email from the queue worker, so a slow or unreachable mail server never makes a page wait or time
+     * out. A failure is logged; the change that triggered the email is already saved.
+     */
+    private function deliver(string $address, ?string $name, string $subject, string $html): void
+    {
+        dispatch(function () use ($address, $name, $subject, $html) {
+            try {
+                Mail::to($address, $name)->send((new Mailable)->subject($subject)->html($html));
+            } catch (Throwable $e) {
+                report($e);
+            }
+        });
     }
 }

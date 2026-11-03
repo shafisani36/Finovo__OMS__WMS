@@ -28,6 +28,8 @@ class OrderObserver
 
     public function saved(Order $order): void
     {
+        $order->touchListsVersion();
+
         if ($order->wasRecentlyCreated || $order->wasChanged(['customer_name', 'customer_email', 'customer_phone', 'shipping_address', 'placed_at'])) {
             $this->customers->linkOrder($order);
         }
@@ -44,5 +46,10 @@ class OrderObserver
         if ($order->wasRecentlyCreated || $order->wasChanged('total_amount')) {
             $this->controls->screen($order);
         }
+    }
+
+    public function deleted(Order $order): void
+    {
+        $order->touchListsVersion();
     }
 }

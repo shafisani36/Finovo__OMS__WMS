@@ -131,7 +131,7 @@ class AiAssistantService
      */
     private function findOrder(int $orgId, string $number): array
     {
-        $order = Order::with(['items:id,order_id,product_name,sku,quantity,status', 'shipments:id,order_id,status,carrier,tracking_number', 'store:id,name'])
+        $order = Order::with(['items:id,order_id,product_name,external_sku,quantity,status', 'shipments:id,order_id,status,carrier,tracking_number', 'store:id,name'])
             ->where('organization_id', $orgId)
             ->whereIn('order_number', array_unique([$number, ltrim($number, '#'), '#'.ltrim($number, '#')]))
             ->first();
@@ -148,7 +148,7 @@ class AiAssistantService
             'payment_status' => $order->payment_status,
             'total' => (float) $order->total_amount.' '.$order->currency,
             'placed_at' => $order->placed_at?->toDateTimeString(),
-            'items' => $order->items->map(fn ($item) => ['product' => $item->product_name, 'sku' => $item->sku, 'quantity' => $item->quantity, 'status' => $item->status]),
+            'items' => $order->items->map(fn ($item) => ['product' => $item->product_name, 'sku' => $item->external_sku, 'quantity' => $item->quantity, 'status' => $item->status]),
             'shipments' => $order->shipments->map(fn ($s) => ['status' => $s->status, 'carrier' => $s->carrier, 'tracking_number' => $s->tracking_number]),
         ], "Order {$order->order_number}"];
     }

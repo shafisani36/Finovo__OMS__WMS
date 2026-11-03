@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\ValidationException;
 
 #[ObservedBy(OrderObserver::class)]
@@ -128,6 +129,22 @@ class Order extends Model
     public function record(string $type, string $description, ?int $userId = null, ?array $changes = null): OrderEvent
     {
         return $this->events()->create(['type' => $type, 'description' => $description, 'user_id' => $userId, 'changes' => $changes]);
+    }
+
+    /**
+     * Number that changes whenever an order of the company changes; order counts are cached under it, so they are
+     * worked out again only after a change.
+     */
+    public static function listsVersion(int $organizationId): int
+    {
+        return (int) Cache::get("orders-version:{$organizationId}", 0);
+    }
+
+    public function touchListsVersion(): void
+    {
+        $key = "orders-version:{$this->organization_id}";
+        Cache::add($key, 0);
+        Cache::increment($key);
     }
 
     /**

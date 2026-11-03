@@ -7,6 +7,7 @@ use App\Models\Order;
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -96,6 +97,7 @@ class OrderControlService
         }
 
         $order->forceFill(['custom_status' => $key])->saveQuietly();
+        $order->touchListsVersion();
         $order->record('custom_status', $key === null ? 'Status label removed' : "Marked {$statuses[$key]['label']}", $user->id);
     }
 
@@ -136,6 +138,7 @@ class OrderControlService
         }
 
         $order->forceFill(['hold_type' => $type, 'hold_reason' => $reason, 'held_at' => now(), 'held_by_user_id' => $user?->id])->saveQuietly();
+        $order->touchListsVersion();
         $order->record('held', ucfirst($type === 'manual' ? 'held' : "held for {$type}").": {$reason}", $user?->id);
     }
 
@@ -150,6 +153,7 @@ class OrderControlService
 
         $approval = $order->hold_type === 'approval';
         $order->forceFill(['hold_type' => null, 'hold_reason' => null, 'held_at' => null, 'held_by_user_id' => null])->saveQuietly();
+        $order->touchListsVersion();
         $order->record($approval ? 'approved' : 'released', $approval ? "Approved by {$user->name}" : "Released by {$user->name}", $user->id);
 
         return $approval ? "Order {$order->order_number} approved." : "Order {$order->order_number} released.";
@@ -233,6 +237,20 @@ class OrderControlService
     public function sla(Organization $organization, ?int $storeId = null): array
     {
         $hours = $this->settings($organization)['sla_hours'];
+
+        // Worked out again after an order changes, and at least every minute (the hours left keep running).
+        return Cache::remember(
+            "orders-sla:{$organization->id}:".Order::listsVersion($organization->id).":{$hours}:{$storeId}",
+            now()->addMinute(),
+            fn () => $this->slaReport($organization, $hours, $storeId),
+        );
+    }
+
+    /**
+     * @return array{sla_hours: int, breached: list<array<string, mixed>>, at_risk: list<array<string, mixed>>}
+     */
+    private function slaReport(Organization $organization, int $hours, ?int $storeId): array
+    {
         $orders = Order::where('organization_id', $organization->id)
             ->whereIn('order_status', self::OPEN)
             ->when($storeId, fn ($q) => $q->where('store_id', $storeId))

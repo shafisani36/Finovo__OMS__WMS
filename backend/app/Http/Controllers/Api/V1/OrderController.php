@@ -20,6 +20,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\Rule;
 
 class OrderController extends Controller
@@ -72,18 +73,29 @@ class OrderController extends Controller
         $warehouseId = $request->validate(['warehouse_id' => ['nullable', 'integer', $this->accessibleWarehouse($request)]])['warehouse_id'] ?? null;
         $query->when($warehouseId, fn ($q) => $q->assignedToWarehouse($warehouseId));
 
-        $perPage = $this->perPage($request, 10);
-        $orders = $query->latest('placed_at')->paginate($perPage);
+        // Metrics, counted in one pass over the company's (store's, warehouse's) orders and kept until an order
+        // changes (or for a minute at most).
+        $kpis = Cache::remember(
+            "orders-kpis:{$org->id}:".Order::listsVersion($org->id).":{$storeId}:{$warehouseId}",
+            now()->addMinute(),
+            fn () => (array) Order::where('organization_id', $org->id)
+                ->when($storeId, fn ($q) => $q->where('store_id', $storeId))
+                ->when($warehouseId, fn ($q) => $q->assignedToWarehouse($warehouseId))
+                ->toBase()
+                ->selectRaw(
+                    "COUNT(*) AS total,
+                     SUM(CASE WHEN order_status IN ('imported', 'pending') THEN 1 ELSE 0 END) AS pending,
+                     SUM(CASE WHEN order_status = 'allocated' THEN 1 ELSE 0 END) AS allocated,
+                     SUM(CASE WHEN order_status IN ('partially_shipped', 'shipped', 'delivered', 'returned') THEN 1 ELSE 0 END) AS shipped,
+                     SUM(CASE WHEN hold_type IS NOT NULL THEN 1 ELSE 0 END) AS on_hold"
+                )
+                ->first(),
+        );
 
-        // Metrics
-        $metrics = fn () => Order::where('organization_id', $org->id)
-            ->when($storeId, fn ($q) => $q->where('store_id', $storeId))
-            ->when($warehouseId, fn ($q) => $q->assignedToWarehouse($warehouseId));
-        $totalOrders = $metrics()->count();
-        $pending = $metrics()->whereIn('order_status', ['imported', 'pending'])->count();
-        $allocated = $metrics()->where('order_status', 'allocated')->count();
-        $shipped = $metrics()->whereIn('order_status', ['partially_shipped', 'shipped', 'delivered', 'returned'])->count();
-        $onHold = $metrics()->whereNotNull('hold_type')->count();
+        // Without a filter the page count is the total above, so the list is not counted a second time.
+        $filtered = $request->filled('search') || $request->filled('status') || $hold || $request->filled('custom_status');
+        $perPage = $this->perPage($request, 10);
+        $orders = $query->latest('placed_at')->paginate($perPage, total: $filtered ? null : (int) $kpis['total']);
 
         return response()->json([
             'status' => 'success',
@@ -95,11 +107,11 @@ class OrderController extends Controller
                 'total' => $orders->total(),
             ],
             'kpis' => [
-                'total_orders' => $totalOrders,
-                'pending' => $pending,
-                'allocated' => $allocated,
-                'shipped' => $shipped,
-                'on_hold' => $onHold,
+                'total_orders' => (int) $kpis['total'],
+                'pending' => (int) $kpis['pending'],
+                'allocated' => (int) $kpis['allocated'],
+                'shipped' => (int) $kpis['shipped'],
+                'on_hold' => (int) $kpis['on_hold'],
             ],
         ]);
     }

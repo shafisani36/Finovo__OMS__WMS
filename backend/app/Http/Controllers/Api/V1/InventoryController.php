@@ -17,10 +17,14 @@ use App\Services\InventoryValuationService;
 use App\Services\StockAgingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\Rule;
 
 class InventoryController extends Controller
 {
+    /** Available units at or below which a balance counts as low stock. */
+    private const LOW_STOCK_UNITS = 10;
+
     public function __construct(
         protected InventoryEngine $inventoryEngine,
         protected InventoryValuationService $valuations
@@ -156,43 +160,42 @@ class InventoryController extends Controller
             $query->where('warehouse_id', $warehouseId);
         }
 
-        $balances = $query->with('variant')->get();
+        // Summed in the database: the page never loads every balance row.
+        $totals = $query->toBase()->selectRaw(
+            'COALESCE(SUM(on_hand), 0) AS on_hand, COALESCE(SUM(reserved), 0) AS reserved, COALESCE(SUM(available), 0) AS available,
+             COALESCE(SUM(quarantined), 0) AS quarantined, COALESCE(SUM(damaged), 0) AS damaged, COALESCE(SUM(in_transit), 0) AS in_transit,
+             SUM(CASE WHEN available <= 0 THEN 1 ELSE 0 END) AS out_of_stock,
+             SUM(CASE WHEN available > 0 AND available <= ? THEN 1 ELSE 0 END) AS low_stock',
+            [self::LOW_STOCK_UNITS]
+        )->first();
 
         $totalSkus = ProductVariant::where('organization_id', $org->id)
             ->when($storeId, fn ($q) => $q->whereHas('skuMappings', fn ($m) => $m->where('store_id', $storeId)))
             ->count();
-        $totalOnHand = $balances->sum('on_hand');
-        $totalReserved = $balances->sum('reserved');
-        $totalAvailable = $balances->sum('available');
-        $totalQuarantined = $balances->sum('quarantined');
-        $totalDamaged = $balances->sum('damaged');
-        $totalInTransit = $balances->sum('in_transit');
 
-        $lowStockCount = 0;
-        $outOfStockCount = 0;
-
-        foreach ($balances as $b) {
-            if ($b->available <= 0) {
-                $outOfStockCount++;
-            } elseif ($b->available <= 10) {
-                $lowStockCount++;
-            }
-        }
+        // Valuing stock replays the ledger, so the figure is kept for a minute per company, scope and method.
+        $method = $this->valuations->method($org);
+        $scope = $this->stockScope($request);
+        $valuation = Cache::remember(
+            'inventory-valuation:'.$org->id.':'.$method.':'.md5(json_encode($scope)),
+            now()->addMinute(),
+            fn () => $this->valuations->report($org->id, $method, 'perpetual', now(), now(), ...$scope)['totals']['closing_value'],
+        );
 
         return response()->json([
             'status' => 'success',
             'data' => [
                 'total_skus' => $totalSkus,
-                'total_on_hand' => $totalOnHand,
-                'total_reserved' => $totalReserved,
-                'total_available' => $totalAvailable,
-                'total_quarantined' => $totalQuarantined,
-                'total_damaged' => $totalDamaged,
-                'total_in_transit' => $totalInTransit,
-                'low_stock_count' => $lowStockCount,
-                'out_of_stock_count' => $outOfStockCount,
+                'total_on_hand' => (int) $totals->on_hand,
+                'total_reserved' => (int) $totals->reserved,
+                'total_available' => (int) $totals->available,
+                'total_quarantined' => (int) $totals->quarantined,
+                'total_damaged' => (int) $totals->damaged,
+                'total_in_transit' => (int) $totals->in_transit,
+                'low_stock_count' => (int) $totals->low_stock,
+                'out_of_stock_count' => (int) $totals->out_of_stock,
                 // Stock on hand now, valued with the company's method (FIFO, LIFO or AVCO).
-                'total_valuation' => $this->valuations->report($org->id, $this->valuations->method($org), 'perpetual', now(), now(), ...$this->stockScope($request))['totals']['closing_value'],
+                'total_valuation' => $valuation,
             ],
         ]);
     }

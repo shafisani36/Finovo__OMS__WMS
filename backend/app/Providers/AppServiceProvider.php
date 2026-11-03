@@ -5,8 +5,13 @@ namespace App\Providers;
 use App\Services\AccessControl;
 use App\Services\StoreSyncOutbox;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Foundation\Events\DiagnosingHealth;
 use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
@@ -30,6 +35,14 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->configureUrls();
+        // No call to a store, courier or other service may hang a request or a worker: calls that set no time limit
+        // of their own give up after these many seconds.
+        Http::globalOptions(['connect_timeout' => 10, 'timeout' => 30]);
+        // The /up health check (for the load balancer and uptime monitor) fails when the database or cache is down.
+        Event::listen(DiagnosingHealth::class, function () {
+            DB::select('SELECT 1');
+            Cache::put('health-check', true, 10);
+        });
         // Rate Limiter for Login Attempts
         RateLimiter::for('login', function (Request $request) {
             $email = (string) $request->input('email');

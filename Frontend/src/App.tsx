@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ActiveStoreProvider } from './context/ActiveStoreContext';
@@ -7,39 +7,42 @@ import { LoginPage } from './pages/LoginPage';
 import { VerifyOtpPage } from './pages/VerifyOtpPage';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
-import { DashboardPage } from './pages/DashboardPage';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
-import { StoresPage } from './pages/StoresPage';
-import { PickingPage } from './pages/PickingPage';
-import { WorkBoardPage } from './pages/WorkBoardPage';
-import { FormsPage } from './pages/FormsPage';
-import { RecurringOrdersPage } from './pages/RecurringOrdersPage';
-import { TrackOrderPage } from './pages/TrackOrderPage';
-import { FormBuilderPage } from './pages/FormBuilderPage';
-import { ClientPortalPage } from './pages/ClientPortalPage';
-import { AssistantPage } from './pages/AssistantPage';
 import { SsoCallbackPage } from './pages/SsoCallbackPage';
-import { StockMovementsPage } from './pages/StockMovementsPage';
-import { WarehousesPage } from './pages/WarehousesPage';
-import { WarehouseCreatePage } from './pages/WarehouseCreatePage';
-import { WarehouseDetailPage } from './pages/WarehouseDetailPage';
-import { OrdersPage } from './pages/OrdersPage';
-import { ProductsPage } from './pages/ProductsPage';
-import { InventoryPage } from './pages/InventoryPage';
-import { ShipmentsPage } from './pages/ShipmentsPage';
-import { ReturnsPage } from './pages/ReturnsPage';
-import { CustomersPage } from './pages/CustomersPage';
-import { BillingPage } from './pages/BillingPage';
-import { EmployeesPage } from './pages/EmployeesPage';
-import { ProductDetailPage } from './pages/ProductDetailPage';
-import { CustomerDetailPage } from './pages/CustomerDetailPage';
-import { PurchaseOrdersPage } from './pages/PurchaseOrdersPage';
-import { MobileApp } from './pages/mobile/MobileApp';
 import { AppLayout } from './components/layout/AppLayout';
 import { AccessDenied } from './components/common/AccessDenied';
+import { PageLoader } from './components/common/PageLoader';
 import { can } from './types/auth';
 import type { Permission } from './types/auth';
 import { Loader2 } from 'lucide-react';
+
+// Each page is downloaded the first time it is opened, so the app starts with a small file.
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const StoresPage = lazy(() => import('./pages/StoresPage'));
+const PickingPage = lazy(() => import('./pages/PickingPage'));
+const WorkBoardPage = lazy(() => import('./pages/WorkBoardPage'));
+const FormsPage = lazy(() => import('./pages/FormsPage'));
+const RecurringOrdersPage = lazy(() => import('./pages/RecurringOrdersPage'));
+const TrackOrderPage = lazy(() => import('./pages/TrackOrderPage'));
+const FormBuilderPage = lazy(() => import('./pages/FormBuilderPage'));
+const ClientPortalPage = lazy(() => import('./pages/ClientPortalPage'));
+const AssistantPage = lazy(() => import('./pages/AssistantPage'));
+const StockMovementsPage = lazy(() => import('./pages/StockMovementsPage'));
+const WarehousesPage = lazy(() => import('./pages/WarehousesPage'));
+const WarehouseCreatePage = lazy(() => import('./pages/WarehouseCreatePage'));
+const WarehouseDetailPage = lazy(() => import('./pages/WarehouseDetailPage'));
+const OrdersPage = lazy(() => import('./pages/OrdersPage'));
+const ProductsPage = lazy(() => import('./pages/ProductsPage'));
+const InventoryPage = lazy(() => import('./pages/InventoryPage'));
+const ShipmentsPage = lazy(() => import('./pages/ShipmentsPage'));
+const ReturnsPage = lazy(() => import('./pages/ReturnsPage'));
+const CustomersPage = lazy(() => import('./pages/CustomersPage'));
+const BillingPage = lazy(() => import('./pages/BillingPage'));
+const EmployeesPage = lazy(() => import('./pages/EmployeesPage'));
+const ProductDetailPage = lazy(() => import('./pages/ProductDetailPage'));
+const CustomerDetailPage = lazy(() => import('./pages/CustomerDetailPage'));
+const PurchaseOrdersPage = lazy(() => import('./pages/PurchaseOrdersPage'));
+const MobileApp = lazy(() => import('./pages/mobile/MobileApp'));
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -102,6 +105,7 @@ export const App: React.FC = () => {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <Suspense fallback={<PageLoader />}>
         <Routes>
           {/* Public Authentication Routes */}
           <Route
@@ -190,6 +194,7 @@ export const App: React.FC = () => {
           {/* Default Navigation Fallbacks */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
         </Routes>
+        </Suspense>
       </AuthProvider>
     </BrowserRouter>
   );
