@@ -17,8 +17,14 @@ class GoodsReceivedNoteService
 {
     public function __construct(
         protected InventoryEngine $inventoryEngine,
-        protected ?ProcurementPdfService $pdfService = null
+        protected ?ProcurementPdfService $pdfService = null,
+        protected ?SerialNumberService $serialService = null
     ) {}
+
+    protected function serialService(): SerialNumberService
+    {
+        return $this->serialService ??= app(SerialNumberService::class);
+    }
 
     /**
      * Create a new Goods Received Note against a Purchase Order.
@@ -136,6 +142,7 @@ class GoodsReceivedNoteService
                     'manufacturing_date' => $itemData['manufacturing_date'] ?? null,
                     'discrepancy_reason' => $itemData['discrepancy_reason'] ?? null,
                     'notes' => $itemData['notes'] ?? null,
+                    'serial_numbers' => $itemData['serial_numbers'] ?? null,
                     'status' => 'draft',
                 ]);
 
@@ -200,6 +207,7 @@ class GoodsReceivedNoteService
                         'lot_number' => $itemUpdate['lot_number'] ?? $grnItem->lot_number,
                         'expiry_date' => $itemUpdate['expiry_date'] ?? $grnItem->expiry_date,
                         'discrepancy_reason' => $itemUpdate['discrepancy_reason'] ?? $grnItem->discrepancy_reason,
+                        'serial_numbers' => $itemUpdate['serial_numbers'] ?? $grnItem->serial_numbers,
                         'status' => 'inspected',
                     ]);
 

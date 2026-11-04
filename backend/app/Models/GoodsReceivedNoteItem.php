@@ -30,6 +30,7 @@ class GoodsReceivedNoteItem extends Model
         'manufacturing_date',
         'discrepancy_reason',
         'notes',
+        'serial_numbers',
         'status',
     ];
 
@@ -44,6 +45,7 @@ class GoodsReceivedNoteItem extends Model
         'pending_inspection_quantity' => 'integer',
         'expiry_date' => 'date',
         'manufacturing_date' => 'date',
+        'serial_numbers' => 'array',
     ];
 
     public function goodsReceivedNote(): BelongsTo

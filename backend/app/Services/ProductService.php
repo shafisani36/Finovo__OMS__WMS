@@ -135,9 +135,12 @@ class ProductService
             ]);
         }
 
-        SkuMapping::whereIn('product_variant_id', $removed)->delete();
-        InventoryBalance::whereIn('product_variant_id', $removed)->delete();
-        ProductVariant::whereIn('id', $removed)->delete();
+        // Only attempt deletions when there are actually removed variant IDs.
+        if ($removed->isNotEmpty()) {
+            SkuMapping::whereIn('product_variant_id', $removed)->delete();
+            InventoryBalance::whereIn('product_variant_id', $removed)->delete();
+            ProductVariant::whereIn('id', $removed)->delete();
+        }
 
         foreach ($variants as $variantData) {
             $fields = [

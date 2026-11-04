@@ -14,11 +14,15 @@ class ReturnItem extends Model
         'sku',
         'product_name',
         'quantity',
+        'serial_numbers',
     ];
 
     protected function casts(): array
     {
-        return ['quantity' => 'integer'];
+        return [
+            'quantity' => 'integer',
+            'serial_numbers' => 'array',
+        ];
     }
 
     public function orderReturn(): BelongsTo
