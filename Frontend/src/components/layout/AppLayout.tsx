@@ -3,6 +3,7 @@ import { PageLoader } from '../common/PageLoader';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
+  ChartNoAxesCombined,
   Sparkles,
   Warehouse,
   Store as StoreIcon,
@@ -445,6 +446,12 @@ export const AppLayout: React.FC = () => {
             <LayoutDashboard size={18} />
             <span>Dashboard</span>
           </NavLink>
+          {can(user, 'orders.view') && (
+            <NavLink to="/analytics" className={({ isActive }) => `sidebar-nav-item ${isActive ? 'active' : ''}`} onClick={() => setMobileMenuOpen(false)}>
+              <ChartNoAxesCombined size={18} />
+              <span>Analytics</span>
+            </NavLink>
+          )}
 
           {/* Sections and pages the user may open (NAV_SECTIONS) */}
           {navSections.map((section) => (

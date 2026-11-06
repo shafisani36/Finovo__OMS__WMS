@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\AiController;
+use App\Http\Controllers\Api\V1\AnalyticsController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BarcodeController;
 use App\Http\Controllers\Api\V1\ClientController;
@@ -254,6 +255,7 @@ Route::prefix('v1')->group(function () {
         Route::middleware('permission:orders.view')->group(function () {
             Route::get('orders', [OrderController::class, 'index']);
             Route::get('orders/sla', [OrderController::class, 'sla']);
+            Route::get('analytics', [AnalyticsController::class, 'index']);
             Route::get('orders/statuses', [OrderController::class, 'customStatuses']);
             // Each action checks its own permission.
             Route::post('orders/bulk', [OrderController::class, 'bulk']);

@@ -85,6 +85,12 @@ return [
     'timezone' => 'UTC',
 
     /*
+    | Time zone the business works in: reports such as analytics count days in it. Dates are still stored in UTC.
+    */
+
+    'business_timezone' => env('BUSINESS_TIMEZONE', 'Asia/Karachi'),
+
+    /*
     |--------------------------------------------------------------------------
     | Application Locale Configuration
     |--------------------------------------------------------------------------

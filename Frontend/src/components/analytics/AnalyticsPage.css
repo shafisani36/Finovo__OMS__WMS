@@ -1,0 +1,191 @@
+/* Analytics page: filters, KPI cards and chart grid, in the app's card style. */
+.an-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.an-periods {
+  display: inline-flex;
+  padding: 4px;
+  gap: 4px;
+  background: #ffffff;
+  border: 1px solid var(--finovo-border);
+  border-radius: 12px;
+}
+
+.an-periods button {
+  border: 0;
+  background: transparent;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--finovo-text-muted);
+  cursor: pointer;
+}
+
+.an-periods button:hover {
+  color: var(--finovo-text-main);
+}
+
+.an-periods button.active {
+  background: var(--finovo-primary);
+  color: #ffffff;
+}
+
+.an-refreshing {
+  font-size: 12px;
+  color: var(--finovo-text-light);
+}
+
+.an-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.an-kpi {
+  background: #ffffff;
+  border: 1px solid var(--finovo-border);
+  border-radius: var(--finovo-radius-lg);
+  padding: 16px 18px;
+}
+
+.an-kpi-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.an-kpi-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--finovo-primary-light);
+  color: var(--finovo-primary);
+}
+
+.an-kpi-title {
+  font-size: 13px;
+  color: var(--finovo-text-muted);
+  font-weight: 500;
+}
+
+.an-kpi-value {
+  margin-top: 10px;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--finovo-text-main);
+  letter-spacing: -0.02em;
+}
+
+.an-kpi-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.an-kpi-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-weight: 600;
+  color: var(--finovo-text-muted);
+}
+
+.an-kpi-change.an-good {
+  color: #059669;
+}
+
+.an-kpi-change.an-bad {
+  color: #dc2626;
+}
+
+.an-kpi-previous {
+  color: var(--finovo-text-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.an-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.an-card {
+  background: #ffffff;
+  border: 1px solid var(--finovo-border);
+  border-radius: var(--finovo-radius-lg);
+  padding: 18px 18px 12px;
+  min-width: 0;
+}
+
+.an-card-wide {
+  grid-column: 1 / -1;
+}
+
+.an-card-head {
+  margin-bottom: 12px;
+}
+
+.an-card-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--finovo-text-main);
+}
+
+.an-card-head p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--finovo-text-muted);
+}
+
+.an-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  font-size: 13px;
+  color: var(--finovo-text-light);
+}
+
+.an-loading {
+  background: #ffffff;
+  border: 1px solid var(--finovo-border);
+  border-radius: var(--finovo-radius-lg);
+}
+
+.an-table td.an-warn {
+  color: #d97706;
+  font-weight: 600;
+}
+
+@media (max-width: 1200px) {
+  .an-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .an-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 520px) {
+  .an-kpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

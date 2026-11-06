@@ -1443,6 +1443,30 @@ export interface OrderSerialLine {
 /** Serial numbers typed or scanned one per line (or separated by commas). */
 export const parseSerials = (text: string): string[] => [...new Set(text.split(/[\n,]+/).map((serial) => serial.trim().toUpperCase()).filter(Boolean))];
 
+// Analytics page
+export const ANALYTICS_PERIODS = [7, 30, 90, 365] as const;
+export type AnalyticsPeriod = (typeof ANALYTICS_PERIODS)[number];
+
+export interface AnalyticsFigure {
+  value: number;
+  previous: number;
+}
+
+export interface AnalyticsReport {
+  period: { days: number; from: string; to: string };
+  currency: string;
+  kpis: Record<'revenue' | 'orders' | 'average_order_value' | 'units_sold' | 'cancellation_rate' | 'return_rate' | 'hours_to_ship' | 'delivered', AnalyticsFigure>;
+  daily: { date: string; orders: number; revenue: number; shipped: number }[];
+  statuses: { status: string; count: number }[];
+  stores: { name: string; platform: string; orders: number; revenue: number }[];
+  top_products: { name: string; sku: string; quantity: number; revenue: number }[];
+  carriers: { carrier: string; shipments: number; delivered: number }[];
+  return_reasons: { reason: string; count: number }[];
+  /** Empty for staff who cannot see stock. */
+  warehouses: { name: string; on_hand: number; reserved: number; available: number; stock_value: number; low_stock: number; shipments: number }[];
+  stock_flow: { date: string; inbound: number; outbound: number }[];
+}
+
 export type RecurringInterval = 'weekly' | 'fortnightly' | 'monthly';
 
 export const RECURRING_INTERVAL_LABELS: Record<RecurringInterval, string> = { weekly: 'Every week', fortnightly: 'Every 2 weeks', monthly: 'Every month' };
@@ -2643,6 +2667,11 @@ const omsService = {
   async unassignOrderSerial(orderId: number, unitId: number): Promise<{ message: string }> {
     const { data } = await apiClient.delete(`/orders/${orderId}/serials/${unitId}`);
     return data;
+  },
+
+  async getAnalytics(params: { days: AnalyticsPeriod; store_id?: number | null; warehouse_id?: number | null }): Promise<AnalyticsReport> {
+    const { data } = await apiClient.get('/analytics', { params });
+    return data.data;
   },
 
   async getRecurringOrders(): Promise<RecurringOrderModel[]> {

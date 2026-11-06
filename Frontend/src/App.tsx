@@ -18,6 +18,7 @@ import { Loader2 } from 'lucide-react';
 
 // Each page is downloaded the first time it is opened, so the app starts with a small file.
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
 const StoresPage = lazy(() => import('./pages/StoresPage'));
 const PickingPage = lazy(() => import('./pages/PickingPage'));
 const WorkBoardPage = lazy(() => import('./pages/WorkBoardPage'));
@@ -164,6 +165,7 @@ export const App: React.FC = () => {
             }
           >
             <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/analytics" element={<RequirePermission permission="orders.view"><AnalyticsPage /></RequirePermission>} />
             <Route path="/stores" element={<RequirePermission permission="stores.view"><StoresPage /></RequirePermission>} />
             <Route path="/warehouses" element={<RequirePermission permission="warehouses.view"><WarehousesPage /></RequirePermission>} />
             <Route path="/warehouses/create" element={<RequirePermission permission="warehouses.manage"><WarehouseCreatePage /></RequirePermission>} />
