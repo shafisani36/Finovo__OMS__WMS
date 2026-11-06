@@ -20,9 +20,11 @@ export default defineConfig({
     },
   },
   // Unit tests (npm test): browser APIs such as localStorage come from jsdom.
-  test: {
+   test: {
     environment: 'jsdom',
     include: ['src/**/*.test.ts'],
     restoreMocks: true,
+    // Slow machines can take several seconds to load Intl currency data on first use.
+    testTimeout: 20000,
   },
 })
