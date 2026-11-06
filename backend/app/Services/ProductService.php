@@ -151,6 +151,7 @@ class ProductService
                 'price' => $variantData['price'],
                 'cost_price' => $variantData['cost_price'] ?? 0,
                 'is_active' => $variantData['is_active'] ?? true,
+                'track_serials' => $variantData['track_serials'] ?? false,
             ];
 
             $variant = isset($variantData['id']) ? $existing->get((int) $variantData['id']) : null;

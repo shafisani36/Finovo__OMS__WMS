@@ -35,6 +35,7 @@ class ShipmentService
         protected CourierService $couriers,
         protected EmailService $emails,
         protected OrderReturnService $returns,
+        protected SerialNumberService $serials,
     ) {}
 
     /**
@@ -159,6 +160,7 @@ class ShipmentService
                 ->each(fn ($item) => $item->update(['status' => 'allocated', 'fulfilled_quantity' => 0]));
             $order->update(['order_status' => 'packed', 'fulfillment_status' => 'unfulfilled']);
             $order->pickTasks()->where('status', 'shipped')->update(['status' => 'packed']);
+            $this->serials->unship($order, $locked->warehouse_id, $user->id);
 
             StoreSyncTask::where('type', StoreSyncTask::TYPE_FULFILLMENT)
                 ->where('subject_id', $locked->id)
@@ -276,6 +278,7 @@ class ShipmentService
         $shipment->record(ShipmentEvent::COURIER, $text, courierStatus: $status->status, at: $status->at);
 
         match ($status->status) {
+            CourierStatus::OUT_FOR_DELIVERY => $this->emails->sendOutForDeliveryEmail($shipment),
             CourierStatus::DELIVERED => $this->deliver($shipment, description: "Delivered ({$shipment->carrier})"),
             CourierStatus::RETURNED => $this->markReturned($shipment),
             default => null,
@@ -330,6 +333,7 @@ class ShipmentService
         if (! $shipment->order?->items()->where('status', 'allocated')->exists()) {
             throw ValidationException::withMessages(['status' => "Order {$shipment->order?->order_number} has no allocated items to dispatch."]);
         }
+        $this->serials->ensureComplete($shipment->order);
     }
 
     /**
@@ -381,6 +385,7 @@ class ShipmentService
             $order->pickTasks()->whereNotIn('status', PickTask::CLOSED)->update(['status' => 'shipped']);
 
             $shipment->update([...$fields, 'status' => Shipment::SHIPPED, 'shipped_at' => now(), 'dispatched_by_user_id' => $user->id]);
+            $this->serials->ship($order, $fields['tracking_number'], $user->id);
 
             return $shipment;
         });

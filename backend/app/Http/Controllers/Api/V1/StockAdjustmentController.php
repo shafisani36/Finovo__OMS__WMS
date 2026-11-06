@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\StockAdjustment;
 use App\Models\Warehouse;
+use App\Services\EmailService;
 use App\Services\InventoryEngine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -88,7 +89,7 @@ class StockAdjustmentController extends Controller
     /**
      * Submit stock adjustment request.
      */
-    public function store(Request $request): JsonResponse
+    public function store(Request $request, EmailService $emails): JsonResponse
     {
         $org = $request->user()->currentOrganization();
 
@@ -178,6 +179,7 @@ class StockAdjustmentController extends Controller
                 locationId: $validated['warehouse_location_id'] ?? null,
                 lotNumber: $validated['lot_number'] ?? null
             );
+            $emails->stockAdjusted($adjustment);
 
             return response()->json([
                 'status' => 'success',
@@ -195,7 +197,7 @@ class StockAdjustmentController extends Controller
     /**
      * Approve pending stock adjustment (enforces separation of duties).
      */
-    public function approve(Request $request, int $adjustmentId): JsonResponse
+    public function approve(Request $request, int $adjustmentId, EmailService $emails): JsonResponse
     {
         $org = $request->user()->currentOrganization();
 
@@ -217,7 +219,7 @@ class StockAdjustmentController extends Controller
         }
 
         // Execute through authoritative InventoryEngine
-        $this->inventoryEngine->adjustStock(
+        $posted = $this->inventoryEngine->adjustStock(
             organizationId: $org->id,
             warehouseId: $adjustment->warehouse_id,
             productVariantId: $adjustment->product_variant_id,
@@ -236,6 +238,7 @@ class StockAdjustmentController extends Controller
             'approved_by_user_id' => $request->user()->id,
             'approved_at' => now(),
         ]);
+        $emails->stockAdjusted($posted);
 
         return response()->json([
             'status' => 'success',

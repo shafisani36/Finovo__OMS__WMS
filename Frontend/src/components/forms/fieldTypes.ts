@@ -4,7 +4,7 @@
  * its own defaults, settings and checks. The layout contract matches the backend's FormSchema.
  */
 
-export type FieldTypeKey = 'text' | 'textarea' | 'number' | 'date' | 'dropdown' | 'checkbox' | 'lookup' | 'barcode' | 'file';
+export type FieldTypeKey = 'text' | 'textarea' | 'number' | 'date' | 'dropdown' | 'checkbox' | 'lookup' | 'barcode' | 'file' | 'page';
 
 export type LookupSource = 'products' | 'customers' | 'warehouses' | 'stores';
 
@@ -18,6 +18,12 @@ export const LOOKUP_SOURCES: { value: LookupSource; label: string }[] = [
 export interface FieldOption {
   value: string;
   label: string;
+}
+
+/** Show a field only when an earlier field has this answer (a checkbox answers "1" when ticked, "0" when not). */
+export interface FieldCondition {
+  field: string;
+  equals: string;
 }
 
 export interface FormField {
@@ -34,6 +40,7 @@ export interface FormField {
   min?: number | null;
   max?: number | null;
   max_length?: number | null;
+  show_if?: FieldCondition | null;
 }
 
 export interface FormSchema {
@@ -56,6 +63,8 @@ export abstract class FieldType {
   abstract readonly label: string;
   abstract readonly description: string;
   readonly settings: readonly FieldSetting[] = [];
+  /** False for layout-only fields (a page break) that take no answer. */
+  readonly answered: boolean = true;
 
   /** A new field of this type with the given ID. */
   create(id: string): FormField {
@@ -201,6 +210,18 @@ class FileFieldType extends FieldType {
   }
 }
 
+/** Starts a new step of the form; its label is the step's title. */
+class PageFieldType extends FieldType {
+  readonly key = 'page';
+  readonly label = 'Page Break';
+  readonly description = 'Start a new step';
+  readonly answered = false;
+
+  create(id: string): FormField {
+    return { id, type: this.key, label: 'Next step' };
+  }
+}
+
 /** One instance of each type, in palette order. */
 export const FIELD_TYPES: Record<FieldTypeKey, FieldType> = {
   text: new TextFieldType(),
@@ -212,6 +233,7 @@ export const FIELD_TYPES: Record<FieldTypeKey, FieldType> = {
   lookup: new LookupFieldType(),
   barcode: new BarcodeFieldType(),
   file: new FileFieldType(),
+  page: new PageFieldType(),
 };
 
 export const fieldType = (key: FieldTypeKey): FieldType => FIELD_TYPES[key];
@@ -229,10 +251,45 @@ export const createFieldId = (taken: Iterable<string>, random: (bytes: number) =
   return id;
 };
 
+/** A condition's form of an answer: what show_if.equals is compared with. */
+export const conditionValue = (value: FieldValue | undefined): string =>
+  typeof value === 'boolean' ? (value ? '1' : '0') : value === null || value === undefined || value instanceof File ? '' : String(value);
+
+/** Whether a field is shown for these answers (same rule as the backend's exclude_unless). */
+export const isShown = (field: FormField, values: Record<string, FieldValue>): boolean =>
+  !field.show_if || conditionValue(values[field.show_if.field]) === field.show_if.equals;
+
+/** Fields that take an answer and are shown for these answers. */
+export const visibleAnswerFields = (fields: FormField[], values: Record<string, FieldValue>): FormField[] =>
+  fields.filter((field) => fieldType(field.type).answered && isShown(field, values));
+
+export interface FormStep {
+  title: string;
+  fields: FormField[];
+}
+
+/** The form split at its page breaks; a form without page breaks is one step. */
+export const formSteps = (schema: FormSchema): FormStep[] => {
+  const steps: FormStep[] = [{ title: '', fields: [] }];
+  for (const field of schema.fields) {
+    if (field.type === 'page') {
+      if (steps[steps.length - 1].fields.length > 0 || steps.length > 1) steps.push({ title: field.label, fields: [] });
+      else steps[0].title = field.label;
+    } else steps[steps.length - 1].fields.push(field);
+  }
+  return steps;
+};
+
+/** Earlier fields a field can depend on: those above it that take an answer. */
+export const conditionSources = (fields: FormField[], id: string): FormField[] => {
+  const index = fields.findIndex((field) => field.id === id);
+  return fields.slice(0, Math.max(index, 0)).filter((field) => fieldType(field.type).answered && field.type !== 'file');
+};
+
 /** Messages for every field whose value is not accepted, keyed by field ID. */
 export const validateValues = (schema: FormSchema, values: Record<string, FieldValue>): Record<string, string> => {
   const errors: Record<string, string> = {};
-  for (const field of schema.fields) {
+  for (const field of visibleAnswerFields(schema.fields, values)) {
     const message = fieldType(field.type).validate(field, values[field.id]);
     if (message) errors[field.id] = message;
   }
@@ -242,7 +299,7 @@ export const validateValues = (schema: FormSchema, values: Record<string, FieldV
 /** The multipart body of a submission: data[<field id>] per answered field. */
 export const toFormData = (schema: FormSchema, values: Record<string, FieldValue>): FormData => {
   const body = new FormData();
-  for (const field of schema.fields) {
+  for (const field of visibleAnswerFields(schema.fields, values)) {
     const payload = fieldType(field.type).toPayload(values[field.id]);
     if (payload !== null) body.append(`data[${field.id}]`, payload);
   }
@@ -251,4 +308,4 @@ export const toFormData = (schema: FormSchema, values: Record<string, FieldValue
 
 /** Starting values of a form: each field's empty value. */
 export const emptyValues = (schema: FormSchema): Record<string, FieldValue> =>
-  Object.fromEntries(schema.fields.map((field) => [field.id, fieldType(field.type).emptyValue()]));
+  Object.fromEntries(schema.fields.filter((field) => fieldType(field.type).answered).map((field) => [field.id, fieldType(field.type).emptyValue()]));

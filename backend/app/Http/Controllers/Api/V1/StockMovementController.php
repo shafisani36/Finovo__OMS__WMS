@@ -7,6 +7,7 @@ use App\Models\InventoryBalance;
 use App\Models\InventoryLedgerEntry;
 use App\Models\Product;
 use App\Models\Warehouse;
+use App\Services\EmailService;
 use App\Services\InventoryEngine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -115,7 +116,7 @@ class StockMovementController extends Controller
     /**
      * Transfer stock between warehouses.
      */
-    public function transfer(Request $request): JsonResponse
+    public function transfer(Request $request, EmailService $emails): JsonResponse
     {
         $org = $request->user()->currentOrganization();
 
@@ -148,6 +149,7 @@ class StockMovementController extends Controller
                 notes: $validated['notes'] ?? null,
                 userId: $request->user()->id
             );
+            $emails->stockTransferred($transfer);
 
             return response()->json([
                 'status' => 'success',
@@ -165,7 +167,7 @@ class StockMovementController extends Controller
     /**
      * Adjust stock (add, subtract, recount).
      */
-    public function adjust(Request $request): JsonResponse
+    public function adjust(Request $request, EmailService $emails): JsonResponse
     {
         $org = $request->user()->currentOrganization();
 
@@ -200,6 +202,7 @@ class StockMovementController extends Controller
                 notes: $validated['notes'] ?? null,
                 userId: $request->user()->id
             );
+            $emails->stockAdjusted($adjustment);
 
             return response()->json([
                 'status' => 'success',

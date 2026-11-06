@@ -60,7 +60,7 @@ export const BuilderCanvas: React.FC<BuilderCanvasProps> = ({ fields, selectedId
         <React.Fragment key={field.id}>
           {dropIndex === index && <div className="fb-drop-line" />}
           <div
-            className={`fb-canvas-field fb-width-${field.width ?? 'full'}${selectedId === field.id ? ' is-selected' : ''}`}
+            className={`fb-canvas-field fb-width-${field.type === 'page' ? 'full' : (field.width ?? 'full')}${selectedId === field.id ? ' is-selected' : ''}`}
             draggable
             onDragStart={(e) => {
               e.dataTransfer.setData(MOVED_FIELD, field.id);
@@ -87,7 +87,18 @@ export const BuilderCanvas: React.FC<BuilderCanvasProps> = ({ fields, selectedId
                 <Trash2 size={13} />
               </button>
             </div>
-            <FormFieldInput field={field} value={null} preview />
+            {field.type === 'page' ? (
+              <div className="fb-page-break">
+                <span>Step: {field.label}</span>
+              </div>
+            ) : (
+              <FormFieldInput field={field} value={null} preview />
+            )}
+            {field.show_if && (
+              <div className="fb-condition-badge">
+                Shown when {fields.find((f) => f.id === field.show_if?.field)?.label ?? field.show_if.field} is "{field.show_if.equals}"
+              </div>
+            )}
           </div>
         </React.Fragment>
       ))}

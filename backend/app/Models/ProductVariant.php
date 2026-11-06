@@ -22,6 +22,7 @@ class ProductVariant extends Model
         'price',
         'cost_price',
         'is_active',
+        'track_serials',
     ];
 
     protected function casts(): array
@@ -30,6 +31,7 @@ class ProductVariant extends Model
             'price' => 'decimal:2',
             'cost_price' => 'decimal:2',
             'is_active' => 'boolean',
+            'track_serials' => 'boolean',
         ];
     }
 

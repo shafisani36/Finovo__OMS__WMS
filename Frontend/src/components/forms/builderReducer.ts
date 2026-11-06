@@ -75,7 +75,8 @@ export const builderReducer = (state: BuilderState, action: BuilderAction): Buil
 
     case 'removed':
       return edited(state, {
-        fields: state.fields.filter((f) => f.id !== action.id),
+        // Fields shown only for the removed field's answer are shown always from now on.
+        fields: state.fields.filter((f) => f.id !== action.id).map((f) => (f.show_if?.field === action.id ? { ...f, show_if: null } : f)),
         selectedId: state.selectedId === action.id ? null : state.selectedId,
       });
 

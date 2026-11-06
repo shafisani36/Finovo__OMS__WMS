@@ -8,6 +8,14 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // An earlier copy of this migration stopped half way on MySQL (return_items has no notes column to place
+        // the new column after), so each step is skipped when it already ran.
+        if (Schema::hasTable('unit_serial_numbers')) {
+            $this->addSerialColumns();
+
+            return;
+        }
+
         Schema::create('unit_serial_numbers', function (Blueprint $table) {
             $table->id();
             $table->foreignId('organization_id')->constrained()->cascadeOnDelete();
@@ -42,13 +50,16 @@ return new class extends Migration
             $table->index(['organization_id', 'order_id'], 'unit_serial_order');
         });
 
-        Schema::table('goods_received_note_items', function (Blueprint $table) {
-            $table->json('serial_numbers')->nullable()->after('notes');
-        });
+        $this->addSerialColumns();
+    }
 
-        Schema::table('return_items', function (Blueprint $table) {
-            $table->json('serial_numbers')->nullable()->after('notes');
-        });
+    private function addSerialColumns(): void
+    {
+        foreach (['goods_received_note_items', 'return_items'] as $name) {
+            if (! Schema::hasColumn($name, 'serial_numbers')) {
+                Schema::table($name, fn (Blueprint $table) => $table->json('serial_numbers')->nullable());
+            }
+        }
     }
 
     public function down(): void

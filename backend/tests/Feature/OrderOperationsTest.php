@@ -164,6 +164,32 @@ class OrderOperationsTest extends TestCase
         Carbon::setTestNow();
     }
 
+    public function test_a_recurring_order_is_set_up_without_an_earlier_order(): void
+    {
+        Carbon::setTestNow('2026-11-03 09:00:00');
+        $plan = [
+            'interval' => 'fortnightly',
+            'starts_on' => '2026-11-03',
+            'store_id' => $this->store->id,
+            'customer_name' => 'Ayesha Khan',
+            'customer_email' => 'ayesha@example.com',
+            'currency' => 'PKR',
+            'items' => [['product_variant_id' => $this->variant->id, 'quantity' => 3, 'unit_price' => 10]],
+        ];
+
+        $this->postJson('/api/v1/recurring-orders', [...$plan, 'starts_on' => '2026-11-01'])->assertUnprocessable()->assertJsonValidationErrors('starts_on');
+        $this->postJson('/api/v1/recurring-orders', [...$plan, 'items' => []])->assertUnprocessable()->assertJsonValidationErrors('items');
+
+        $created = $this->postJson('/api/v1/recurring-orders', $plan)->assertCreated()->json('data');
+        $this->assertSame(['Ayesha Khan', 30, 'fortnightly'], [$created['customer_name'], $created['total'], $created['interval']]);
+
+        $this->artisan('orders:recurring')->assertSuccessful();
+        $made = Order::sole();
+        $this->assertSame(['Ayesha Khan', 3, 'pending'], [$made->customer_name, (int) $made->items()->sum('quantity'), $made->payment_status]);
+        $this->assertSame('2026-11-17', RecurringOrder::find($created['id'])->next_run_at->toDateString());
+        Carbon::setTestNow();
+    }
+
     public function test_a_return_is_refunded_or_replaced_once(): void
     {
         $order = $this->shippedOrder();

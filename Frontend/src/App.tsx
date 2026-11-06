@@ -23,6 +23,7 @@ const PickingPage = lazy(() => import('./pages/PickingPage'));
 const WorkBoardPage = lazy(() => import('./pages/WorkBoardPage'));
 const FormsPage = lazy(() => import('./pages/FormsPage'));
 const RecurringOrdersPage = lazy(() => import('./pages/RecurringOrdersPage'));
+const SerialNumbersPage = lazy(() => import('./pages/SerialNumbersPage'));
 const TrackOrderPage = lazy(() => import('./pages/TrackOrderPage'));
 const FormBuilderPage = lazy(() => import('./pages/FormBuilderPage'));
 const ClientPortalPage = lazy(() => import('./pages/ClientPortalPage'));
@@ -172,6 +173,7 @@ export const App: React.FC = () => {
             <Route path="/products" element={<RequirePermission permission="products.view"><ProductsPage /></RequirePermission>} />
             <Route path="/products/:id" element={<RequirePermission permission="products.view"><ProductDetailPage /></RequirePermission>} />
             <Route path="/inventory" element={<RequirePermission permission="inventory.view"><InventoryPage /></RequirePermission>} />
+            <Route path="/serial-numbers" element={<RequirePermission permission="inventory.view"><SerialNumbersPage /></RequirePermission>} />
             <Route path="/shipments" element={<RequirePermission permission="shipments.view"><ShipmentsPage /></RequirePermission>} />
             <Route path="/picking" element={<RequirePermission permission="picking.view"><PickingPage /></RequirePermission>} />
             <Route path="/work-board" element={<RequirePermission permission="picking.view"><WorkBoardPage /></RequirePermission>} />

@@ -24,7 +24,7 @@ import {
 import { useAuth } from '../hooks/useAuth';
 import { useActiveStore } from '../hooks/useActiveStore';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
-import omsService from '../services/omsService';
+import omsService, { parseSerials } from '../services/omsService';
 import CustomDropdown from '../components/common/CustomDropdown';
 import MetricCard from '../components/common/MetricCard';
 import InfoCalloutCard from '../components/common/InfoCalloutCard';
@@ -680,9 +680,11 @@ export const PurchaseOrdersPage: React.FC = () => {
 
   // Inspect GRN State
   const [inspectItems, setInspectItems] = useState<any[]>([]);
-  const openInspectGrn = (grn: any) => {
-    setSelectedGrn(grn);
-    setInspectItems((grn.items || []).map((x: any) => ({ ...x })));
+  const openInspectGrn = async (grn: any) => {
+    // The full note carries each line's product, so serial-tracked lines ask for their serial numbers.
+    const full = (await omsService.getGoodsReceivedNote(grn.id).catch(() => null))?.data ?? grn;
+    setSelectedGrn(full);
+    setInspectItems((full.items || []).map((x: any) => ({ ...x, serials_text: (x.serial_numbers || []).join('\n') })));
     setShowInspectGrnModal(true);
   };
 
@@ -700,6 +702,7 @@ export const PurchaseOrdersPage: React.FC = () => {
           lot_number: item.lot_number,
           expiry_date: item.expiry_date ? String(item.expiry_date).slice(0, 10) : undefined,
           discrepancy_reason: item.discrepancy_reason,
+          ...(item.product_variant?.track_serials ? { serial_numbers: parseSerials(item.serials_text || '') } : {}),
         })),
       };
 
@@ -2491,6 +2494,16 @@ export const PurchaseOrdersPage: React.FC = () => {
                         <td>
                           <div style={{ fontWeight: 600 }}>{item.sku}</div>
                           <div style={{ fontSize: 10, color: '#64748b' }}>{item.product_name}</div>
+                          {item.product_variant?.track_serials && (
+                            <textarea
+                              className="form-input"
+                              style={{ marginTop: 6, height: 56, minWidth: 160, fontFamily: 'monospace', fontSize: 11 }}
+                              aria-label={`Serial numbers for ${item.sku}`}
+                              placeholder="Serial numbers, one per unit kept (good, damaged, quarantined)"
+                              value={item.serials_text}
+                              onChange={(e) => setInspectItems((prev) => prev.map((x, i) => (i === idx ? { ...x, serials_text: e.target.value } : x)))}
+                            />
+                          )}
                         </td>
                         <td><strong>{item.received_quantity}</strong></td>
                         <td>

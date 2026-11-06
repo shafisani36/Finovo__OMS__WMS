@@ -27,28 +27,37 @@ class RecurringOrderService
             throw ValidationException::withMessages(['order' => "Order {$order->order_number} has no catalog products to repeat."]);
         }
 
+        return $this->plan($order->organization_id, [
+            'store_id' => $order->store_id,
+            'customer_name' => $order->customer_name,
+            'customer_email' => $order->customer_email,
+            'customer_phone' => $order->customer_phone,
+            'shipping_address' => $order->shipping_address,
+            'billing_address' => $order->billing_address,
+            'payment_method' => $order->payment_method,
+            'currency' => $order->currency,
+            'shipping_amount' => (float) $order->shipping_amount,
+            'notes' => "Repeats order {$order->order_number}.",
+            'items' => $order->items()->whereNotNull('product_variant_id')->get()->map(fn ($item) => [
+                'product_variant_id' => $item->product_variant_id,
+                'quantity' => $item->quantity,
+                'unit_price' => (float) $item->unit_price,
+            ])->values()->all(),
+        ], $interval, $startsOn, $user, $order->id);
+    }
+
+    /**
+     * A plan typed in from scratch: the order to place (already checked against the order rules) and its rhythm.
+     *
+     * @param  array<string, mixed>  $template
+     */
+    public function plan(int $organizationId, array $template, string $interval, CarbonInterface $startsOn, User $user, ?int $sourceOrderId = null): RecurringOrder
+    {
         return RecurringOrder::create([
-            'organization_id' => $order->organization_id,
-            'source_order_id' => $order->id,
+            'organization_id' => $organizationId,
+            'source_order_id' => $sourceOrderId,
             'created_by' => $user->id,
-            'template' => [
-                'store_id' => $order->store_id,
-                'customer_name' => $order->customer_name,
-                'customer_email' => $order->customer_email,
-                'customer_phone' => $order->customer_phone,
-                'shipping_address' => $order->shipping_address,
-                'billing_address' => $order->billing_address,
-                'payment_status' => 'pending',
-                'payment_method' => $order->payment_method,
-                'currency' => $order->currency,
-                'shipping_amount' => (float) $order->shipping_amount,
-                'notes' => "Repeats order {$order->order_number}.",
-                'items' => $order->items()->whereNotNull('product_variant_id')->get()->map(fn ($item) => [
-                    'product_variant_id' => $item->product_variant_id,
-                    'quantity' => $item->quantity,
-                    'unit_price' => (float) $item->unit_price,
-                ])->values()->all(),
-            ],
+            'template' => [...$template, 'payment_status' => 'pending'],
             'interval' => $interval,
             'next_run_at' => $startsOn->copy()->startOfDay(),
         ]);

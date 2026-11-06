@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ExternalLink, Hash, Mail, PackageSearch } from 'lucide-react';
-import { AuthLayout } from '../components/layout/AuthLayout';
+import { ExternalLink, Hash, Mail, PackageSearch, RotateCcw, Truck } from 'lucide-react';
+import { AuthLayout, type AuthFeature } from '../components/layout/AuthLayout';
 import { Input } from '../components/common/Input';
 import { Button } from '../components/common/Button';
 import { Alert } from '../components/common/Alert';
@@ -12,6 +12,12 @@ import { formatDate, formatMoney, humanize } from '../utils/format';
 import { errorMessage } from '../utils/errors';
 
 type CustomerRequest = 'cancel' | 'return' | null;
+
+const CUSTOMER_FEATURES: AuthFeature[] = [
+  { icon: PackageSearch, title: 'See where your order is', text: 'From confirmed to delivered' },
+  { icon: Truck, title: 'Follow your parcels', text: 'Courier and tracking number for each one' },
+  { icon: RotateCcw, title: 'Change of plans?', text: 'Ask to cancel or return items here' },
+];
 
 /**
  * Customer self-service, without an account: the order number and the email used to place the order show its
@@ -73,7 +79,12 @@ export const TrackOrderPage: React.FC = () => {
   const returnUnits = Object.values(quantities).reduce((sum, quantity) => sum + quantity, 0);
 
   return (
-    <AuthLayout>
+    <AuthLayout
+      title="WHERE IS"
+      highlight="MY ORDER?"
+      subtitle="Check your order's progress, follow your parcels, and ask for a cancellation or return — no account needed."
+      features={CUSTOMER_FEATURES}
+    >
       <div className="auth-card">
         <div className="card-header">
           <h2 className="card-title">Track your order</h2>

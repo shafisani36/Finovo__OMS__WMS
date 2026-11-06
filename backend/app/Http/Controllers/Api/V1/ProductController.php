@@ -10,6 +10,7 @@ use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Models\SkuMapping;
 use App\Rules\PublicUrl;
+use App\Services\EmailService;
 use App\Services\ProductService;
 use App\Services\StorePushService;
 use Illuminate\Http\JsonResponse;
@@ -23,6 +24,7 @@ class ProductController extends Controller
     public function __construct(
         protected ProductService $products,
         protected StorePushService $push,
+        protected EmailService $emails,
     ) {}
 
     /**
@@ -32,6 +34,7 @@ class ProductController extends Controller
     {
         $validated = $this->validateProduct($request);
         [$product, $report] = $this->products->save($request->user()->currentOrganization()->id, $validated, null, $validated['store_ids'] ?? []);
+        $this->emailTeam(EmailService::PRODUCT_CREATED, $product);
 
         return response()->json([
             'status' => 'success',
@@ -49,6 +52,7 @@ class ProductController extends Controller
         $this->ensureSameOrganization($request, $product);
         $validated = $this->validateProduct($request, $product);
         [$product, $report] = $this->products->save($product->organization_id, $validated, $product, $validated['store_ids'] ?? []);
+        $this->emailTeam(EmailService::PRODUCT_UPDATED, $product);
 
         return response()->json([
             'status' => 'success',
@@ -64,12 +68,26 @@ class ProductController extends Controller
     public function destroy(Request $request, Product $product): JsonResponse
     {
         $this->ensureSameOrganization($request, $product);
+        $product->loadMissing('variants');
         $report = $this->products->delete($product);
+        $this->emailTeam(EmailService::PRODUCT_DELETED, $product);
 
         return response()->json([
             'status' => 'success',
             'message' => trim("{$product->name} was deleted. ".$report->message('deleted')),
             'push' => $report->toArray(),
+        ]);
+    }
+
+    private function emailTeam(string $event, Product $product): void
+    {
+        $product->loadMissing(['organization', 'variants']);
+        $this->emails->sendActivityEmail($event, $product->organization, [
+            'name' => $product->name,
+            'details' => [
+                'SKU' => $product->sku,
+                'Variants' => $product->variants->pluck('sku')->implode(', '),
+            ],
         ]);
     }
 
@@ -97,6 +115,7 @@ class ProductController extends Controller
             'variants.*.price' => ['required', 'numeric', 'min:0', 'max:99999999'],
             'variants.*.cost_price' => ['nullable', 'numeric', 'min:0', 'max:99999999'],
             'variants.*.is_active' => ['sometimes', 'boolean'],
+            'variants.*.track_serials' => ['sometimes', 'boolean'],
             'store_ids' => ['nullable', 'array'],
             'store_ids.*' => ['integer', 'distinct', $this->inOrganization($request, 'stores')],
         ], [
@@ -193,6 +212,7 @@ class ProductController extends Controller
                     'price' => (float) $v->price,
                     'cost_price' => $v->cost_price !== null ? (float) $v->cost_price : null,
                     'is_active' => $v->is_active,
+                    'track_serials' => $v->track_serials,
                     'stock' => $stockOf($v->balances),
                 ]),
                 'variants_count' => $p->variants->count(),
@@ -265,6 +285,7 @@ class ProductController extends Controller
                     'price' => (float) $variant->price,
                     'cost_price' => $variant->cost_price !== null ? (float) $variant->cost_price : null,
                     'is_active' => $variant->is_active,
+                    'track_serials' => $variant->track_serials,
                     'stock' => $this->stock($variant->balances),
                     'warehouses' => $variant->balances->map(fn (InventoryBalance $balance) => [
                         'id' => $balance->warehouse_id,

@@ -63,6 +63,35 @@ class FormBuilderTest extends TestCase
         $submission = $this->getJson("/api/v1/forms/{$form['uuid']}/submissions")->assertOk()->assertJsonCount(1, 'data')->json('data.0');
         $this->assertSame(['Box crushed', 2, 'damaged', $variant->id], [$submission['data']['f_reason'], $submission['data']['f_qty'], $submission['data']['f_kind'], $submission['data']['f_product']]);
         Storage::disk('local')->assertExists($submission['data']['f_photo']['path']);
+        $this->getJson("/api/v1/forms/{$form['uuid']}/submissions")->assertJsonPath("lookup_labels.products.{$variant->id}", 'Serum (SER-01)');
+    }
+
+    public function test_steps_and_conditional_fields(): void
+    {
+        $fields = [
+            ['id' => 'p_one', 'type' => 'page', 'label' => 'What happened'],
+            ['id' => 'f_kind', 'type' => 'dropdown', 'label' => 'Kind', 'required' => true, 'options' => [['value' => 'damaged', 'label' => 'Damaged'], ['value' => 'missing', 'label' => 'Missing']]],
+            ['id' => 'p_two', 'type' => 'page', 'label' => 'Details'],
+            ['id' => 'f_damage', 'type' => 'text', 'label' => 'Describe the damage', 'required' => true, 'show_if' => ['field' => 'f_kind', 'equals' => 'damaged']],
+        ];
+        $form = $this->postJson('/api/v1/forms', ['name' => 'Report'])->json('data');
+
+        // A field cannot depend on one below it, or on a step.
+        foreach ([array_reverse($fields), [...$fields, ['id' => 'f_bad', 'type' => 'text', 'label' => 'Bad', 'show_if' => ['field' => 'p_two', 'equals' => 'x']]]] as $bad) {
+            $this->putJson("/api/v1/forms/{$form['uuid']}", ['revision' => 0, 'name' => 'Report', 'schema' => ['fields' => $bad]])->assertUnprocessable();
+        }
+
+        $this->putJson("/api/v1/forms/{$form['uuid']}", ['revision' => 0, 'name' => 'Report', 'schema' => ['fields' => $fields]])->assertOk();
+        $this->postJson("/api/v1/forms/{$form['uuid']}/publish")->assertOk();
+        $url = "/api/v1/forms/{$form['uuid']}/submissions";
+
+        // Shown, so required; hidden, so not required and its answer is dropped.
+        $this->postJson($url, ['data' => ['f_kind' => 'damaged']])->assertUnprocessable()->assertJsonValidationErrors('data.f_damage');
+        $this->postJson($url, ['data' => ['f_kind' => 'missing', 'f_damage' => 'ignored']])->assertCreated();
+        $this->postJson($url, ['data' => ['f_kind' => 'damaged', 'f_damage' => 'Lid cracked']])->assertCreated();
+
+        $answers = collect($this->getJson($url)->json('data'))->pluck('data')->sortBy('f_kind')->values()->all();
+        $this->assertSame([['f_kind' => 'damaged', 'f_damage' => 'Lid cracked'], ['f_kind' => 'missing', 'f_damage' => null]], $answers);
     }
 
     public function test_layouts_with_bad_or_duplicate_fields_are_refused(): void

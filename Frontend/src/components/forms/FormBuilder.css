@@ -322,3 +322,43 @@
     width: 100%;
   }
 }
+
+/* Page breaks and conditional fields */
+.fb-page-break {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #6366f1;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fb-page-break::before,
+.fb-page-break::after {
+  content: '';
+  flex: 1;
+  border-top: 2px dashed #c7d2fe;
+}
+
+.fb-condition-badge {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.fb-step-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fb-step-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.fb-step-actions {
+  display: flex;
+  gap: 8px;
+}

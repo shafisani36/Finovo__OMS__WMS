@@ -4,13 +4,14 @@ namespace App\Observers;
 
 use App\Models\Order;
 use App\Services\CustomerService;
+use App\Services\EmailService;
 use App\Services\OrderControlService;
 use App\Services\StoreSyncOutbox;
 use Illuminate\Support\Facades\Auth;
 
 /**
  * Keeps each order linked to its customer, whether the order was imported from a store or created by hand,
- * shows the warehouse progress of a store's order on that store, writes the order timeline and holds orders
+ * shows the warehouse progress of a store's order on that store, writes the order timeline, emails the team and customer about its progress, and holds orders
  * that need approval or exceed the customer's credit limit.
  */
 class OrderObserver
@@ -19,6 +20,7 @@ class OrderObserver
         protected CustomerService $customers,
         protected StoreSyncOutbox $outbox,
         protected OrderControlService $controls,
+        protected EmailService $emails,
     ) {}
 
     public function created(Order $order): void
@@ -41,6 +43,7 @@ class OrderObserver
         $previous = $order->getOriginal('order_status');
         if ($order->wasChanged('order_status') && $previous !== null && $previous !== $order->order_status) {
             $order->record('status', "Status changed from {$previous} to {$order->order_status}", Auth::id());
+            $this->emails->orderStatusChanged($order);
         }
 
         if ($order->wasRecentlyCreated || $order->wasChanged('total_amount')) {

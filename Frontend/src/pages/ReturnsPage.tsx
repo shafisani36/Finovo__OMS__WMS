@@ -10,7 +10,7 @@ import StatusPill from '../components/common/StatusPill';
 import { Alert } from '../components/common/Alert';
 import { useConfirmDialog } from '../components/common/ConfirmDialog';
 import { useActiveStore } from '../hooks/useActiveStore';
-import omsService from '../services/omsService';
+import omsService, { parseSerials } from '../services/omsService';
 import type { ReturnableOrder, ReturnKpis, ReturnModel } from '../services/omsService';
 import { formatDate } from '../utils/format';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
@@ -73,6 +73,7 @@ export const ReturnsPage: React.FC = () => {
   const [inspecting, setInspecting] = useState<ReturnModel | null>(null);
   const [disposition, setDisposition] = useState<NonNullable<ReturnModel['disposition']>>('sellable');
   const [inspectionNotes, setInspectionNotes] = useState('');
+  const [returnSerials, setReturnSerials] = useState('');
   const [rejecting, setRejecting] = useState<ReturnModel | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [resolving, setResolving] = useState<ReturnModel | null>(null);
@@ -326,6 +327,7 @@ export const ReturnsPage: React.FC = () => {
                 setInspecting(row);
                 setDisposition('sellable');
                 setInspectionNotes('');
+                setReturnSerials('');
                 setFormError(null);
               }}
             >
@@ -573,7 +575,7 @@ export const ReturnsPage: React.FC = () => {
             onSubmit={(e) => {
               e.preventDefault();
               runAction(
-                () => omsService.completeReturn(inspecting.id, { disposition, notes: inspectionNotes.trim() || undefined }),
+                () => omsService.completeReturn(inspecting.id, { disposition, notes: inspectionNotes.trim() || undefined, serials: parseSerials(returnSerials) }),
                 'Failed to complete the return.'
               );
             }}
@@ -621,6 +623,17 @@ export const ReturnsPage: React.FC = () => {
                   onChange={(e) => setInspectionNotes(e.target.value)}
                   placeholder="e.g. Box opened, item unused"
                   maxLength={1000}
+                />
+              </div>
+
+              <div>
+                <label className="form-label">Serial numbers received (for serial-tracked products)</label>
+                <textarea
+                  className="form-input"
+                  style={{ height: 60, width: '100%', fontFamily: 'monospace' }}
+                  value={returnSerials}
+                  onChange={(e) => setReturnSerials(e.target.value)}
+                  placeholder="Scan one per line; leave empty when none"
                 />
               </div>
             </div>

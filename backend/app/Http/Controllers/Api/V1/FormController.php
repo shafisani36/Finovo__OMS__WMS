@@ -124,6 +124,7 @@ class FormController extends Controller
         return response()->json([
             'status' => 'success',
             'data' => $page->items(),
+            'lookup_labels' => $this->forms->lookupLabels($form, $page->items()),
             'meta' => ['current_page' => $page->currentPage(), 'last_page' => $page->lastPage(), 'total' => $page->total()],
         ]);
     }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, CheckSquare, ChevronDownSquare, FileUp, Hash, AlignLeft, ScanLine, Search, Type } from 'lucide-react';
+import { Calendar, CheckSquare, ChevronDownSquare, FileUp, Hash, AlignLeft, ScanLine, Search, SeparatorHorizontal, Type } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { FIELD_TYPES } from './fieldTypes';
 import type { FieldTypeKey } from './fieldTypes';
@@ -15,6 +15,7 @@ const FIELD_ICONS: Record<FieldTypeKey, LucideIcon> = {
   lookup: Search,
   barcode: ScanLine,
   file: FileUp,
+  page: SeparatorHorizontal,
 };
 
 /** Field types to drag onto the canvas (or click to add at the end). */

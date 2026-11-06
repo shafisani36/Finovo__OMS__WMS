@@ -28,6 +28,7 @@ import {
   Smartphone,
   LayoutTemplate,
   Repeat,
+  ScanBarcode,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
@@ -63,6 +64,7 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
       { to: '/recurring-orders', label: 'Recurring Orders', icon: Repeat, permission: 'orders.manage' },
       { to: '/products', label: 'Products', icon: Package, permission: 'products.view' },
       { to: '/inventory', label: 'Inventory Engine', icon: Boxes, permission: 'inventory.view' },
+      { to: '/serial-numbers', label: 'Serial Numbers', icon: ScanBarcode, permission: 'inventory.view' },
       { to: '/shipments', label: 'Shipments', icon: Truck, permission: 'shipments.view' },
       { to: '/picking', label: 'Picking', icon: CheckSquare, permission: 'picking.view' },
       { to: '/work-board', label: 'Work Board', icon: Users, permission: 'picking.view' },

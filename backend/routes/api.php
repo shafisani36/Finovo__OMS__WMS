@@ -29,6 +29,7 @@ use App\Http\Controllers\Api\V1\PurchaseRequisitionController;
 use App\Http\Controllers\Api\V1\RecurringOrderController;
 use App\Http\Controllers\Api\V1\ReplenishmentController;
 use App\Http\Controllers\Api\V1\ReturnController;
+use App\Http\Controllers\Api\V1\SerialNumberController;
 use App\Http\Controllers\Api\V1\ShipmentController;
 use App\Http\Controllers\Api\V1\SingleSignOnController;
 use App\Http\Controllers\Api\V1\StockAdjustmentController;
@@ -270,6 +271,7 @@ Route::prefix('v1')->group(function () {
             Route::put('orders/{order}/custom-status', [OrderController::class, 'setCustomStatus']);
             Route::post('orders/{order}/repeat', [OrderController::class, 'repeat']);
             Route::get('recurring-orders', [RecurringOrderController::class, 'index']);
+            Route::post('recurring-orders', [RecurringOrderController::class, 'store']);
             Route::put('recurring-orders/{recurringOrder}', [RecurringOrderController::class, 'update']);
             Route::delete('recurring-orders/{recurringOrder}', [RecurringOrderController::class, 'destroy']);
             Route::post('recurring-orders/{recurringOrder}/run', [RecurringOrderController::class, 'run']);
@@ -303,6 +305,18 @@ Route::prefix('v1')->group(function () {
             Route::delete('picking/waves/{pickWave}', [PickingController::class, 'cancelWave']);
         });
 
+        // Serial numbers per unit (products that track them)
+        Route::middleware('permission:inventory.view')->group(function () {
+            Route::get('serials', [SerialNumberController::class, 'index']);
+            Route::get('serials/trace', [SerialNumberController::class, 'trace']);
+        });
+        Route::post('serials', [SerialNumberController::class, 'store'])->middleware('permission:inventory.receive');
+        Route::get('orders/{order}/serials', [SerialNumberController::class, 'forOrder'])->middleware('permission:orders.view');
+        Route::middleware('permission:picking.update')->group(function () {
+            Route::post('orders/{order}/serials', [SerialNumberController::class, 'assign']);
+            Route::delete('orders/{order}/serials/{unitSerialNumber}', [SerialNumberController::class, 'unassign']);
+        });
+
         // Shipments (packed orders are dispatched from here)
         Route::middleware('permission:shipments.view')->group(function () {
             Route::get('shipments', [ShipmentController::class, 'index']);
@@ -317,6 +331,7 @@ Route::prefix('v1')->group(function () {
             Route::post('shipments/dispatch', [ShipmentController::class, 'dispatchMany']);
             Route::post('shipments/{id}/dispatch', [ShipmentController::class, 'dispatch'])->whereNumber('id');
             Route::post('shipments/{id}/cancel-dispatch', [ShipmentController::class, 'cancelDispatch'])->whereNumber('id');
+            Route::post('shipments/{id}/out-for-delivery', [ShipmentController::class, 'outForDelivery'])->whereNumber('id');
             Route::post('shipments/{id}/deliver', [ShipmentController::class, 'deliver'])->whereNumber('id');
         });
 

@@ -168,6 +168,13 @@ export const ShipmentsPage: React.FC = () => {
   const shipmentActions = (row: ShipmentModel): RowAction[] =>
     ([
       canDispatch && row.status === 'pending' && { label: 'Dispatch', icon: Send, onSelect: () => setDispatchList([row]) },
+      canDispatch &&
+        row.status === 'shipped' &&
+        row.courier_status !== 'out_for_delivery' && {
+          label: 'Out for Delivery',
+          icon: Truck,
+          onSelect: () => run(() => omsService.markShipmentOutForDelivery(row.id), 'The shipment could not be updated.'),
+        },
       canDispatch && row.status === 'shipped' && { label: 'Mark Delivered', icon: CheckCircle2, onSelect: () => handleDeliver(row) },
       row.has_label && {
         label: 'Courier Label',

@@ -264,8 +264,8 @@ class OrderAllocationAndPickingTest extends TestCase
             ->assertJsonPath('customer_emailed', false)
             ->assertJsonPath('data.tracking_url', null);
 
-        // Only the order with an email address gets the shipping email.
-        Mail::assertSentCount(1);
+        // Only the order with an email address gets the shipping email (the team is emailed about both).
+        $this->assertCount(1, Mail::sent(Mailable::class, fn (Mailable $mail) => str_contains($mail->subject, 'has been shipped')));
     }
 
     public function test_customer_gets_an_order_confirmation_for_a_new_imported_order(): void
@@ -298,7 +298,7 @@ class OrderAllocationAndPickingTest extends TestCase
         $cancelled->update(['order_status' => 'cancelled']);
         $this->assertFalse($emails->sendOrderConfirmationEmail($cancelled));
 
-        Mail::assertSentCount(1);
+        $this->assertCount(1, Mail::sent(Mailable::class, fn (Mailable $mail) => str_contains($mail->subject, 'confirmed')));
     }
 
     public function test_tracking_id_is_generated_when_left_empty_and_never_repeats(): void

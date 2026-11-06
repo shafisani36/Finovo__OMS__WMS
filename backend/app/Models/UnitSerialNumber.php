@@ -2,23 +2,29 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class UnitSerialNumber extends Model
 {
-    use HasFactory;
-
     public const STATUS_IN_STOCK = 'in_stock';
+
     public const STATUS_ALLOCATED = 'allocated';
+
     public const STATUS_PICKED = 'picked';
+
     public const STATUS_PACKED = 'packed';
+
     public const STATUS_SHIPPED = 'shipped';
+
     public const STATUS_DELIVERED = 'delivered';
+
     public const STATUS_RETURNED = 'returned';
+
     public const STATUS_DAMAGED = 'damaged';
+
     public const STATUS_QUARANTINED = 'quarantined';
+
     public const STATUS_DISPOSED = 'disposed';
 
     protected $fillable = [

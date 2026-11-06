@@ -18,6 +18,7 @@ interface VariantRow {
   cost_price: string;
   barcode: string;
   is_active: boolean;
+  track_serials: boolean;
 }
 
 let rowCounter = 0;
@@ -29,6 +30,7 @@ const newRow = (values: Partial<VariantRow> = {}): VariantRow => ({
   cost_price: '',
   barcode: '',
   is_active: true,
+  track_serials: false,
   ...values,
 });
 
@@ -51,6 +53,7 @@ const initialState = (product?: ProductDetail | null, storeId?: number) => ({
           cost_price: v.cost_price !== null ? String(v.cost_price) : '',
           barcode: v.barcode ?? '',
           is_active: v.is_active,
+          track_serials: v.track_serials,
         })
       )
     : [newRow()],
@@ -73,6 +76,7 @@ export const productPayload = (product: ProductDetail, overrides: Partial<Produc
     price: v.price,
     cost_price: v.cost_price,
     is_active: v.is_active,
+    track_serials: v.track_serials,
   })),
   ...overrides,
 });
@@ -129,6 +133,7 @@ export const ProductFormModal: React.FC<Props> = ({ product, onClose, onSaved })
         price: Number(row.price || 0),
         cost_price: row.cost_price === '' ? null : Number(row.cost_price),
         is_active: row.is_active,
+        track_serials: row.track_serials,
       })),
     };
 
@@ -213,6 +218,7 @@ export const ProductFormModal: React.FC<Props> = ({ product, onClose, onSaved })
                   <th>Cost</th>
                   <th>Barcode</th>
                   <th>Active</th>
+                  <th title="Each unit gets its own serial number when received, and is scanned onto orders">Serials</th>
                   <th aria-label="Remove" />
                 </tr>
               </thead>
@@ -245,6 +251,9 @@ export const ProductFormModal: React.FC<Props> = ({ product, onClose, onSaved })
                     </td>
                     <td>
                       <input type="checkbox" aria-label={`Variant ${index + 1} active`} checked={row.is_active} onChange={(e) => setRow(row.key, 'is_active', e.target.checked)} />
+                    </td>
+                    <td>
+                      <input type="checkbox" aria-label={`Track serial numbers, variant ${index + 1}`} checked={row.track_serials} onChange={(e) => setRow(row.key, 'track_serials', e.target.checked)} />
                     </td>
                     <td>
                       <button

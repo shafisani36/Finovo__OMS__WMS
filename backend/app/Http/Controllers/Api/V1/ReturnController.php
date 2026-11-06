@@ -7,8 +7,10 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\OrderReturn;
 use App\Models\ReturnItem;
+use App\Services\EmailService;
 use App\Services\InventoryEngine;
 use App\Services\OrderReturnService;
+use App\Services\SerialNumberService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -26,6 +28,7 @@ class ReturnController extends Controller
     public function __construct(
         protected InventoryEngine $inventoryEngine,
         protected OrderReturnService $returns,
+        protected SerialNumberService $serials,
     ) {}
 
     /**
@@ -163,11 +166,14 @@ class ReturnController extends Controller
      * Record the inspection result. Sellable units go back into available stock, damaged and quarantined units
      * are put on hand but held out of sale, and disposed units do not return to stock.
      */
-    public function complete(Request $request, int $id): JsonResponse
+    public function complete(Request $request, int $id, EmailService $emails): JsonResponse
     {
         $validated = $request->validate([
             'disposition' => ['required', Rule::in(OrderReturn::DISPOSITIONS)],
             'notes' => 'nullable|string|max:1000',
+            // Serial numbers of the returned units, for products that track them
+            'serials' => ['nullable', 'array', 'max:500'],
+            'serials.*' => ['string', 'max:100'],
         ]);
 
         $return = $this->transition($request, $id, ['received'], 'completed', function (OrderReturn $return) use ($validated, $request) {
@@ -198,7 +204,12 @@ class ReturnController extends Controller
             ]);
 
             $this->markOrderReturnedWhenFullyBack($return->order);
+            if (! empty($validated['serials'])) {
+                $this->serials->receiveReturn($return, $validated['serials'], $validated['disposition'], $request->user()->id);
+            }
         });
+
+        $emails->returnReceived($return);
 
         return $this->respond($return, "Return {$return->return_number} completed.");
     }

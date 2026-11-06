@@ -7,6 +7,7 @@ use App\Models\InventoryTransfer;
 use App\Models\Product;
 use App\Models\Warehouse;
 use App\Services\AccessControl;
+use App\Services\EmailService;
 use App\Services\InventoryEngine;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -89,7 +90,7 @@ class InventoryTransferController extends Controller
     /**
      * Create and optionally dispatch transfer.
      */
-    public function store(Request $request): JsonResponse
+    public function store(Request $request, EmailService $emails): JsonResponse
     {
         $org = $request->user()->currentOrganization();
 
@@ -138,6 +139,7 @@ class InventoryTransferController extends Controller
                 notes: $validated['notes'] ?? null,
                 userId: $request->user()->id
             );
+            $emails->stockTransferred($transfer);
 
             return response()->json([
                 'status' => 'success',
@@ -155,6 +157,7 @@ class InventoryTransferController extends Controller
             notes: $validated['notes'] ?? null,
             userId: $request->user()->id
         );
+        $emails->stockTransferred($transfer);
 
         return response()->json([
             'status' => 'success',
@@ -166,7 +169,7 @@ class InventoryTransferController extends Controller
     /**
      * Receive in-transit transfer at destination.
      */
-    public function receive(Request $request, int $transferId): JsonResponse
+    public function receive(Request $request, int $transferId, EmailService $emails): JsonResponse
     {
         $org = $request->user()->currentOrganization();
 
@@ -187,6 +190,7 @@ class InventoryTransferController extends Controller
             userId: $request->user()->id,
             discrepancyReason: $validated['discrepancy_reason'] ?? null
         );
+        $emails->stockTransferred($updatedTransfer);
 
         return response()->json([
             'status' => 'success',

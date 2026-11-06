@@ -11,6 +11,7 @@ use App\Models\ProductVariant;
 use App\Models\PurchaseOrder;
 use App\Models\PurchaseRequisition;
 use App\Models\Store;
+use App\Models\UnitSerialNumber;
 use App\Models\User;
 use App\Models\Warehouse;
 use App\Models\WarehouseLocation;
@@ -422,6 +423,33 @@ class PurchaseRequisitionAndGrnTest extends TestCase
         ]);
 
         $responseValid->assertStatus(201);
+    }
+
+    public function test_a_grn_of_a_serialised_product_posts_only_with_a_serial_number_per_unit(): void
+    {
+        $this->variant1->update(['track_serials' => true]);
+        $po = $this->createSamplePo();
+        $grnId = $this->actingAs($this->requesterA, 'sanctum')->postJson('/api/v1/goods-received-notes', [
+            'purchase_order_id' => $po->id,
+            'receiving_location_id' => $this->dockLocation->id,
+            'items' => [['purchase_order_item_id' => $po->items->first()->id, 'received_quantity' => 3, 'accepted_quantity' => 2, 'damaged_quantity' => 1]],
+        ])->assertCreated()->json('data.id');
+        $itemId = GoodsReceivedNote::findOrFail($grnId)->items()->value('id');
+
+        $this->actingAs($this->managerA, 'sanctum')->postJson("/api/v1/goods-received-notes/{$grnId}/post")
+            ->assertUnprocessable()
+            ->assertJsonPath('message', "{$this->variant1->sku} needs 3 serial number(s), one for each unit kept; 0 entered.");
+
+        $this->actingAs($this->requesterA, 'sanctum')->putJson("/api/v1/goods-received-notes/{$grnId}/inspect", [
+            'items' => [['id' => $itemId, 'accepted_quantity' => 2, 'damaged_quantity' => 1, 'serial_numbers' => ['g-1', 'G-2', 'G-3']]],
+        ])->assertOk();
+        $this->actingAs($this->managerA, 'sanctum')->postJson("/api/v1/goods-received-notes/{$grnId}/post")->assertOk();
+
+        $this->assertSame(
+            ['G-1' => 'in_stock', 'G-2' => 'in_stock', 'G-3' => 'damaged'],
+            UnitSerialNumber::orderBy('serial_number')->pluck('status', 'serial_number')->all()
+        );
+        $this->assertSame($this->warehouseA->id, UnitSerialNumber::where('serial_number', 'G-1')->value('warehouse_id'));
     }
 
     public function test_can_post_grn_to_authoritative_inventory_with_conditions_and_update_po(): void

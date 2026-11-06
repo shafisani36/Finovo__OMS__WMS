@@ -12,7 +12,10 @@ use Illuminate\Validation\ValidationException;
  */
 class FormSchema
 {
-    public const TYPES = ['text', 'textarea', 'number', 'date', 'dropdown', 'checkbox', 'lookup', 'barcode', 'file'];
+    public const TYPES = ['text', 'textarea', 'number', 'date', 'dropdown', 'checkbox', 'lookup', 'barcode', 'file', 'page'];
+
+    /** A "page" field starts a new step of the form; it has a title but no answer. */
+    public const STEP = 'page';
 
     /** Records a lookup field can point to. */
     public const LOOKUP_SOURCES = ['products', 'customers', 'warehouses', 'stores'];
@@ -32,7 +35,7 @@ class FormSchema
         return [
             'schema' => ['required', 'array:fields'],
             'schema.fields' => ['present', 'array', 'max:'.self::MAX_FIELDS],
-            'schema.fields.*' => ['array:id,type,label,required,width,placeholder,help,options,source,min,max,max_length'],
+            'schema.fields.*' => ['array:id,type,label,required,width,placeholder,help,options,source,min,max,max_length,show_if'],
             'schema.fields.*.id' => ['required', 'string', 'regex:/^[a-z][a-z0-9_]{1,39}$/', 'distinct'],
             'schema.fields.*.type' => ['required', Rule::in(self::TYPES)],
             'schema.fields.*.label' => ['required', 'string', 'max:120'],
@@ -48,7 +51,32 @@ class FormSchema
             'schema.fields.*.min' => ['sometimes', 'nullable', 'numeric'],
             'schema.fields.*.max' => ['sometimes', 'nullable', 'numeric'],
             'schema.fields.*.max_length' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:5000'],
+            // Shown (and checked) only when an earlier field has this answer
+            'schema.fields.*.show_if' => ['sometimes', 'nullable', 'array:field,equals'],
+            'schema.fields.*.show_if.field' => ['required_with:schema.fields.*.show_if', 'string', 'max:40'],
+            'schema.fields.*.show_if.equals' => ['required_with:schema.fields.*.show_if', 'string', 'max:120'],
         ];
+    }
+
+    /**
+     * A field may depend only on an answer given before it (an earlier field that is not a step).
+     *
+     * @param  array{fields: list<array<string, mixed>>}  $schema
+     *
+     * @throws ValidationException
+     */
+    public static function ensureValidConditions(array $schema): void
+    {
+        $earlier = [];
+        foreach ($schema['fields'] as $index => $field) {
+            $on = $field['show_if']['field'] ?? null;
+            if ($on !== null && ! in_array($on, $earlier, true)) {
+                throw ValidationException::withMessages(["schema.fields.{$index}.show_if" => "{$field['label']} can only depend on a field above it."]);
+            }
+            if ($field['type'] !== self::STEP) {
+                $earlier[] = $field['id'];
+            }
+        }
     }
 
     /**
@@ -62,7 +90,12 @@ class FormSchema
     {
         $rules = ['data' => ['array']];
         foreach ($schema['fields'] as $field) {
-            $rules["data.{$field['id']}"] = [($field['required'] ?? false) ? 'required' : 'nullable', ...self::valueRules($field, $lookupRule)];
+            if ($field['type'] === self::STEP) {
+                continue;
+            }
+            // A field hidden by its condition is left out: not required, and its answer is dropped.
+            $condition = isset($field['show_if']) ? ["exclude_unless:data.{$field['show_if']['field']},{$field['show_if']['equals']}"] : [];
+            $rules["data.{$field['id']}"] = [...$condition, ($field['required'] ?? false) ? 'required' : 'nullable', ...self::valueRules($field, $lookupRule)];
         }
 
         return $rules;
@@ -79,6 +112,9 @@ class FormSchema
     {
         $values = [];
         foreach ($schema['fields'] as $field) {
+            if ($field['type'] === self::STEP) {
+                continue;
+            }
             $value = $data[$field['id']] ?? null;
             $values[$field['id']] = match ($field['type']) {
                 'number' => $value === null ? null : $value + 0,

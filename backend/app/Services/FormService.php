@@ -47,6 +47,7 @@ class FormService
     public function saveDraft(Form $form, int $revision, string $name, array $schema, User $user): Form
     {
         $this->ensureSensibleRanges($schema);
+        FormSchema::ensureValidConditions($schema);
 
         return DB::transaction(function () use ($form, $revision, $name, $schema, $user) {
             $locked = Form::whereKey($form->id)->lockForUpdate()->firstOrFail();
@@ -110,6 +111,46 @@ class FormService
         }
 
         return $form->submissions()->create(['version' => $version->version, 'data' => $data, 'user_id' => $user->id]);
+    }
+
+    /**
+     * Names of the records chosen in lookup fields of these answers, by source and id, so answers show
+     * "Serum (SER-01)" instead of a number.
+     *
+     * @param  iterable<FormSubmission>  $submissions
+     * @return array<string, array<int, string>>
+     */
+    public function lookupLabels(Form $form, iterable $submissions): array
+    {
+        $ids = [];
+        foreach ($form->publishedVersion()?->schema['fields'] ?? [] as $field) {
+            if ($field['type'] !== 'lookup') {
+                continue;
+            }
+            foreach ($submissions as $submission) {
+                if (isset($submission->data[$field['id']])) {
+                    $ids[$field['source']][] = (int) $submission->data[$field['id']];
+                }
+            }
+        }
+
+        $orgId = $form->organization_id;
+        $labels = [];
+        foreach ($ids as $source => $list) {
+            $list = array_values(array_unique($list));
+            $labels[$source] = match ($source) {
+                'products' => ProductVariant::where('product_variants.organization_id', $orgId)->whereIn('product_variants.id', $list)
+                    ->join('products', 'products.id', '=', 'product_variants.product_id')
+                    ->get(['product_variants.id', 'product_variants.sku', 'products.name'])
+                    ->mapWithKeys(fn ($row) => [$row->id => "{$row->name} ({$row->sku})"]),
+                'customers' => Customer::where('organization_id', $orgId)->whereIn('id', $list)->pluck('name', 'id'),
+                'warehouses' => Warehouse::where('organization_id', $orgId)->whereIn('id', $list)->pluck('name', 'id'),
+                'stores' => Store::where('organization_id', $orgId)->whereIn('id', $list)->pluck('name', 'id'),
+            };
+            $labels[$source] = $labels[$source]->all();
+        }
+
+        return $labels;
     }
 
     /**

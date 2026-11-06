@@ -36,6 +36,9 @@ export interface FormSubmissionModel {
   created_at: string;
 }
 
+/** Names of the records chosen in lookup answers, by source and record ID. */
+export type LookupLabels = Partial<Record<LookupSource, Record<string, string>>>;
+
 export interface LookupOption {
   value: number;
   label: string;
@@ -89,7 +92,7 @@ const formService = {
     return request(`/forms/${uuid}/submissions`, { method: 'POST', body });
   },
 
-  async submissions(uuid: string, page = 1): Promise<{ data: FormSubmissionModel[]; meta: { current_page: number; last_page: number; total: number } }> {
+  async submissions(uuid: string, page = 1): Promise<{ data: FormSubmissionModel[]; lookup_labels: LookupLabels; meta: { current_page: number; last_page: number; total: number } }> {
     const { data } = await apiClient.get(`/forms/${uuid}/submissions`, { params: { page } });
     return data;
   },

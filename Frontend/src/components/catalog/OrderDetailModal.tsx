@@ -11,6 +11,7 @@ import { BarcodeLabel } from '../barcode/BarcodeLabel';
 import { Alert } from '../common/Alert';
 import { DetailValue } from '../common/DetailValue';
 import OrderWorkflow from './OrderWorkflow';
+import OrderSerialsSection from './OrderSerials';
 import OrderFormModal from './OrderFormModal';
 import { HoldPill, OrderHoldSection, OrderSplitSection, OrderTimeline } from './OrderControls';
 import { CustomStatusPill, OrderCustomStatusSection, OrderRepeatSection } from './OrderOperations';
@@ -205,6 +206,8 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({ order, statu
             {notice && <Alert type="success" message={notice} className="page-banner" />}
             {fulfillment ? <OrderWorkflow order={fulfillment} onChanged={handleChanged} /> : <div className="detail-muted">Loading order status...</div>}
           </section>
+
+          <OrderSerialsSection orderId={order.id} canScan={can(user, 'picking.update')} onChanged={handleChanged} />
 
           <OrderHoldSection order={order} status={status} canManage={can(user, 'orders.manage')} onChanged={handleControlChanged} />
           {can(user, 'orders.manage') && <OrderCustomStatusSection order={order} statuses={statuses} onChanged={handleControlChanged} />}

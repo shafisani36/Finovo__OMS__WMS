@@ -924,6 +924,7 @@ export interface ProductDetail {
     price: number;
     cost_price: number | null;
     is_active: boolean;
+    track_serials: boolean;
     stock: StockLevels;
     warehouses: ({ id: number; name: string | null } & StockLevels)[];
   }[];
@@ -1011,6 +1012,7 @@ export interface ProductVariantModel {
   price: number;
   cost_price?: number | null;
   is_active?: boolean;
+  track_serials?: boolean;
   stock?: { on_hand: number; reserved: number; available: number };
 }
 
@@ -1023,6 +1025,8 @@ export interface ProductVariantPayload {
   price: number;
   cost_price?: number | null;
   is_active?: boolean;
+  /** Each unit carries its own serial number. */
+  track_serials?: boolean;
 }
 
 export interface ProductPayload {
@@ -1394,6 +1398,50 @@ export interface BulkOrderResult {
   done: string[];
   failed: { order_number: string; message: string }[];
 }
+
+// Serial numbers (one per unit of products that track serials)
+export type SerialStatus = 'in_stock' | 'allocated' | 'shipped' | 'damaged' | 'quarantined' | 'disposed';
+
+export const SERIAL_STATUS_LABELS: Record<SerialStatus, string> = {
+  in_stock: 'In stock',
+  allocated: 'On an order',
+  shipped: 'Shipped',
+  damaged: 'Damaged',
+  quarantined: 'Quarantined',
+  disposed: 'Disposed',
+};
+
+export interface SerialUnitModel {
+  id: number;
+  serial: string;
+  status: SerialStatus;
+  sku: string | null;
+  product_name: string | null;
+  warehouse: string | null;
+  order_number: string | null;
+  updated_at: string;
+}
+
+export interface SerialTraceModel extends SerialUnitModel {
+  location: string | null;
+  lot_number: string | null;
+  grn_number: string | null;
+  customer: string | null;
+  return_number: string | null;
+  events: { type: string; description: string; at: string }[];
+}
+
+export interface OrderSerialLine {
+  item_id: number;
+  product_name: string;
+  sku: string;
+  quantity: number;
+  status: string;
+  serials: { id: number; serial_number: string; status: SerialStatus }[];
+}
+
+/** Serial numbers typed or scanned one per line (or separated by commas). */
+export const parseSerials = (text: string): string[] => [...new Set(text.split(/[\n,]+/).map((serial) => serial.trim().toUpperCase()).filter(Boolean))];
 
 export type RecurringInterval = 'weekly' | 'fortnightly' | 'monthly';
 
@@ -2250,6 +2298,12 @@ const omsService = {
     return data;
   },
 
+  /** The courier has the parcel on its last leg; the customer is emailed. */
+  async markShipmentOutForDelivery(shipmentId: number): Promise<{ message: string; data: ShipmentModel }> {
+    const { data } = await apiClient.post(`/shipments/${shipmentId}/out-for-delivery`);
+    return data;
+  },
+
   async deliverShipment(shipmentId: number): Promise<{ message: string; data: ShipmentModel }> {
     const { data } = await apiClient.post(`/shipments/${shipmentId}/deliver`);
     return data;
@@ -2280,7 +2334,7 @@ const omsService = {
     return data;
   },
 
-  async completeReturn(returnId: number, payload: { disposition: string; notes?: string }) {
+  async completeReturn(returnId: number, payload: { disposition: string; notes?: string; serials?: string[] }) {
     const { data } = await apiClient.post(`/returns/${returnId}/complete`, payload);
     return data;
   },
@@ -2551,6 +2605,43 @@ const omsService = {
   /** Places the order again on a schedule, from the given date. */
   async repeatOrder(orderId: number, interval: RecurringInterval, startsOn: string): Promise<{ message: string }> {
     const { data } = await apiClient.post(`/orders/${orderId}/repeat`, { interval, starts_on: startsOn });
+    return data;
+  },
+
+  /** A recurring order typed in from scratch (not copied from an order). */
+  async createRecurringOrder(plan: Omit<OrderPayload, 'payment_status' | 'discount_amount' | 'tax_amount'> & { interval: RecurringInterval; starts_on: string }): Promise<{ message: string; data: RecurringOrderModel }> {
+    const { data } = await apiClient.post('/recurring-orders', plan);
+    return data;
+  },
+
+  // Serial numbers
+  async getSerials(params: { search?: string; status?: SerialStatus | ''; warehouse_id?: number | ''; page?: number }): Promise<{ data: SerialUnitModel[]; meta: { current_page: number; last_page: number; total: number } }> {
+    const { data } = await apiClient.get('/serials', { params });
+    return data;
+  },
+
+  async traceSerial(serial: string): Promise<SerialTraceModel[]> {
+    const { data } = await apiClient.get('/serials/trace', { params: { serial } });
+    return data.data;
+  },
+
+  async registerSerials(warehouseId: number, productVariantId: number, serials: string[]): Promise<{ message: string }> {
+    const { data } = await apiClient.post('/serials', { warehouse_id: warehouseId, product_variant_id: productVariantId, serials });
+    return data;
+  },
+
+  async getOrderSerials(orderId: number): Promise<OrderSerialLine[]> {
+    const { data } = await apiClient.get(`/orders/${orderId}/serials`);
+    return data.data;
+  },
+
+  async assignOrderSerials(orderId: number, itemId: number, serials: string[]): Promise<{ message: string }> {
+    const { data } = await apiClient.post(`/orders/${orderId}/serials`, { item_id: itemId, serials });
+    return data;
+  },
+
+  async unassignOrderSerial(orderId: number, unitId: number): Promise<{ message: string }> {
+    const { data } = await apiClient.delete(`/orders/${orderId}/serials/${unitId}`);
     return data;
   },
 
@@ -2860,6 +2951,7 @@ const omsService = {
       lot_number?: string;
       expiry_date?: string;
       discrepancy_reason?: string;
+      serial_numbers?: string[];
     }>;
   }) {
     const { data } = await apiClient.put(`/goods-received-notes/${id}/inspect`, payload);

@@ -7,11 +7,12 @@ import FieldPalette from '../components/forms/FieldPalette';
 import BuilderCanvas from '../components/forms/BuilderCanvas';
 import FieldInspector from '../components/forms/FieldInspector';
 import FormRenderer from '../components/forms/FormRenderer';
+import { fieldType } from '../components/forms/fieldTypes';
 import type { FormField, FormSchema } from '../components/forms/fieldTypes';
 import { useFormBuilder } from '../hooks/useFormBuilder';
 import type { SyncStatus } from '../hooks/useFormBuilder';
 import formService from '../services/formService';
-import type { FormSubmissionModel, FormVersionSummary } from '../services/formService';
+import type { FormSubmissionModel, FormVersionSummary, LookupLabels } from '../services/formService';
 import { useAuth } from '../hooks/useAuth';
 import { can } from '../types/auth';
 import { formatDate } from '../utils/format';
@@ -30,29 +31,34 @@ const SYNC_LABELS: Record<SyncStatus, string> = {
 };
 
 /** An answer as text for the answers table. */
-const answerText = (field: FormField, value: unknown): string => {
+const answerText = (field: FormField, value: unknown, labels: LookupLabels): string => {
   if (value === null || value === undefined || value === '') return '—';
   if (field.type === 'checkbox') return value ? 'Yes' : 'No';
   if (field.type === 'dropdown') return field.options?.find((option) => option.value === value)?.label ?? String(value);
-  if (field.type === 'lookup') return `#${value}`;
+  if (field.type === 'lookup') return (field.source && labels[field.source]?.[String(value)]) ?? `#${value}`;
   if (field.type === 'file' && typeof value === 'object') return (value as { name?: string }).name ?? 'File';
   return String(value);
 };
 
 const AnswersTable: React.FC<{ uuid: string; schema: FormSchema }> = ({ uuid, schema }) => {
   const [rows, setRows] = useState<FormSubmissionModel[] | null>(null);
+  const [labels, setLabels] = useState<LookupLabels>({});
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     formService
       .submissions(uuid)
-      .then((res) => setRows(res.data))
+      .then((res) => {
+        setRows(res.data);
+        setLabels(res.lookup_labels ?? {});
+      })
       .catch((err) => setError(errorMessage(err, 'Could not load the answers.')));
   }, [uuid]);
 
   if (error) return <Alert type="error" message={error} />;
   if (!rows) return <div className="fb-help">Loading answers...</div>;
   if (rows.length === 0) return <div className="fb-help">No answers yet.</div>;
+  const columns = schema.fields.filter((field) => fieldType(field.type).answered);
 
   return (
     <div className="table-responsive-wrapper">
@@ -61,7 +67,7 @@ const AnswersTable: React.FC<{ uuid: string; schema: FormSchema }> = ({ uuid, sc
           <tr>
             <th>Sent</th>
             <th>By</th>
-            {schema.fields.map((field) => (
+            {columns.map((field) => (
               <th key={field.id}>{field.label}</th>
             ))}
           </tr>
@@ -73,8 +79,8 @@ const AnswersTable: React.FC<{ uuid: string; schema: FormSchema }> = ({ uuid, sc
                 {formatDate(row.created_at, true)} <span className="fb-help">v{row.version}</span>
               </td>
               <td>{row.user?.name ?? '—'}</td>
-              {schema.fields.map((field) => (
-                <td key={field.id}>{answerText(field, row.data[field.id])}</td>
+              {columns.map((field) => (
+                <td key={field.id}>{answerText(field, row.data[field.id], labels)}</td>
               ))}
             </tr>
           ))}
@@ -204,7 +210,7 @@ export const FormBuilderPage: React.FC = () => {
         <div className="fb-designer">
           <FieldPalette onAdd={(fieldType) => dispatch({ type: 'added', fieldType })} />
           <BuilderCanvas fields={state.fields} selectedId={state.selectedId} dispatch={dispatch} />
-          <FieldInspector field={selected} dispatch={dispatch} />
+          <FieldInspector field={selected} fields={state.fields} dispatch={dispatch} />
         </div>
       )}
 

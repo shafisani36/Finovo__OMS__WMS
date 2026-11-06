@@ -2,8 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Loader2, Search, Trash2, X } from 'lucide-react';
 import { Alert } from '../common/Alert';
 import CustomDropdown from '../common/CustomDropdown';
-import omsService, { ORDER_CREATE_PLATFORMS } from '../../services/omsService';
-import type { OrderModel, OrderPayload, ProductModel } from '../../services/omsService';
+import omsService, { ORDER_CREATE_PLATFORMS, RECURRING_INTERVAL_LABELS } from '../../services/omsService';
+import type { OrderModel, OrderPayload, ProductModel, RecurringInterval } from '../../services/omsService';
 import { platformLabel } from '../stores/storePlatforms';
 import { useStoreList } from '../../hooks/useStoreList';
 import { useActiveStore } from '../../hooks/useActiveStore';
@@ -125,15 +125,19 @@ interface Props {
   /** The order being edited; empty to create a new one. */
   order?: OrderModel | null;
   onClose: () => void;
-  onSaved: (message: string, order: OrderModel) => void;
+  onSaved: (message: string, order: OrderModel | null) => void;
+  /** Set up a recurring order instead: the same order placed on a schedule, starting on a chosen day. */
+  recurring?: boolean;
 }
+
+const today = () => new Date().toLocaleDateString('en-CA');
 
 /**
  * Create an order by hand (phone, walk-in or wholesale) or edit one still waiting for stock. An order placed on
  * a connected store is also created there; for an order already on its store only the customer, address and
  * note can change.
  */
-export const OrderFormModal: React.FC<Props> = ({ order, onClose, onSaved }) => {
+export const OrderFormModal: React.FC<Props> = ({ order, onClose, onSaved, recurring = false }) => {
   const stores = useStoreList();
   const { activeStore } = useActiveStore();
   const onStore = Boolean(order?.external_order_id);
@@ -156,12 +160,15 @@ export const OrderFormModal: React.FC<Props> = ({ order, onClose, onSaved }) => 
     tax: order?.tax_amount ? String(Number(order.tax_amount)) : '',
   });
   const [notes, setNotes] = useState(order?.notes ?? '');
+  const [schedule, setSchedule] = useState<{ interval: RecurringInterval; startsOn: string }>({ interval: 'monthly', startsOn: today() });
   const [lines, setLines] = useState<Line[]>(() => linesOf(order));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const subtotal = useMemo(() => lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unitPrice || 0), 0), [lines]);
-  const total = Math.max(0, subtotal - Number(amounts.discount || 0) + Number(amounts.shipping || 0) + Number(amounts.tax || 0));
+  const total = recurring
+    ? subtotal + Number(amounts.shipping || 0)
+    : Math.max(0, subtotal - Number(amounts.discount || 0) + Number(amounts.shipping || 0) + Number(amounts.tax || 0));
   const chosenStore = stores.find((store) => store.id === storeId);
 
   const addLine = (line: Line) =>
@@ -202,8 +209,13 @@ export const OrderFormModal: React.FC<Props> = ({ order, onClose, onSaved }) => 
     try {
       setSaving(true);
       setError(null);
-      const res = order ? await omsService.updateOrder(order.id, payload) : await omsService.createOrder(payload);
-      onSaved(res.message, res.data);
+      if (recurring) {
+        const { payment_status: _status, discount_amount: _discount, tax_amount: _tax, ...plan } = payload;
+        onSaved((await omsService.createRecurringOrder({ ...plan, interval: schedule.interval, starts_on: schedule.startsOn })).message, null);
+      } else {
+        const res = order ? await omsService.updateOrder(order.id, payload) : await omsService.createOrder(payload);
+        onSaved(res.message, res.data);
+      }
     } catch (err) {
       setError(errorMessage(err, 'The order could not be saved.'));
     } finally {
@@ -216,9 +228,13 @@ export const OrderFormModal: React.FC<Props> = ({ order, onClose, onSaved }) => 
       <form className="procurement-modal cf-modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <div className="procurement-modal-header">
           <div>
-            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#0f172a' }}>{order ? `Edit order ${order.order_number}` : 'Create Order'}</h3>
+            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#0f172a' }}>{recurring ? 'New Recurring Order' : order ? `Edit order ${order.order_number}` : 'Create Order'}</h3>
             <p style={{ margin: '3px 0 0', fontSize: 12, color: '#64748b' }}>
-              {order ? 'Changes are also sent to the order’s store.' : 'For phone, walk-in or wholesale orders. Stock is reserved when you allocate it.'}
+              {recurring
+                ? 'This order is placed again on its schedule, as an unpaid order, starting on the day you choose.'
+                : order
+                  ? 'Changes are also sent to the order’s store.'
+                  : 'For phone, walk-in or wholesale orders. Stock is reserved when you allocate it.'}
             </p>
           </div>
           <button type="button" className="topbar-icon-button" onClick={onClose} aria-label="Close" disabled={saving}>
@@ -333,8 +349,30 @@ export const OrderFormModal: React.FC<Props> = ({ order, onClose, onSaved }) => 
             </div>
           )}
 
+          {recurring && (
+            <>
+              <div className="cf-section-title">Schedule</div>
+              <div className="cf-grid">
+                <div className="cf-field">
+                  <span className="cf-label">How often *</span>
+                  <CustomDropdown
+                    value={schedule.interval}
+                    onChange={(val) => setSchedule({ ...schedule, interval: val as RecurringInterval })}
+                    searchable={false}
+                    options={Object.entries(RECURRING_INTERVAL_LABELS).map(([value, label]) => ({ value, label }))}
+                  />
+                </div>
+                <label className="cf-field">
+                  <span className="cf-label">First order on *</span>
+                  <input className="cf-input" type="date" min={today()} value={schedule.startsOn} onChange={(e) => setSchedule({ ...schedule, startsOn: e.target.value })} required />
+                </label>
+              </div>
+            </>
+          )}
+
           <div className="cf-section-title">Payment and totals</div>
           <div className="cf-totals">
+            {!recurring && (
             <div className="cf-field">
               <span className="cf-label">Payment</span>
               <CustomDropdown
@@ -347,6 +385,7 @@ export const OrderFormModal: React.FC<Props> = ({ order, onClose, onSaved }) => 
                 ]}
               />
             </div>
+            )}
             <label className="cf-field">
               <span className="cf-label">Payment method</span>
               <input className="cf-input" value={payment.method} onChange={(e) => setPayment({ ...payment, method: e.target.value })} placeholder="e.g. Cash on delivery" maxLength={100} />
@@ -364,14 +403,18 @@ export const OrderFormModal: React.FC<Props> = ({ order, onClose, onSaved }) => 
               <span className="cf-label">Shipping</span>
               <input className="cf-input" type="number" min={0} step="0.01" value={amounts.shipping} onChange={(e) => setAmounts({ ...amounts, shipping: e.target.value })} />
             </label>
-            <label className="cf-field">
-              <span className="cf-label">Discount</span>
-              <input className="cf-input" type="number" min={0} step="0.01" value={amounts.discount} onChange={(e) => setAmounts({ ...amounts, discount: e.target.value })} />
-            </label>
-            <label className="cf-field">
-              <span className="cf-label">Tax</span>
-              <input className="cf-input" type="number" min={0} step="0.01" value={amounts.tax} onChange={(e) => setAmounts({ ...amounts, tax: e.target.value })} />
-            </label>
+            {!recurring && (
+              <>
+                <label className="cf-field">
+                  <span className="cf-label">Discount</span>
+                  <input className="cf-input" type="number" min={0} step="0.01" value={amounts.discount} onChange={(e) => setAmounts({ ...amounts, discount: e.target.value })} />
+                </label>
+                <label className="cf-field">
+                  <span className="cf-label">Tax</span>
+                  <input className="cf-input" type="number" min={0} step="0.01" value={amounts.tax} onChange={(e) => setAmounts({ ...amounts, tax: e.target.value })} />
+                </label>
+              </>
+            )}
             <div className="cf-total-box">
               <span>Order total</span>
               <strong>{formatMoney(total, payment.currency || 'PKR')}</strong>
@@ -395,7 +438,7 @@ export const OrderFormModal: React.FC<Props> = ({ order, onClose, onSaved }) => 
             </button>
             <button type="submit" className="btn-primary" disabled={saving}>
               {saving && <Loader2 size={16} className="animate-spin" />}
-              <span>{order ? 'Save Order' : 'Create Order'}</span>
+              <span>{recurring ? 'Save Recurring Order' : order ? 'Save Order' : 'Create Order'}</span>
             </button>
           </div>
         </div>

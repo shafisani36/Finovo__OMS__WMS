@@ -253,7 +253,12 @@ class GoodsReceivedNoteService
             $orgId = $grn->organization_id;
             $whId = $grn->warehouse_id;
 
-            foreach ($grn->loadMissing('items.purchaseOrderItem')->items as $grnItem) {
+            $grn->loadMissing(['items.purchaseOrderItem', 'items.productVariant']);
+            foreach ($grn->items as $grnItem) {
+                $this->serialService()->ensureGrnLineComplete($grnItem);
+            }
+
+            foreach ($grn->items as $grnItem) {
                 $variantId = $grnItem->product_variant_id;
                 $destLocationId = $grnItem->destination_location_id ?: $grn->receiving_location_id;
                 $lotNumber = $grnItem->lot_number;
@@ -316,6 +321,7 @@ class GoodsReceivedNoteService
                 }
 
                 // (Rejected stock is returned to vendor, not placed in warehouse inventory)
+                $this->serialService()->registerFromGrn($grn, $grnItem, $user);
 
                 // 4. Update Purchase Order Item received quantity
                 $physicalCustodyQty = $grnItem->accepted_quantity + $grnItem->damaged_quantity + $grnItem->quarantined_quantity;

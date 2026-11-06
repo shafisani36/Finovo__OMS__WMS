@@ -219,6 +219,16 @@ class WarehouseController extends Controller
 
         $updated = $this->warehouseService->updateWarehouse($warehouse, $request->user()->id, $validated);
 
+        $this->emails->sendActivityEmail(EmailService::WAREHOUSE_UPDATED, $request->user()->currentOrganization(), [
+            'name' => $updated->name,
+            'actor' => $request->user(),
+            'details' => [
+                'Code' => $updated->code,
+                'Changed' => collect(array_keys($updated->getChanges()))->reject(fn ($key) => $key === 'updated_at')->map(fn ($key) => str_replace('_', ' ', $key))->implode(', '),
+                'Status' => ucwords(str_replace('_', ' ', (string) $updated->status)),
+            ],
+        ], $updated->id);
+
         return response()->json([
             'status' => 'success',
             'message' => 'Warehouse configuration updated.',
@@ -309,7 +319,7 @@ class WarehouseController extends Controller
                 'Code' => $warehouse->code,
                 'Location' => collect([$warehouse->city, $warehouse->country])->filter()->implode(', '),
             ],
-        ]);
+        ], $warehouse->id);
 
         return response()->json([
             'status' => 'success',

@@ -1,11 +1,13 @@
 import React from 'react';
 import { Plus, X } from 'lucide-react';
-import { FIELD_TYPES, LOOKUP_SOURCES } from './fieldTypes';
+import { FIELD_TYPES, LOOKUP_SOURCES, conditionSources } from './fieldTypes';
 import type { FieldOption, FormField, LookupSource } from './fieldTypes';
 import type { BuilderAction } from './builderReducer';
 
 interface FieldInspectorProps {
   field: FormField | null;
+  /** Every field of the form, for the "show only when" choice. */
+  fields: FormField[];
   dispatch: (action: BuilderAction) => void;
 }
 
@@ -21,7 +23,7 @@ const optionValue = (label: string, options: FieldOption[], index: number): stri
 const numberOrNull = (value: string): number | null => (value.trim() === '' ? null : Number(value));
 
 /** Settings of the selected field; the settings offered depend on its type. */
-export const FieldInspector: React.FC<FieldInspectorProps> = ({ field, dispatch }) => {
+export const FieldInspector: React.FC<FieldInspectorProps> = ({ field, fields, dispatch }) => {
   if (!field) {
     return (
       <aside className="fb-inspector">
@@ -35,6 +37,27 @@ export const FieldInspector: React.FC<FieldInspectorProps> = ({ field, dispatch 
   const update = (patch: Partial<Omit<FormField, 'id' | 'type'>>) => dispatch({ type: 'updated', id: field.id, patch });
   const options = field.options ?? [];
   const setOptions = (next: FieldOption[]) => update({ options: next });
+  const sources = conditionSources(fields, field.id);
+  const source = sources.find((f) => f.id === field.show_if?.field) ?? null;
+  const answersOf = (f: FormField): FieldOption[] | null =>
+    f.type === 'dropdown' ? (f.options ?? []) : f.type === 'checkbox' ? [{ value: '1', label: 'Ticked' }, { value: '0', label: 'Not ticked' }] : null;
+  const chooseSource = (id: string) => {
+    const chosen = sources.find((f) => f.id === id);
+    update({ show_if: chosen ? { field: chosen.id, equals: answersOf(chosen)?.[0]?.value ?? '' } : null });
+  };
+
+  if (!type.answered) {
+    return (
+      <aside className="fb-inspector" aria-label="Field settings">
+        <h4 className="fb-panel-title">Page Break</h4>
+        <label className="cf-field">
+          <span className="cf-label">Step title</span>
+          <input className="cf-input" value={field.label} maxLength={120} onChange={(e) => update({ label: e.target.value })} />
+        </label>
+        <p className="fb-help">Fields below this break are filled in on a new step, with Next and Back buttons.</p>
+      </aside>
+    );
+  }
 
   return (
     <aside className="fb-inspector" aria-label="Field settings">
@@ -130,6 +153,34 @@ export const FieldInspector: React.FC<FieldInspectorProps> = ({ field, dispatch 
         <span className="cf-label">Help text</span>
         <input className="cf-input" value={field.help ?? ''} maxLength={300} onChange={(e) => update({ help: e.target.value || null })} />
       </label>
+
+      <label className="cf-field">
+        <span className="cf-label">Show only when</span>
+        <select className="cf-input" value={source?.id ?? ''} onChange={(e) => chooseSource(e.target.value)} disabled={sources.length === 0}>
+          <option value="">Always shown</option>
+          {sources.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {source && field.show_if && (
+        <label className="cf-field">
+          <span className="cf-label">Has the answer</span>
+          {answersOf(source) ? (
+            <select className="cf-input" value={field.show_if.equals} onChange={(e) => update({ show_if: { field: source.id, equals: e.target.value } })}>
+              {answersOf(source)?.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input className="cf-input" value={field.show_if.equals} maxLength={120} onChange={(e) => update({ show_if: { field: source.id, equals: e.target.value } })} />
+          )}
+        </label>
+      )}
     </aside>
   );
 };

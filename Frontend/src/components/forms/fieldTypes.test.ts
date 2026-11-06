@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FIELD_ID_PATTERN, FIELD_TYPES, MAX_FILE_BYTES, createFieldId, emptyValues, fieldType, toFormData, validateValues } from './fieldTypes';
+import { FIELD_ID_PATTERN, FIELD_TYPES, MAX_FILE_BYTES, conditionSources, createFieldId, emptyValues, fieldType, formSteps, isShown, toFormData, validateValues } from './fieldTypes';
 import type { FormField, FormSchema } from './fieldTypes';
 
 const schema: FormSchema = {
@@ -27,7 +27,7 @@ describe('field types', () => {
   });
 
   it('inherits shared rules and adds its own checks', () => {
-    expect(Object.keys(FIELD_TYPES)).toHaveLength(9);
+    expect(Object.keys(FIELD_TYPES)).toHaveLength(10);
     // Paragraph and barcode are text fields with other defaults.
     expect(fieldType('textarea').validate({ id: 'f_a', type: 'textarea', label: 'Notes' }, 'x'.repeat(300))).toBeNull();
     expect(fieldType('barcode').validate({ id: 'f_b', type: 'barcode', label: 'Code' }, 'x'.repeat(300))).toBe('Code can be at most 255 characters.');
@@ -56,5 +56,32 @@ describe('field types', () => {
     const field: FormField = { id: 'f_c', type: 'checkbox', label: 'Agree' };
     expect(fieldType('checkbox').validate(field, false)).toBeNull();
     expect(fieldType('checkbox').toPayload(false)).toBe('0');
+  });
+
+  it('splits a form into steps and leaves out fields hidden by their condition', () => {
+    const stepped: FormSchema = {
+      fields: [
+        { id: 'p_one', type: 'page', label: 'What happened' },
+        { id: 'f_kind', type: 'dropdown', label: 'Kind', required: true, options: [{ value: 'damaged', label: 'Damaged' }, { value: 'missing', label: 'Missing' }] },
+        { id: 'f_sealed', type: 'checkbox', label: 'Sealed' },
+        { id: 'p_two', type: 'page', label: 'Details' },
+        { id: 'f_damage', type: 'text', label: 'Damage', required: true, show_if: { field: 'f_kind', equals: 'damaged' } },
+        { id: 'f_seal_note', type: 'text', label: 'Seal note', show_if: { field: 'f_sealed', equals: '1' } },
+      ],
+    };
+
+    expect(formSteps(stepped).map((step) => [step.title, step.fields.map((field) => field.id)])).toEqual([
+      ['What happened', ['f_kind', 'f_sealed']],
+      ['Details', ['f_damage', 'f_seal_note']],
+    ]);
+    expect(Object.keys(emptyValues(stepped))).not.toContain('p_one');
+    expect(conditionSources(stepped.fields, 'f_damage').map((field) => field.id)).toEqual(['f_kind', 'f_sealed']);
+
+    const missing = { f_kind: 'missing', f_sealed: true, f_damage: 'left over', f_seal_note: null };
+    expect(isShown(stepped.fields[4], missing)).toBe(false);
+    expect(isShown(stepped.fields[5], missing)).toBe(true);
+    expect(validateValues(stepped, missing)).toEqual({});
+    expect(toFormData(stepped, missing).has('data[f_damage]')).toBe(false);
+    expect(validateValues(stepped, { ...missing, f_kind: 'damaged', f_damage: '' })).toHaveProperty('f_damage');
   });
 });

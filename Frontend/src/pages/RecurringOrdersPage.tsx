@@ -1,22 +1,24 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Loader2, Pause, Play, Repeat, Send, Trash2 } from 'lucide-react';
+import { Loader2, Pause, Play, Plus, Repeat, Send, Trash2 } from 'lucide-react';
 import { Alert } from '../components/common/Alert';
 import StatusPill from '../components/common/StatusPill';
 import { useConfirmDialog } from '../components/common/ConfirmDialog';
+import OrderFormModal from '../components/catalog/OrderFormModal';
 import omsService, { RECURRING_INTERVAL_LABELS } from '../services/omsService';
 import type { RecurringInterval, RecurringOrderModel } from '../services/omsService';
 import { formatDate, formatMoney } from '../utils/format';
 import { errorMessage } from '../utils/errors';
 
 /**
- * Orders placed again on a schedule. A plan is made from an order (Repeat Order in its details); here it is
- * paused, moved to another interval, placed at once or deleted.
+ * Orders placed again on a schedule. A plan is set up here from scratch or made from an order (Repeat Order in
+ * its details); here it is paused, moved to another interval, placed at once or deleted.
  */
 export const RecurringOrdersPage: React.FC = () => {
   const { confirm, dialog } = useConfirmDialog();
   const [plans, setPlans] = useState<RecurringOrderModel[] | null>(null);
   const [banner, setBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [creating, setCreating] = useState(false);
 
   const load = useCallback(() => {
     omsService
@@ -56,11 +58,26 @@ export const RecurringOrdersPage: React.FC = () => {
       <div className="page-header-row">
         <div className="page-title-section">
           <h1 className="page-title">Recurring Orders</h1>
-          <p className="page-subtitle">Orders placed again on a schedule. To add one, open an order and choose Repeat Order.</p>
+          <p className="page-subtitle">Orders placed again on a schedule. Add one here, or open an order and choose Repeat Order.</p>
         </div>
+        <button type="button" className="btn-finovo-primary" onClick={() => setCreating(true)}>
+          <Plus size={16} />
+          <span>New Recurring Order</span>
+        </button>
       </div>
 
       {banner && <Alert type={banner.type} message={banner.text} className="page-banner" />}
+      {creating && (
+        <OrderFormModal
+          recurring
+          onClose={() => setCreating(false)}
+          onSaved={(message) => {
+            setCreating(false);
+            setBanner({ type: 'success', text: message });
+            load();
+          }}
+        />
+      )}
 
       <div className="content-card">
         <div className="table-responsive-wrapper">

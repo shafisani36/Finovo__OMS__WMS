@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\GoodsReceivedNote;
 use App\Models\PurchaseOrder;
 use App\Services\CrossDockService;
+use App\Services\EmailService;
 use App\Services\GoodsReceivedNoteService;
 use App\Services\ProcurementPdfService;
 use Illuminate\Http\JsonResponse;
@@ -109,6 +110,9 @@ class GoodsReceivedNoteController extends Controller
             'items.*.expiry_date' => 'nullable|date',
             'items.*.discrepancy_reason' => 'nullable|string',
             'items.*.notes' => 'nullable|string',
+            // One serial number per unit kept, for products that track them
+            'items.*.serial_numbers' => 'nullable|array|max:1000',
+            'items.*.serial_numbers.*' => 'string|max:120',
         ]);
 
         $po = $this->inUserWarehouses(PurchaseOrder::where('organization_id', $org->id), $request)->findOrFail($validated['purchase_order_id']);
@@ -169,6 +173,8 @@ class GoodsReceivedNoteController extends Controller
             'items.*.lot_number' => 'nullable|string|max:100',
             'items.*.expiry_date' => 'nullable|date',
             'items.*.discrepancy_reason' => 'nullable|string',
+            'items.*.serial_numbers' => 'nullable|array|max:1000',
+            'items.*.serial_numbers.*' => 'string|max:120',
         ]);
 
         $updated = $this->grnService->inspectGrn($grn, $validated, $request->user());
@@ -183,12 +189,13 @@ class GoodsReceivedNoteController extends Controller
     /**
      * Post GRN quantities into authoritative inventory balances and stock ledger.
      */
-    public function postToInventory(Request $request, int $id): JsonResponse
+    public function postToInventory(Request $request, int $id, EmailService $emails): JsonResponse
     {
         $org = $request->user()->currentOrganization();
         $grn = $this->inUserWarehouses(GoodsReceivedNote::where('organization_id', $org->id), $request)->findOrFail($id);
 
         $posted = $this->grnService->postToInventory($grn, $request->user());
+        $emails->stockReceived($posted);
         $crossDock = $this->crossDock->allocateWaiting($posted->organization_id, $posted->warehouse_id, $posted->items->pluck('product_variant_id')->unique()->values()->all());
 
         return response()->json([

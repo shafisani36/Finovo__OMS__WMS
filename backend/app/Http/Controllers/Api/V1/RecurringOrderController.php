@@ -4,14 +4,16 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\RecurringOrder;
+use App\Services\OrderService;
 use App\Services\RecurringOrderService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
 
 /**
- * Orders placed again on a schedule: list, change the interval or next date, pause, place now, delete.
+ * Orders placed again on a schedule: list, set up from scratch, change the interval or next date, pause, place now, delete.
  */
 class RecurringOrderController extends Controller
 {
@@ -26,6 +28,28 @@ class RecurringOrderController extends Controller
             ->map(fn (RecurringOrder $plan) => $this->present($plan));
 
         return response()->json(['status' => 'success', 'data' => $plans]);
+    }
+
+    /**
+     * Set up a plan without an earlier order: who to send to, what, and how often.
+     */
+    public function store(Request $request, RecurringOrderService $plans, OrderService $orders): JsonResponse
+    {
+        $orgId = $request->user()->currentOrganization()->id;
+        $rules = Arr::except($orders->rules($orgId), ['payment_status', 'discount_amount', 'tax_amount']);
+        $data = $request->validate([
+            'interval' => ['required', Rule::in(RecurringOrder::INTERVALS)],
+            'starts_on' => ['required', 'date', 'after_or_equal:today'],
+            ...$rules,
+        ], OrderService::VALIDATION_MESSAGES);
+
+        $plan = $plans->plan($orgId, Arr::only($data, array_keys($rules)), $data['interval'], Carbon::parse($data['starts_on']), $request->user());
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Recurring order for {$data['customer_name']} saved, first order on {$plan->next_run_at->toFormattedDateString()}.",
+            'data' => $this->present($plan->load('creator:id,name')),
+        ], 201);
     }
 
     public function update(Request $request, RecurringOrder $recurringOrder): JsonResponse

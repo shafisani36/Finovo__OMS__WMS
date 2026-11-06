@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Integrations\Couriers\CourierStatus;
 use App\Integrations\Couriers\Parcel;
 use App\Models\CourierAccount;
 use App\Models\Shipment;
@@ -203,6 +204,25 @@ class ShipmentController extends Controller
         return response()->json([
             'status' => 'success',
             'message' => trim("Dispatch of order {$orderNumber} cancelled; its stock is back in the warehouse and it is ready to dispatch again. {$note}"),
+            'data' => $this->present($shipment->fresh(self::RELATIONS)),
+        ]);
+    }
+
+    /**
+     * The courier has the parcel on its last leg (for couriers whose tracking is not read automatically); the
+     * customer is emailed that it is on the way.
+     */
+    public function outForDelivery(Request $request, int $id): JsonResponse
+    {
+        $shipment = $this->find($request, $id);
+        if ($shipment->status !== Shipment::SHIPPED || $shipment->courier_status === CourierStatus::OUT_FOR_DELIVERY) {
+            throw ValidationException::withMessages(['status' => 'Only a parcel on its way, not yet out for delivery, can be marked out for delivery.']);
+        }
+        $this->shipments->applyCourierStatus($shipment, new CourierStatus(CourierStatus::OUT_FOR_DELIVERY, "Out for delivery (marked by {$request->user()->name})"));
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Order {$shipment->order->order_number} is out for delivery; the customer was emailed.",
             'data' => $this->present($shipment->fresh(self::RELATIONS)),
         ]);
     }
